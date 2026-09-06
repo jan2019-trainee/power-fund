@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark light">
+  <title>Power Fund Tracker</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="wrap" id="app">
+    <div class="loading">Loading fund data…</div>
+  </div>
+
+  <!-- Supabase client (UMD build exposes window.supabase) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+
+  <!-- App code: config -> calculations -> database -> app -->
+  <script src="js/config.js"></script>
+  <script src="js/calculations.js"></script>
+  <script src="js/database.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

@@ -1,3 +1,192 @@
-# power-fund
-ViTAMiN Power Fund
-lods ikaw nay bahala
+# ⚡ Power Fund
+
+A shared **rotating savings fund** tracker (a.k.a. *paluwagan*) for a small group.
+Five members each contribute a fixed amount twice a month; every round the pooled
+money is paid out to one member in turn. This app records contributions and payouts —
+**it does not move any money**. All payments happen outside the app (GCash / InstaPay
+to the treasurer); the app is just the shared ledger.
+
+- 5 members (names editable)
+- ₱1,000 per member per cycle
+- 30 cycles — the 15th and last day of each month, ~15 months
+- 5 rounds of 6 cycles; each round pools ₱30,000 and pays out to one member.
+  Each round has its own independent ₱30,000 target. A round moves through
+  **🟢 Collecting → 🟡 Payout Pending → ✅ Completed**. Reaching ₱30,000 does
+  **not** auto-advance — the treasurer clicks **Start Next Round** to begin the
+  next one, and can do so while the previous round's payout is still pending.
+  The main progress bar always shows only the active round; after round 5 it
+  reads **All 5 Rounds Completed**
+- Payment states: **unpaid → pending review → confirmed paid**. A member must
+  attach a proof-of-payment screenshot to submit a contribution
+- Tap the payment QR code or any proof screenshot to view it enlarged
+- A treasurer PIN gates review/confirm/payout actions (a convenience lock, **not** security)
+
+## Technology
+
+| Part | Choice |
+|------|--------|
+| Frontend | Plain HTML, CSS, vanilla JavaScript — no framework, no build step |
+| Database | [Supabase](https://supabase.com) (PostgreSQL) |
+| File storage | Supabase Storage (payment screenshots) |
+| Live sync | Supabase Realtime (+ polling fallback) |
+| Hosting | Any static host; instructions below are for [Vercel](https://vercel.com) |
+| Source control | Git / GitHub |
+
+The Supabase JavaScript client is loaded from a CDN in `index.html`. There are no
+npm dependencies and nothing to compile.
+
+## Folder structure
+
+```
+power fund/
+├── index.html            markup only + <script> tags
+├── css/
+│   └── style.css          all styles
+├── js/
+│   ├── config.js          Supabase URL + anon key (you fill these in)
+│   ├── calculations.js    pure fund maths (totals, progress, overdue, …)
+│   ├── database.js         every Supabase call lives here
+│   └── app.js              rendering + button/form handling + realtime
+├── assets/
+│   └── gcash-qr.jpg        the treasurer's payment QR (replace with your own)
+├── supabase/
+│   ├── schema.sql          tables, security policies, storage bucket
+│   ├── seed.sql            5 members, 30 cycles, 5 payout rows
+│   └── migrations/         incremental changes for databases already created
+├── .gitignore
+└── README.md
+```
+
+## Setup
+
+### 1. Create a Supabase project
+
+1. Sign in at [supabase.com](https://supabase.com) → **New project**.
+2. Pick a name, a strong database password, and a region close to your group.
+3. Wait for it to finish provisioning (~2 minutes).
+
+### 2. Create the database tables
+
+1. In the project, open **SQL Editor → New query**.
+2. Paste the entire contents of [`supabase/schema.sql`](supabase/schema.sql) and **Run**.
+   This creates the tables, the (intentionally open) security policies, enables
+   Realtime, and creates the `payment-proofs` storage bucket.
+3. **If your database was created before a schema change**, also run each file in
+   [`supabase/migrations/`](supabase/migrations/) in order. A brand-new database
+   created from the current `schema.sql` already includes them and can skip this.
+
+### 3. Seed members and cycles
+
+1. **SQL Editor → New query** again.
+2. Paste [`supabase/seed.sql`](supabase/seed.sql) and **Run**.
+3. Check the results:
+
+   ```sql
+   select 'members' t, count(*) from members
+   union all select 'cycles',  count(*) from cycles
+   union all select 'payouts', count(*) from payouts;
+   ```
+
+   You should see `members = 5`, `cycles = 30`, `payouts = 5`.
+
+To change the schedule, edit the `first_cycle_date` line in `seed.sql` **before**
+running it, or edit `due_date` values directly in the `cycles` table afterwards.
+To rename members, edit them in the app (treasurer mode → *Edit names*) or in the
+`members` table.
+
+### 4. Configure credentials
+
+1. In Supabase: **Project Settings → API**.
+2. Copy **Project URL** and the **`anon` `public`** key.
+3. Open [`js/config.js`](js/config.js) and paste them in:
+
+   ```js
+   window.APP_CONFIG = {
+     SUPABASE_URL: "https://xxxxxxxx.supabase.co",
+     SUPABASE_ANON_KEY: "eyJhbGciOi...",
+     QR_IMAGE_URL: "assets/gcash-qr.jpg",
+   };
+   ```
+
+The `anon` key is meant to be used in the browser and is safe to commit. **Never**
+put the `service_role` key here — it bypasses all security.
+
+There is no `.env` file and no Vite in this project, so there are no
+`VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` environment variables to set. If you
+later add a build step, move the two values into env vars named exactly that and
+read them via `import.meta.env`.
+
+### 5. Add the payment QR
+
+Two options:
+
+- **From the app (recommended):** unlock **Treasurer mode → Payment QR → choose
+  a new QR code → Upload**. The image is stored in the `payment-assets` Supabase
+  bucket and every member sees it. Requires migration `003` (see step 2).
+- **Bundled default:** replace [`assets/gcash-qr.jpg`](assets/gcash-qr.jpg) with
+  the real QR. This is only the fallback shown until a QR is uploaded from the app.
+
+## Run locally
+
+It's a static site — no build, no server code.
+
+- **VS Code:** install the **Live Server** extension, then right-click
+  `index.html` → *Open with Live Server*.
+- **Or** any static server, e.g. `npx serve .` or `python -m http.server`.
+
+Opening `index.html` as a `file://` URL will not work (the browser blocks the
+Supabase connection) — always serve it over `http://`.
+
+## Deploy to Vercel
+
+1. Push this folder to a GitHub repository.
+2. At [vercel.com](https://vercel.com) → **Add New → Project** → import the repo.
+3. Settings:
+   - **Framework Preset:** *Other*
+   - **Build Command:** leave empty
+   - **Output Directory:** leave empty (serves the repo root)
+4. **Deploy.** Every push to the default branch redeploys automatically.
+
+Because `js/config.js` is committed with the anon key in it, the deployed site
+works with no extra Vercel configuration.
+
+## Security limitations — read this
+
+This app has **no authentication**. That is a deliberate choice to keep it simple
+for five people who trust each other.
+
+- The Supabase **anon key is visible** in `js/config.js` and in the deployed
+  JavaScript. Anyone who can open the site can extract it.
+- The database is configured for **open read and write** from the browser. The RLS
+  policies in `schema.sql` say `using (true) with check (true)` — they exist only
+  because Supabase requires a policy to allow any access at all. **They provide no
+  user-level protection**, because there are no users to distinguish.
+- Uploads to the `payment-proofs` (screenshots) and `payment-assets` (payment QR)
+  buckets are likewise open read/write.
+- The **treasurer PIN is not security**. It is a soft UI lock stored in plain text
+  in the `app_settings` table; anyone technical can bypass it. Use it only to stop
+  accidental edits. This includes the **Payment QR** upload — technically any
+  visitor with the anon key could replace the QR, so treat the site URL as the
+  secret and keep an eye on the activity log.
+
+**What actually protects the data:** keeping the site URL private. Treat the
+Vercel URL like a shared password — share it only with the 5 members, don't post
+it publicly, and don't submit it to search engines.
+
+If you ever need real protection (per-person logins, audit trail, locked-down
+writes), add Supabase Auth and rewrite the RLS policies to check `auth.uid()`.
+That is out of scope for this version.
+
+**Never commit:** the `service_role` key, the database password (kept locally in
+`supabase-db-password.local.txt`, which is git-ignored), or real credentials in
+this README.
+
+## Backup
+
+Financial data — keep copies.
+
+- **Treasurer mode → Export CSV:** a readable grid of every cycle and who has paid.
+- **Treasurer mode → Download backup:** a full JSON snapshot (members, cycles,
+  contributions, payouts, activity log).
+- **Treasurer mode → Restore backup:** load a JSON snapshot back. This **replaces**
+  all current contributions and payout status, so it asks for confirmation first.

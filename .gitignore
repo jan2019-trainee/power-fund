@@ -1,0 +1,19 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+*.local
+*.local.*
+
+# Local secrets — NEVER commit these
+supabase-db-password.local.txt
+.env
+.env.*
+
+# Vercel
+.vercel/
+
+# Node (only if you ever add tooling)
+node_modules/
+
+# Scratch
+scratch_*.txt

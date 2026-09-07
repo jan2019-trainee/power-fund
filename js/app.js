@@ -1797,6 +1797,15 @@
     // due countdown (only while the active round is still collecting)
     html += (function () {
       if (allDone || curStatus !== "collecting") return "";
+      // Skip when the My-status card above is already announcing this exact
+      // same cycle's due date ("🟡 Payment due ..."). They only diverge when
+      // this member (or the whole group) has moved ahead of the fund's
+      // date-driven "current" cycle — e.g. everyone already paid it early —
+      // in which case payCycle != curCycle and both banners stay, because
+      // they're then reporting genuinely different dates.
+      if (myMember && myStatus && myStatus.kind === "due" && payCycle === curCycle) {
+        return "";
+      }
       const today = C.startOfDay(new Date());
       const due = C.dueDateOf(state.cycles, curCycle);
       if (!due) return "";

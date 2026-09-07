@@ -442,7 +442,11 @@ body {
   max-width: 360px;
   width: 100%;
   text-align: center;
+  max-height: 90vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
+.modal:focus { outline: none; }
 .modal h3 {
   font-family: 'Space Grotesk', sans-serif;
   margin: 0 0 4px;
@@ -453,11 +457,29 @@ body {
   font-size: 13px;
   margin: 0 0 18px;
 }
+.qr-box-btn {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: zoom-in;
+  font: inherit;
+  color: inherit;
+}
+.qr-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  margin: -8px 0 14px;
+}
+
 .qr-box {
   background: #fff;
   border-radius: 10px;
-  width: 200px;
-  height: 200px;
+  width: 240px;
+  height: 240px;
+  max-width: 100%;
   margin: 0 auto 16px;
   display: flex;
   align-items: center;
@@ -580,7 +602,7 @@ body {
   text-align: center;
   box-sizing: border-box;
 }
-.pin-input:focus { outline: none; border-color: var(--accent); }
+.pin-input:focus { border-color: var(--accent); }
 .pin-error { color: #E15353; font-size: 12px; margin: 0 0 12px; text-align: center; }
 
 .name-input {
@@ -630,7 +652,7 @@ body {
   resize: vertical;
   box-sizing: border-box;
 }
-.payout-note-input:focus { outline: none; border-color: var(--accent); }
+.payout-note-input:focus { border-color: var(--accent); }
 
 .share-btn {
   margin-top: 14px;
@@ -664,7 +686,7 @@ body {
   box-sizing: border-box;
   text-align: left;
 }
-.share-text-area:focus { outline: none; border-color: var(--accent); }
+.share-text-area:focus { border-color: var(--accent); }
 .copy-feedback { color: var(--success); font-size: 12px; margin: -4px 0 12px; text-align: center; }
 
 /* ---- Zoomable images (QR code + proof of payment) ---- */
@@ -833,10 +855,169 @@ body {
   line-height: 1.5;
 }
 .start-round-confirm-btns { display: flex; gap: 8px; }
-.start-round-confirm-btns button { flex: 1; padding: 10px; }
+.start-round-confirm-btns button { flex: 1; padding: 10px; min-height: 44px; }
+
+/* ==========================================================================
+   UX pass (P0 + P1): hero hierarchy, current-cycle status + CTA, a11y,
+   responsive scale. Behaviour / data unchanged.
+   ========================================================================== */
+
+/* ---- Keyboard focus: visible ring on every interactive element ---- */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .battery-fill, .round-chevron { transition: none; }
+}
+
+/* ---- Hero: lead with the round, then money, then "to go", then who-paid ---- */
+.hero-round-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.hero-round-num {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.hero-round-line .round-state { font-size: 12px; padding: 4px 10px; }
+
+.hero-progress-meta {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.hero-progress-meta b { color: var(--text-primary); font-weight: 600; }
+
+.cycle-status {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.cycle-status-head { font-size: 12.5px; color: var(--text-muted); }
+.cycle-status-head b { color: var(--text-primary); font-weight: 600; }
+.cycle-status-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.mini-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 34px;
+  padding: 6px 11px;
+  border-radius: 20px;
+  border: 1.5px solid var(--border);
+  background: transparent;
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.mini-chip.paid { border-color: var(--success); color: var(--success); background: var(--success-soft); }
+.mini-chip.pending { border-color: var(--accent); color: var(--accent); background: rgba(245,166,35,0.14); }
+.mini-chip.unpaid { border-color: var(--accent); color: var(--text-primary); }
+.mini-chip:not(:disabled):hover { filter: brightness(1.15); }
+.mini-chip.unpaid:not(:disabled):hover { background: var(--accent-soft); filter: none; }
+.mini-chip:disabled { cursor: default; }
+
+.hero-cta {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  padding: 13px 16px;
+  min-height: 48px;
+  background: var(--accent);
+  border: none;
+  border-radius: 10px;
+  color: #14213D;
+  font-family: 'Inter', sans-serif;
+  font-size: 14.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.hero-cta:hover { background: #ffb733; }
+
+/* ---- "Record a contribution" name picker ---- */
+.picker-list { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 16px; }
+.picker-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 11px 14px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-card-alt);
+  text-align: left;
+  cursor: pointer;
+  font-family: 'Inter', sans-serif;
+}
+.picker-row .picker-name { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+.picker-row .picker-status { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.picker-row:not(:disabled):hover { border-color: var(--accent); }
+.picker-row.paid .picker-status { color: var(--success); }
+.picker-row.pending .picker-status { color: var(--accent); }
+.picker-row:disabled { cursor: default; opacity: 0.6; }
+
+/* ---- Previous round: clearly secondary "history", below the current round ---- */
+.prev-round {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+}
+.prev-round-label { color: var(--accent); }
+
+/* ---- Accordion headers are real controls now ---- */
+.round-header[role="button"] { outline: none; }
+.round-header[role="button"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* ---- Desktop: use the extra width instead of a thin column ---- */
+@media (min-width: 1024px) {
+  .wrap { max-width: 900px; }
+  .battery-hero { padding: 26px 30px; }
+}
+
+/* ---- Larger tap targets on touch / small screens ---- */
+@media (max-width: 640px) {
+  .member-chip { min-height: 34px; padding: 7px 11px; }
+  .reorder-arrows button { width: 32px; height: 32px; font-size: 13px; }
+  .stepper button { width: 38px; height: 38px; }
+  .reset-btn { min-height: 40px; }
+  .reset-row { justify-content: flex-start; }
+  .modal-btn-secondary { padding: 12px; min-height: 44px; }
+}
+
+/* ---- Narrowest phones (~320–360px) ---- */
+@media (max-width: 360px) {
+  body { padding: 16px 8px 44px; }
+  .battery-hero { padding: 18px 14px; }
+  .battery-amount { font-size: 22px; }
+  .battery-amount span { font-size: 14px; }
+  .hero-round-num { font-size: 15px; }
+  .qr-box { width: 200px; height: 200px; }
+}
 
 /* ---- Tablet: keep the member grid and round rows comfortable between the
-   480px mobile rule and the 760px .wrap max-width ---- */
+   480px mobile rule and the 900px .wrap max-width ---- */
 @media (min-width: 481px) and (max-width: 900px) {
   .member-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
   .modal { max-width: 420px; }

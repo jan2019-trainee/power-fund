@@ -1,7 +1,43 @@
 /* Power Fund — styles (extracted verbatim from the original single-file app,
    plus one tablet breakpoint at the end). Keep visual changes minimal. */
 
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
+/* Fonts — self-hosted (was a Google Fonts @import). The .woff2 files are the
+   variable builds Google Fonts serves for these families, so one file covers
+   every weight the UI uses. `latin-ext` carries the ₱ peso sign (U+20B1).
+   Typography, weights and metrics are unchanged — this only removes the
+   third-party request so the app works offline. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('../assets/fonts/inter-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url('../assets/fonts/inter-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-weight: 500 700;
+  font-display: swap;
+  src: url('../assets/fonts/space-grotesk-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-weight: 500 700;
+  font-display: swap;
+  src: url('../assets/fonts/space-grotesk-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
 
 :root {
   --bg-primary: #0D1B2A;
@@ -1339,4 +1375,94 @@ textarea:focus-visible,
   .member-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
   .modal { max-width: 420px; }
 }
+
+/* ==========================================================================
+   PWA — offline notice / update prompt / install hints
+   (all driven by js/pwa.js; nothing here changes the existing web UX)
+   ========================================================================== */
+
+/* A fixed strip at the very top for the exceptional states only. It is empty
+   and zero-height until js/pwa.js reveals one of its rows, so it costs nothing
+   in the normal case. */
+#pf-pwa {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 45; /* under the app's modals (50) and lightbox (100) */
+  display: flex;
+  flex-direction: column;
+  padding-top: env(safe-area-inset-top, 0px);
+}
+.pf-pwa-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  font-family: 'Inter', sans-serif;
+  font-size: 12.5px;
+  line-height: 1.45;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.28);
+}
+/* `display:flex` above ties the UA `[hidden]` rule on specificity and would win
+   on source order — restore it so js/pwa.js can actually hide a row. */
+.pf-pwa-item[hidden] { display: none; }
+.pf-pwa-item > span { flex: 1 1 auto; }
+.pf-pwa-item b { font-weight: 600; }
+.pf-pwa-offline { background: #E15353; color: #fff; }
+.pf-pwa-update {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.pf-pwa-install,
+.pf-pwa-ios {
+  background: var(--bg-card-alt);
+  color: var(--text-primary);
+  border-bottom-color: var(--border);
+}
+.pf-pwa-btn {
+  flex: 0 0 auto;
+  background: var(--accent);
+  border: none;
+  color: #14213D;
+  font-family: 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 12.5px;
+  padding: 7px 14px;
+  min-height: 36px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.pf-pwa-btn:hover { background: #ffb733; }
+.pf-pwa-x {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 6px;
+  min-height: 32px;
+  min-width: 32px;
+  opacity: 0.75;
+}
+.pf-pwa-x:hover { opacity: 1; }
+
+@media (max-width: 640px) {
+  .pf-pwa-btn { min-height: 44px; }
+  .pf-pwa-x { min-height: 44px; min-width: 44px; }
+}
+
+/* Reserve space for the strip so it never sits on top of the header. --pf-bar-h
+   is 0px until js/pwa.js measures a visible strip, so these match the existing
+   body padding exactly in the normal case. */
+body { padding-top: calc(28px + var(--pf-bar-h, 0px)); }
+@media (max-width: 480px) { body { padding-top: calc(20px + var(--pf-bar-h, 0px)); } }
+@media (max-width: 360px) { body { padding-top: calc(16px + var(--pf-bar-h, 0px)); } }
+
+/* File-save fallback modal (iOS standalone, where <a download> is inert) reuses
+   the app's own .modal-overlay / .modal / .share-text-area styling — no new
+   modal styles needed. */
 

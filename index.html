@@ -4,7 +4,18 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#0D1B2A">
   <title>Power Fund Tracker</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon-180.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Power Fund">
+
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -12,13 +23,15 @@
     <div class="loading">Loading fund data…</div>
   </div>
 
-  <!-- Supabase client (UMD build exposes window.supabase) -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <!-- Supabase client (UMD build exposes window.supabase). Vendored locally so
+       the app shell has no runtime CDN dependency and works offline. -->
+  <script src="js/vendor/supabase-2.45.4.min.js"></script>
 
-  <!-- App code: config -> calculations -> database -> app -->
+  <!-- App code: config -> calculations -> database -> app -> pwa -->
   <script src="js/config.js"></script>
   <script src="js/calculations.js"></script>
   <script src="js/database.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/pwa.js"></script>
 </body>
 </html>

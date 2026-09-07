@@ -2307,13 +2307,14 @@
                        : ""
                    }
                  </div>`
-              : unlocked && fullyFunded
-              ? `<div class="payout-status-box pending-box">
-                   <div>🟡 Payout Pending — ${C.peso(C.GOAL_PER_ROUND)} reached</div>
-                   <button class="contribute-btn payout-btn" onclick="PowerFund.openPayoutModal(${r})">Mark payout released</button>
-                 </div>`
               : fullyFunded
-              ? `<div class="payout-status-box pending-box"><div>🟡 Payout Pending — ${C.peso(
+              ? // No "Mark payout released" button here even when unlocked —
+                // every payout-pending round is already listed with that
+                // exact button in the "Needs your attention" panel above,
+                // which is visible on every render (not just while this
+                // round's accordion happens to be expanded). Two buttons
+                // for the same action on the same page is just noise.
+                `<div class="payout-status-box pending-box"><div>🟡 Payout Pending — ${C.peso(
                   C.GOAL_PER_ROUND
                 )} reached</div></div>`
               : ""

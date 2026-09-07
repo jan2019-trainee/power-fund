@@ -1639,7 +1639,7 @@
              <div class="save-error-banner">⚠️ ${escapeHtml(appError)}</div>
              <button class="reset-btn" style="margin-top:16px" onclick="PowerFund.retry()">Try again</button>
            </div>`
-        : `<div class="loading">Loading fund data…</div>`;
+        : `<div class="loading"><div class="loading-spinner" aria-hidden="true"></div><p>Loading fund data…</p></div>`;
       return;
     }
 
@@ -2385,6 +2385,13 @@
     html += `<div class="footer-note">
       <b>How this works</b>
       <ul class="how-it-works-list">
+        <li><b>The fund:</b> ${members.length} members × ${C.peso(
+      C.CONTRIBUTION_AMOUNT
+    )} on the 15th &amp; end of every month → ${C.peso(
+      C.GOAL_PER_ROUND
+    )} payout per round, ${C.TOTAL_ROUNDS} rounds in total (${C.peso(
+      C.TARGET_AMOUNT
+    )} overall). Pay via the QR shown in "Record a contribution" — every payment needs a screenshot as proof</li>
         <li><b>Members:</b> tap <b>＋ Record a contribution</b> → scan the QR → attach your payment screenshot (required) → <b>I've sent this</b></li>
         <li><b>Treasurer:</b> reviews the screenshot, then <b>Confirm</b> or <b>Reject</b>. Paying several cycles in one transfer is reviewed together</li>
         <li><b>Cycle status:</b> ✓ paid · … waiting for treasurer review · ✕ not paid (overdue is still fine to pay late)</li>
@@ -2583,7 +2590,7 @@
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
           <h3 id="dlg-title">${titles[pinModalMode]}</h3>
           <p class="modal-sub">${subs[pinModalMode]}</p>
-          <input type="password" inputmode="numeric" class="pin-input" placeholder="PIN" value="${escapeHtml(
+          <input type="password" inputmode="numeric" autocomplete="off" class="pin-input" placeholder="PIN" value="${escapeHtml(
             pinInputValue
           )}"
                  oninput="PowerFund.setPinInput(this.value)" onkeydown="if(event.key==='Enter') PowerFund.submitPin()">
@@ -2834,7 +2841,7 @@
           }
           ${
             d.requirePin
-              ? `<input type="password" inputmode="numeric" class="pin-input"
+              ? `<input type="password" inputmode="numeric" autocomplete="off" class="pin-input"
                      placeholder="Treasurer PIN" value="${escapeHtml(d.pinValue)}"
                      oninput="PowerFund.setConfirmPin(this.value)"
                      onkeydown="if(event.key==='Enter') PowerFund.submitConfirm()">`

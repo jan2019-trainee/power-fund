@@ -71,6 +71,29 @@ body {
   text-align: center;
 }
 
+.save-warning-banner {
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-size: 12.5px;
+  text-align: center;
+  line-height: 1.5;
+}
+.warn-dismiss {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 4px 6px;
+  margin-left: 4px;
+  min-height: 32px;
+}
+
 .title {
   font-family: 'Space Grotesk', sans-serif;
   font-size: 26px;
@@ -392,6 +415,41 @@ body {
 }
 .reset-btn:hover { border-color: #E15353; color: #E15353; }
 
+/* Destructive actions sit apart from the utility row */
+.danger-zone {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.danger-zone-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #E15353;
+}
+.reset-btn.danger { border-color: rgba(225, 83, 83, 0.5); color: #E15353; }
+.reset-btn.danger:hover { background: rgba(225, 83, 83, 0.12); }
+
+/* Destructive-action confirmation modal */
+.confirm-body {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  text-align: left;
+  margin-bottom: 16px;
+}
+.confirm-body b { color: var(--text-primary); font-weight: 600; }
+.confirm-type-input {
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
 .loading {
   text-align: center;
   padding: 60px 20px;
@@ -638,6 +696,60 @@ body {
   flex-wrap: wrap;
 }
 .payout-btn { margin-top: 12px; }
+.payout-field-label {
+  display: block;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin: 4px 0 6px;
+}
+.payout-amount-input {
+  letter-spacing: normal;
+  font-size: 16px;
+  text-align: left;
+  margin-bottom: 4px;
+}
+.payout-field-hint {
+  text-align: left;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0 0 14px;
+  line-height: 1.5;
+}
+
+/* Payout history */
+.payout-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+.payout-history-row {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--success);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.ph-main { font-size: 13px; color: var(--text-primary); }
+.ph-main b { font-family: 'Space Grotesk', sans-serif; }
+.ph-meta { font-size: 12px; color: var(--text-muted); margin-top: 4px; line-height: 1.5; }
+.ph-receipt {
+  margin-top: 8px;
+  background: var(--accent-soft);
+  border: none;
+  color: var(--accent);
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 12px;
+  min-height: 36px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.ph-receipt:hover { background: rgba(245,166,35,0.24); }
+
 .payout-note-input {
   width: 100%;
   min-height: 70px;
@@ -858,6 +970,194 @@ body {
 .start-round-confirm-btns button { flex: 1; padding: 10px; min-height: 44px; }
 
 /* ==========================================================================
+   Overall fund balance card (M5) — whole-fund total, above the round hero
+   ========================================================================== */
+.fund-total {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px 18px;
+  margin-bottom: 14px;
+}
+.fund-total-label {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin: 0 0 6px;
+}
+.fund-total-amount {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.fund-total-amount span { color: var(--text-muted); font-size: 14px; font-weight: 500; }
+.fund-total-bar {
+  height: 6px;
+  border-radius: 4px;
+  background: var(--bg-card-alt);
+  margin: 10px 0 8px;
+  overflow: hidden;
+}
+.fund-total-fill {
+  height: 100%;
+  border-radius: 4px;
+  background: var(--success);
+  transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.fund-total-meta { font-size: 12.5px; color: var(--text-muted); }
+.fund-total-meta b { color: var(--text-primary); font-weight: 600; }
+.fund-total-pending { color: var(--accent); white-space: nowrap; }
+
+@media (prefers-reduced-motion: reduce) {
+  .fund-total-fill { transition: none; }
+}
+
+/* ==========================================================================
+   Treasurer "Needs your attention" panel + pending-review queue (M3)
+   ========================================================================== */
+.attention-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--accent);
+  border-left: 3px solid var(--accent);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+.attention-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+  margin: 0 0 12px;
+}
+.attention-group {
+  padding: 12px 0;
+  border-top: 1px solid var(--border);
+}
+.attention-group:first-of-type { border-top: none; padding-top: 0; }
+.attention-group-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 10px;
+  line-height: 1.5;
+}
+.attention-group .contribute-btn { margin-top: 0; }
+
+.queue-list { display: flex; flex-direction: column; gap: 8px; }
+.queue-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.queue-card-info { flex: 1 1 160px; min-width: 0; }
+.queue-card-l1 { font-size: 13px; color: var(--text-primary); line-height: 1.45; }
+.queue-card-l2 { font-size: 11.5px; color: var(--text-muted); margin-top: 3px; }
+.queue-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 20px;
+  padding: 0 6px;
+  vertical-align: middle;
+}
+.queue-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.queue-thumb {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  cursor: zoom-in;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.queue-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.queue-thumb-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: default;
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-size: 9px;
+  text-align: center;
+  line-height: 1.1;
+}
+.queue-btn {
+  min-height: 44px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.queue-btn-review {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+}
+.queue-btn-review:hover { border-color: var(--accent); color: var(--accent); }
+.queue-btn-confirm {
+  background: var(--success);
+  border: 1px solid var(--success);
+  color: #08130E;
+}
+.queue-btn-confirm:hover { filter: brightness(1.08); }
+.queue-btn:disabled { opacity: 0.5; cursor: default; }
+
+.attention-more {
+  margin-top: 8px;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-family: 'Inter', sans-serif;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 6px 2px;
+  min-height: 40px;
+  cursor: pointer;
+}
+.overdue-list { margin-top: 8px; display: flex; flex-direction: column; gap: 2px; }
+.overdue-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.overdue-row:last-child { border-bottom: none; }
+.overdue-row span:first-child { color: var(--text-primary); }
+
+@media (max-width: 480px) {
+  .attention-panel { padding: 14px; }
+  .queue-card-actions { width: 100%; justify-content: flex-start; }
+  .queue-btn { flex: 1; }
+}
+
+/* ==========================================================================
    UX pass (P0 + P1): hero hierarchy, current-cycle status + CTA, a11y,
    responsive scale. Behaviour / data unchanged.
    ========================================================================== */
@@ -996,14 +1296,31 @@ textarea:focus-visible,
   .battery-hero { padding: 26px 30px; }
 }
 
-/* ---- Larger tap targets on touch / small screens ---- */
+/* ---- Larger tap targets on touch / small screens (R6) ---- */
 @media (max-width: 640px) {
-  .member-chip { min-height: 34px; padding: 7px 11px; }
-  .reorder-arrows button { width: 32px; height: 32px; font-size: 13px; }
-  .stepper button { width: 38px; height: 38px; }
-  .reset-btn { min-height: 40px; }
+  .member-chip { min-height: 44px; padding: 10px 12px; }
+  .mini-chip { min-height: 44px; }
+  .reorder-arrows button { width: 40px; height: 40px; font-size: 14px; }
+  .stepper button { width: 40px; height: 40px; }
+  .reset-btn { min-height: 44px; }
   .reset-row { justify-content: flex-start; }
-  .modal-btn-secondary { padding: 12px; min-height: 44px; }
+  .modal-btn-primary, .modal-btn-secondary { padding: 13px; min-height: 46px; }
+  .contribute-btn, .payout-btn, .hero-cta, .share-btn { min-height: 44px; }
+  .queue-btn, .queue-thumb { min-height: 44px; }
+  .attention-more, .ph-receipt { min-height: 44px; }
+  .warn-dismiss { min-width: 44px; min-height: 44px; }
+  .lightbox-close { min-height: 44px; }
+}
+
+/* ---- Short viewports: keep the modal's action buttons reachable ---- */
+@media (max-height: 680px) {
+  .modal-actions {
+    position: sticky;
+    bottom: -1px;
+    background: var(--bg-card);
+    padding-top: 10px;
+    margin-top: 4px;
+  }
 }
 
 /* ---- Narrowest phones (~320–360px) ---- */

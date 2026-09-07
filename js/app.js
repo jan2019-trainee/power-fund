@@ -1797,13 +1797,17 @@
     // due countdown (only while the active round is still collecting)
     html += (function () {
       if (allDone || curStatus !== "collecting") return "";
-      // Skip when the My-status card above is already announcing this exact
-      // same cycle's due date ("🟡 Payment due ..."). They only diverge when
-      // this member (or the whole group) has moved ahead of the fund's
-      // date-driven "current" cycle — e.g. everyone already paid it early —
-      // in which case payCycle != curCycle and both banners stay, because
-      // they're then reporting genuinely different dates.
-      if (myMember && myStatus && myStatus.kind === "due" && payCycle === curCycle) {
+      // Skip this generic, fund-wide reminder once a member is identified —
+      // the My-status card above is now the personalized source of truth for
+      // "what does the current due date mean for me," so a second banner is
+      // redundant when they're due (repeats the same date), pointless when
+      // they're paid up or awaiting verification (nothing left to do), and
+      // actively misleading when they're overdue (it would name a *different*,
+      // later cycle's date right next to "overdue," implying more time than
+      // they actually have). The date itself isn't lost — it's still shown on
+      // the "<date> · N/5 paid this cycle" line in the round card below, and
+      // on the matching row in the Rounds & cycles accordion.
+      if (myMember && myStatus) {
         return "";
       }
       const today = C.startOfDay(new Date());

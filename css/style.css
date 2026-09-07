@@ -130,6 +130,19 @@ body {
   min-height: 32px;
 }
 
+.save-success-banner {
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border-radius: 9px;
+  background: var(--success-soft);
+  border: 1px solid var(--success);
+  color: var(--success);
+  font-size: 12.5px;
+  text-align: center;
+  line-height: 1.5;
+}
+.save-success-banner .warn-dismiss { color: var(--success); }
+
 .title {
   font-family: 'Space Grotesk', sans-serif;
   font-size: 26px;
@@ -1266,9 +1279,9 @@ textarea:focus-visible,
 }
 .mini-chip.paid { border-color: var(--success); color: var(--success); background: var(--success-soft); }
 .mini-chip.pending { border-color: var(--accent); color: var(--accent); background: rgba(245,166,35,0.14); }
-.mini-chip.unpaid { border-color: var(--accent); color: var(--text-primary); }
+.mini-chip.unpaid { border-color: var(--border); color: var(--text-primary); }
 .mini-chip:not(:disabled):hover { filter: brightness(1.15); }
-.mini-chip.unpaid:not(:disabled):hover { background: var(--accent-soft); filter: none; }
+.mini-chip.unpaid:not(:disabled):hover { background: var(--accent-soft); border-color: var(--accent); filter: none; }
 .mini-chip:disabled { cursor: default; }
 
 .hero-cta {

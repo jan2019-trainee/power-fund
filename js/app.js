@@ -27,6 +27,8 @@
   let busy = false; // a write is in flight — block double clicks
   let appError = null; // string shown in the red banner
   let appWarning = null; // amber banner: an action succeeded but a side effect didn't
+  let appSuccess = null; // green banner: confirms an action fully succeeded (auto-dismisses)
+  let successTimer = null;
   let openRound = null;
   let hasAutoOpened = false;
 
@@ -131,6 +133,8 @@
   function showError(msg) {
     appError = msg || "Something went wrong. Please try again.";
     appWarning = null; // a hard error supersedes a soft warning
+    appSuccess = null; // ...and a stale success notice
+    clearTimeout(successTimer);
     console.error("App error:", msg);
     render();
   }
@@ -143,6 +147,25 @@
   }
   function dismissWarning() {
     appWarning = null;
+    render();
+  }
+
+  /** A positive confirmation banner: the action fully succeeded. Auto-dismisses
+   *  after a few seconds so it never lingers like a warning/error would. */
+  function showSuccess(msg) {
+    appSuccess = msg || null;
+    clearTimeout(successTimer);
+    render();
+    if (msg) {
+      successTimer = setTimeout(() => {
+        appSuccess = null;
+        render();
+      }, 6000);
+    }
+  }
+  function dismissSuccess() {
+    clearTimeout(successTimer);
+    appSuccess = null;
     render();
   }
 
@@ -340,6 +363,11 @@
       );
       closeModal();
       await reload();
+      showSuccess(
+        `✅ Payment submitted — ${C.peso(
+          count * C.CONTRIBUTION_AMOUNT
+        )} is waiting for treasurer verification.`
+      );
     } catch (e) {
       showError(e.message);
     } finally {
@@ -1578,6 +1606,11 @@
     const curRound = C.currentRound(rounds, state.contributions);
     const curStatus = C.roundStatus(state.contributions, rounds, curRound); // collecting|payout_pending|completed
     const curCollected = C.roundCollected(state.contributions, curRound);
+    // Who this round's payout goes to — shown in the hero so it's visible
+    // without opening the Rounds & cycles accordion.
+    const heroRecipient = allDone
+      ? null
+      : members.find((m) => m.member_order === curRound);
     const pct = allDone ? 100 : C.progressPercentRound(state.contributions, curRound);
     const prevPendingRounds = C.pendingPayoutRounds(state.contributions, rounds);
     const canStartNext = C.canStartNextRound(state.contributions, rounds);
@@ -1666,6 +1699,11 @@
       html += `<div class="save-warning-banner">⚠️ ${escapeHtml(
         appWarning
       )} <button type="button" class="warn-dismiss" onclick="PowerFund.dismissWarning()" aria-label="Dismiss">✕</button></div>`;
+    }
+    if (appSuccess) {
+      html += `<div class="save-success-banner" role="status">${escapeHtml(
+        appSuccess
+      )} <button type="button" class="warn-dismiss" onclick="PowerFund.dismissSuccess()" aria-label="Dismiss">✕</button></div>`;
     }
 
     // ---- Overall fund balance (whole fund, confirmed money only) ------
@@ -1854,7 +1892,9 @@
         ${
           allDone
             ? `<span class="hero-round-num">✅ All ${C.TOTAL_ROUNDS} Rounds Completed</span>`
-            : `<span class="hero-round-num">Round ${curRound} of ${C.TOTAL_ROUNDS}</span> ${ROUND_PILL[curStatus]}`
+            : `<span class="hero-round-num">Round ${curRound} of ${C.TOTAL_ROUNDS}${
+                heroRecipient ? ` — ${escapeHtml(heroRecipient.name)}` : ""
+              }</span> ${ROUND_PILL[curStatus]}`
         }
       </div>
       <div class="battery-amount">${
@@ -1896,7 +1936,11 @@
                    .map((m) => {
                      const s = C.statusOf(state.contributions, m.id, payCycle);
                      const cls = s === 2 ? "paid" : s === 1 ? "pending" : "unpaid";
-                     const mark = s === 2 ? "✓" : s === 1 ? "…" : "✕";
+                     // No icon for "not paid yet" — a plain unpaid chip on a
+                     // freshly-opened cycle isn't an error, so it shouldn't
+                     // read like one (matches the Rounds & cycles grid below,
+                     // which also shows no icon for a not-yet-due unpaid cycle).
+                     const mark = s === 2 ? "✓" : s === 1 ? "…" : "";
                      const word =
                        s === 2
                          ? "paid"
@@ -1919,7 +1963,7 @@
                        clickable ? "" : "disabled"
                      } onclick="PowerFund.cellClicked('${m.id}', ${payCycle})" aria-label="${escapeHtml(
                        m.name
-                     )}: ${word}${action}">${mark} ${escapeHtml(m.name)}</button>`;
+                     )}: ${word}${action}">${mark ? mark + " " : ""}${escapeHtml(m.name)}</button>`;
                    })
                    .join("")}
                </div>
@@ -2713,6 +2757,7 @@
       init();
     },
     dismissWarning,
+    dismissSuccess,
     toggleUnlock,
     toggleRound,
     toggleActivityLog,

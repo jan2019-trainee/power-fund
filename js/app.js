@@ -691,6 +691,18 @@
   }
 
   function downloadFile(content, filename, type) {
+    // On an installed iOS PWA (standalone) `<a download>` silently does nothing,
+    // so hand CSV / JSON exports to the share sheet or a copy-out modal instead.
+    // Desktop and every normal mobile browser keep the direct download below.
+    // The file content is unchanged — see js/pwa.js.
+    if (
+      window.PowerFundPWA &&
+      typeof window.PowerFundPWA.saveFile === "function" &&
+      window.PowerFundPWA.needsSaveFallback()
+    ) {
+      window.PowerFundPWA.saveFile(content, filename, type);
+      return;
+    }
     const blob = new Blob([content], { type });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");

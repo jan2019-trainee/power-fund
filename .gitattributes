@@ -1,0 +1,7 @@
+# Vendored third-party bundle — never normalize line endings or diff it.
+js/vendor/** binary linguist-vendored
+
+# Binary assets
+*.woff2 binary
+*.png binary
+*.jpg binary

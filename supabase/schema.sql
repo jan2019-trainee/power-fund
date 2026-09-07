@@ -60,6 +60,14 @@ create table payouts (
   note          text,                            -- optional payout note ("Bought BLUETTI…")
   released_on   date,                             -- when the payout was released
   started_at    timestamptz,                      -- when the treasurer started this round (round 1 seeded)
+  -- Payout accountability (migration 004). All nullable, all filled at release.
+  -- A historical record: `amount` NEVER affects round funding (that stays
+  -- derived from confirmed contributions, target GOAL_PER_ROUND = 30,000).
+  amount              numeric(10,2) check (amount is null or amount >= 0),  -- pesos actually paid out
+  recipient_member_id uuid references members(id) on delete set null,      -- link to the recipient
+  recipient_name      text,                                                -- name snapshot at release time
+  receipt_url         text,                                                -- optional receipt / proof image
+  released_by         text,                                                -- free-text label (no auth here)
   created_at    timestamptz not null default now()
 );
 -- Round status is derived, not stored:

@@ -18,8 +18,19 @@ to the treasurer); the app is just the shared ledger.
   reads **All 5 Rounds Completed**
 - Payment states: **unpaid → pending review → confirmed paid**. A member must
   attach a proof-of-payment screenshot to submit a contribution
-- Tap the payment QR code or any proof screenshot to view it enlarged
-- A treasurer PIN gates review/confirm/payout actions (a convenience lock, **not** security)
+- The treasurer works a **Pending review** queue at the top of the dashboard —
+  each pending payment (or advance batch) can be reviewed or confirmed in one tap;
+  rejecting stays behind a confirmation step. Rejected / reverted screenshots are
+  **moved to an archive**, never deleted
+- When a payout is released the treasurer records the **recipient, amount, date
+  and (optionally) a receipt image**; that record stays correct even if members
+  are later renamed or reordered. `amount` is a historical record and never
+  affects the ₱30,000 funding target. Needs migration `004` (see setup step 2)
+- Tap the payment QR code or any proof/receipt screenshot to view it enlarged
+- A treasurer PIN gates review/confirm/payout actions (a convenience lock, **not**
+  security). Destructive actions (revert, undo release, reset, restore) need a
+  confirmation; **Reset all data** additionally needs you to type `RESET` and
+  re-enter the PIN, and no longer clears the PIN
 
 ## Technology
 

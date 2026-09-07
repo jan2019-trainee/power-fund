@@ -98,6 +98,19 @@ window.Calc = (function () {
   }
 
   /**
+   * Is `proofUrl` still referenced by a contribution other than the ones in
+   * `exceptIds`? Used before archiving/removing a screenshot so a file that a
+   * sibling cycle of the same advance batch still points at is left in place.
+   */
+  function proofInUse(contributions, proofUrl, exceptIds) {
+    if (!proofUrl) return false;
+    const skip = new Set(exceptIds || []);
+    return contributions.some(
+      (c) => !skip.has(c.id) && (c.proof_url || null) === proofUrl
+    );
+  }
+
+  /**
    * The set of cycles a treasurer should review together when clicking one
    * pending cycle: the maximal contiguous run of that member's PENDING cycles
    * that share the same proof screenshot and the same round (i.e. one advance
@@ -122,6 +135,56 @@ window.Calc = (function () {
     const out = [];
     for (let c = lo; c <= hi; c++) out.push(c);
     return out;
+  }
+
+  /**
+   * Group every pending-review contribution into review batches — one entry per
+   * advance payment (a contiguous run of a member's PENDING cycles that share a
+   * proof and a round). Sorted for a treasurer's review queue:
+   *   1) oldest submission first   2) then earliest cycle   3) then member id
+   *
+   * Returns: [{ memberId, cycles: [n, ...], proofUrl, submittedAt, amount }]
+   * where `submittedAt` is the earliest created_at in the batch (ISO string or
+   * null) and `amount` is the batch total in pesos.
+   */
+  function pendingBatches(contributions) {
+    const pend = contributions
+      .filter((c) => c.status === STATUS_PENDING)
+      .slice()
+      .sort((a, b) => a.cycle_number - b.cycle_number);
+
+    const seen = new Set();
+    const batches = [];
+    for (const row of pend) {
+      if (seen.has(row.member_id + "|" + row.cycle_number)) continue;
+      const cycles = pendingRun(contributions, row.member_id, row.cycle_number);
+      let submittedAt = null;
+      let amount = 0;
+      for (const n of cycles) {
+        seen.add(row.member_id + "|" + n);
+        const r = contributionFor(contributions, row.member_id, n);
+        if (!r) continue;
+        amount += Number(r.amount) || 0;
+        const t = r.created_at || r.paid_at || null;
+        if (t && (!submittedAt || t < submittedAt)) submittedAt = t;
+      }
+      batches.push({
+        memberId: row.member_id,
+        cycles,
+        proofUrl: row.proof_url || null,
+        submittedAt,
+        amount,
+      });
+    }
+
+    batches.sort((a, b) => {
+      const ta = a.submittedAt || "";
+      const tb = b.submittedAt || "";
+      if (ta !== tb) return ta < tb ? -1 : 1;
+      if (a.cycles[0] !== b.cycles[0]) return a.cycles[0] - b.cycles[0];
+      return String(a.memberId) < String(b.memberId) ? -1 : 1;
+    });
+    return batches;
   }
 
   // ---- Totals --------------------------------------------------------
@@ -156,6 +219,13 @@ window.Calc = (function () {
   /** Number of contributions still awaiting treasurer review (whole fund). */
   function pendingCount(contributions) {
     return contributions.filter((c) => c.status === STATUS_PENDING).length;
+  }
+
+  /** Pesos submitted but not yet confirmed by the treasurer (whole fund). */
+  function pendingTotal(contributions) {
+    return contributions
+      .filter((c) => c.status === STATUS_PENDING)
+      .reduce((sum, c) => sum + Number(c.amount), 0);
   }
 
   // ---- Rounds ------------------------------------------------------
@@ -467,13 +537,16 @@ window.Calc = (function () {
     contributionFor,
     statusOf,
     proofOf,
+    proofInUse,
     pendingRun,
+    pendingBatches,
 
     totalCollected,
     totalPerMember,
     cycleTotal,
     paidCountForCycle,
     pendingCount,
+    pendingTotal,
 
     roundCycleRange,
     roundOfCycle,

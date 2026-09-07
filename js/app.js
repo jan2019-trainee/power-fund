@@ -26,6 +26,7 @@
   let unlocked = false; // treasurer mode
   let busy = false; // a write is in flight — block double clicks
   let appError = null; // string shown in the red banner
+  let appWarning = null; // amber banner: an action succeeded but a side effect didn't
   let openRound = null;
   let hasAutoOpened = false;
 
@@ -36,8 +37,14 @@
 
   let reviewTarget = null; // { memberId, cycles: [n, ...] } — the whole advance batch
   let rejectConfirming = false;
-  let resetConfirming = false;
   let startRoundConfirming = false; // inline confirm for "Start Next Round"
+
+  // Generic "are you sure?" gate for destructive treasurer actions. Nothing
+  // that destroys or reverses financial data runs on the first tap — it opens
+  // one of these first. Shape:
+  //   { kind, title, bodyHtml, confirmLabel, requireType, requirePin,
+  //     typeValue, pinValue, error, ctx }
+  let confirmDialog = null;
 
   let pinModalMode = null; // null | 'setup' | 'enter' | 'change'
   let pinInputValue = "";
@@ -45,10 +52,17 @@
 
   let payoutModalRound = null;
   let payoutNoteValue = "";
+  let payoutAmountValue = ""; // string in the release modal; blank => the ₱30,000 default
+  let payoutReceiptFile = null; // optional receipt image the treasurer attaches
+  let payoutReceiptPreview = null; // object URL for its preview
 
   let activityLogOpen = false;
+  let activityLogLimit = 30; // grows when the treasurer taps "Show older"
   let shareModalOpen = false;
   let copyFeedback = null;
+
+  let attentionQueueExpanded = false; // "show N more" in the review queue
+  let overdueListOpen = false; // overdue detail list in the attention panel
 
   let editNamesModalOpen = false;
   let editNamesValues = {};
@@ -90,8 +104,23 @@
         released: false,
         note: "",
         released_on: null,
+        amount: null,
+        recipient_member_id: null,
+        recipient_name: null,
+        receipt_url: null,
+        released_by: null,
       }
     );
+  }
+
+  /** Recipient name for a payout row: the snapshot taken at release, else the
+   *  member currently in that payout position. */
+  function payoutRecipientName(payout) {
+    if (payout && payout.recipient_name) return payout.recipient_name;
+    const m = (state.members || []).find(
+      (x) => x.member_order === payout.round_number
+    );
+    return m ? m.name : "—";
   }
 
   function payoutDateText(released_on) {
@@ -101,7 +130,19 @@
 
   function showError(msg) {
     appError = msg || "Something went wrong. Please try again.";
+    appWarning = null; // a hard error supersedes a soft warning
     console.error("App error:", msg);
+    render();
+  }
+
+  /** A softer banner: the main action worked, but something alongside it didn't. */
+  function showWarning(msg) {
+    appWarning = msg || null;
+    if (msg) console.warn("App warning:", msg);
+    render();
+  }
+  function dismissWarning() {
+    appWarning = null;
     render();
   }
 
@@ -120,14 +161,20 @@
   }
 
   async function logActivity(message) {
-    await window.DB.addActivityLog(message);
+    const ok = await window.DB.addActivityLog(message);
+    if (ok === false) {
+      // The action itself succeeded; make sure the missing audit line is seen.
+      appWarning =
+        "Your last action was saved, but it could not be added to the activity log.";
+    }
+    return ok !== false;
   }
 
   // ===================================================================
   // Load / reload
   // ===================================================================
   async function loadAll() {
-    const data = await window.DB.loadEverything();
+    const data = await window.DB.loadEverything(activityLogLimit);
 
     // attach cycle_number to every contribution so Calc stays self-contained
     const numById = {};
@@ -142,7 +189,13 @@
     }));
 
     state = data;
-    if (appError && /database|connection|internet/i.test(appError)) appError = null;
+    // A successful load means any earlier error message is now stale.
+    appError = null;
+  }
+
+  function loadMoreActivity() {
+    activityLogLimit += 30;
+    reload();
   }
 
   async function reload() {
@@ -280,7 +333,11 @@
         count > 1
           ? `cycles ${cycleNumber}–${cycleNumber + count - 1}`
           : `cycle ${cycleNumber}`;
-      await logActivity(`${memberName(memberId)} marked ${range} as sent`);
+      await logActivity(
+        `${memberName(memberId)} marked ${range} as sent — ${C.peso(
+          count * C.CONTRIBUTION_AMOUNT
+        )}`
+      );
       closeModal();
       await reload();
     } catch (e) {
@@ -323,34 +380,113 @@
       return;
     }
 
+    if (status === C.STATUS_PAID) {
+      // Reverting a confirmed contribution destroys a financial record — never
+      // do it on the first tap.
+      const due = C.dueDateOf(state.cycles, cycleNumber);
+      openConfirm({
+        kind: "revert",
+        title: "Mark this contribution as unpaid?",
+        bodyHtml:
+          `Move <b>${escapeHtml(memberName(memberId))}</b>'s ` +
+          `<b>${due ? escapeHtml(C.formatDate(due)) : "cycle " + cycleNumber}</b> ` +
+          `contribution back to unpaid?<br><br>` +
+          `This removes <b>${C.peso(C.CONTRIBUTION_AMOUNT)}</b> from Round ` +
+          `${C.roundOfCycle(cycleNumber)}'s total. Any payment screenshot is ` +
+          `kept in the archive, not deleted.`,
+        confirmLabel: "Yes, mark unpaid",
+        ctx: { memberId, cycleNumber },
+      });
+      return;
+    }
+
+    // Unpaid → treasurer records it as paid directly (cash). Not destructive.
     busy = true;
     render();
     try {
       const cycleId = cycleIdByNumber[cycleNumber];
-      if (status === C.STATUS_PAID) {
-        const row = C.contributionFor(state.contributions, memberId, cycleNumber);
-        await window.DB.deleteContribution(memberId, cycleId);
-        if (row && row.proof_url) await window.DB.deleteProof(row.proof_url);
-        await logActivity(
-          `Treasurer reverted ${memberName(memberId)}'s cycle ${cycleNumber} to unpaid`
-        );
-      } else {
-        await window.DB.upsertContribution({
-          cycleId,
-          memberId,
-          amount: C.CONTRIBUTION_AMOUNT,
-          status: C.STATUS_PAID,
-        });
-        await logActivity(
-          `Treasurer recorded ${memberName(memberId)}'s cycle ${cycleNumber} as paid (direct)`
-        );
-      }
+      await window.DB.upsertContribution({
+        cycleId,
+        memberId,
+        amount: C.CONTRIBUTION_AMOUNT,
+        status: C.STATUS_PAID,
+      });
+      await logActivity(
+        `Treasurer recorded ${memberName(memberId)}'s cycle ${cycleNumber} as paid (direct) — ${C.peso(
+          C.CONTRIBUTION_AMOUNT
+        )}`
+      );
       await reload();
     } catch (e) {
       showError(e.message);
     } finally {
       busy = false;
       render();
+    }
+  }
+
+  /** The actual revert, after the confirmation dialog. */
+  async function doRevertContribution(memberId, cycleNumber) {
+    if (busy) return;
+    busy = true;
+    render();
+    try {
+      const cycleId = cycleIdByNumber[cycleNumber];
+      const row = C.contributionFor(state.contributions, memberId, cycleNumber);
+      const proof = row && row.proof_url;
+      await window.DB.deleteContribution(memberId, cycleId);
+
+      const outcome = await preserveProof(proof, row ? [row.id] : []);
+
+      await logActivity(
+        `Treasurer reverted ${memberName(memberId)}'s cycle ${cycleNumber} to unpaid` +
+          outcome.logSuffix
+      );
+      await reload();
+      if (outcome.warning) {
+        showWarning(
+          "The contribution was reverted, but its payment screenshot could not " +
+            "be archived — it is still at its original URL. See the activity log."
+        );
+      }
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+
+  /**
+   * Keep a rejected/reverted payment screenshot instead of deleting it:
+   *   - if another contribution still points at the file (shared advance-batch
+   *     proof), leave it in place;
+   *   - otherwise move it to the bucket's archive/ folder.
+   * Never throws. Returns { logSuffix, warning } so the caller can record the
+   * outcome and, on failure, tell the treasurer the two outcomes differed.
+   */
+  async function preserveProof(proofUrl, removedIds) {
+    if (!proofUrl) return { logSuffix: "", warning: false };
+    if (C.proofInUse(state.contributions, proofUrl, removedIds || [])) {
+      return {
+        logSuffix: " (screenshot kept — still used by another cycle)",
+        warning: false,
+      };
+    }
+    try {
+      const archivedUrl = await window.DB.archiveProof(proofUrl);
+      return {
+        logSuffix: archivedUrl
+          ? ` — screenshot archived: ${archivedUrl}`
+          : " — screenshot kept",
+        warning: false,
+      };
+    } catch (e) {
+      console.error("Archive failed:", e);
+      return {
+        logSuffix: ` — WARNING: screenshot NOT archived (${proofUrl})`,
+        warning: true,
+      };
     }
   }
 
@@ -377,13 +513,28 @@
   async function confirmReview() {
     if (!reviewTarget || busy) return;
     const { memberId, cycles } = reviewTarget;
+    await confirmCycles(memberId, cycles);
+  }
+
+  /** Confirm a batch straight from the review queue (skips opening the modal). */
+  async function confirmBatch(memberId, firstCycle) {
+    if (busy) return;
+    const cycles = C.pendingRun(state.contributions, memberId, firstCycle);
+    await confirmCycles(memberId, cycles);
+  }
+
+  /** Shared worker: mark the given pending cycles as confirmed-paid. */
+  async function confirmCycles(memberId, cycles) {
+    if (busy || !cycles || !cycles.length) return;
     busy = true;
     render();
     try {
       const now = new Date().toISOString();
+      let total = 0;
       for (const c of cycles) {
         const row = C.contributionFor(state.contributions, memberId, c);
         if (row && row.status === C.STATUS_PENDING) {
+          total += Number(row.amount) || 0;
           await window.DB.updateContribution(row.id, {
             status: C.STATUS_PAID,
             paid_at: now,
@@ -393,7 +544,7 @@
       await logActivity(
         `Treasurer confirmed ${memberName(memberId)}'s ${cycleRangeLabel(
           cycles
-        )} as paid`
+        )} as paid — ${C.peso(total)}`
       );
       closeReviewModal();
       await reload();
@@ -420,19 +571,34 @@
     busy = true;
     render();
     try {
-      const proof = C.proofOf(state.contributions, memberId, cycles[0]);
+      const rows = cycles
+        .map((c) => C.contributionFor(state.contributions, memberId, c))
+        .filter(Boolean);
+      const proof =
+        (rows[0] && rows[0].proof_url) ||
+        C.proofOf(state.contributions, memberId, cycles[0]);
+      const removedIds = rows.map((r) => r.id);
+
       for (const c of cycles) {
         await window.DB.deleteContribution(memberId, cycleIdByNumber[c]);
       }
-      // The batch shares one screenshot — remove it once, after the rows are gone.
-      if (proof) await window.DB.deleteProof(proof);
+
+      // The batch shares one screenshot — keep it (archive), don't delete it.
+      const outcome = await preserveProof(proof, removedIds);
+
       await logActivity(
         `Treasurer rejected ${memberName(memberId)}'s ${cycleRangeLabel(
           cycles
-        )} claim`
+        )} claim` + outcome.logSuffix
       );
       closeReviewModal();
       await reload();
+      if (outcome.warning) {
+        showWarning(
+          "The claim was rejected, but its payment screenshot could not be " +
+            "archived — it is still at its original URL. See the activity log."
+        );
+      }
     } catch (e) {
       showError(e.message);
     } finally {
@@ -483,21 +649,30 @@
   // Reset everything
   // ===================================================================
   function resetData() {
-    resetConfirming = true;
-    render();
-  }
-  function cancelResetConfirm() {
-    resetConfirming = false;
-    render();
+    openConfirm({
+      kind: "reset",
+      title: "Reset all fund data?",
+      bodyHtml:
+        `This permanently clears <b>every contribution</b>, the <b>activity log</b>, ` +
+        `and <b>all payout status</b> (including released payouts). Uploaded payment ` +
+        `screenshots are removed too.<br><br>` +
+        `Members, their names, the payout order, cycle dates and the treasurer PIN ` +
+        `are kept.<br><br>This cannot be undone.`,
+      confirmLabel: "Reset everything",
+      requireType: "RESET",
+      requirePin: true,
+    });
   }
   async function doReset() {
     if (busy) return;
     busy = true;
-    resetConfirming = false;
     render();
     try {
       await window.DB.resetAll();
       await logActivity("Fund was reset — all contributions cleared");
+      // Reset keeps the PIN; the current session re-locks so treasurer mode
+      // can only be re-entered with it.
+      unlocked = false;
       await reload();
     } catch (e) {
       showError(e.message);
@@ -527,8 +702,13 @@
     URL.revokeObjectURL(url);
   }
 
+  /** Today's date as YYYY-MM-DD in the viewer's LOCAL timezone (not UTC), so a
+   *  payout released late in the evening in PH records the right day. */
   function todayStamp() {
-    return new Date().toISOString().slice(0, 10);
+    const d = new Date();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${d.getFullYear()}-${m}-${day}`;
   }
 
   function exportCsv() {
@@ -576,6 +756,11 @@
         note: p.note,
         released_on: p.released_on,
         started_at: p.started_at, // present only with migration 002
+        amount: p.amount, // \
+        recipient_member_id: p.recipient_member_id, //  } present only with
+        recipient_name: p.recipient_name, //  } migration 004
+        receipt_url: p.receipt_url, //  /
+        released_by: p.released_by, // /
       })),
       activityLog: (state.activityLog || []).map((a) => ({
         message: a.message,
@@ -608,11 +793,37 @@
     } catch (e) {
       return showError("That file isn't valid JSON.");
     }
-    const ok = window.confirm(
-      "Restore from this backup?\n\nThis REPLACES all current contributions and payout status with the contents of the file. This cannot be undone."
-    );
-    if (!ok) return;
+    if (!data || !Array.isArray(data.contributions)) {
+      return showError("That file doesn't look like a Power Fund backup.");
+    }
+    const n = data.contributions.length;
+    const released = Array.isArray(data.payouts)
+      ? data.payouts.filter((p) => p && p.released).length
+      : 0;
+    const summary = [
+      data.exported_at ? `exported ${formatDateTime(data.exported_at)}` : null,
+      `${n} contribution${n === 1 ? "" : "s"}`,
+      `${released} released payout${released === 1 ? "" : "s"}`,
+    ]
+      .filter(Boolean)
+      .join(" · ");
 
+    openConfirm({
+      kind: "restore",
+      title: "Replace all data with this backup?",
+      bodyHtml:
+        `<b>${escapeHtml(summary)}</b><br><br>` +
+        `This <b>replaces every current contribution and all payout status</b> ` +
+        `with the file's contents. Anything not in the file is lost. This cannot be undone.`,
+      confirmLabel: "Replace everything",
+      requireType: "REPLACE",
+      ctx: { data },
+    });
+  }
+
+  /** The actual restore, after the confirmation dialog. */
+  async function doRestoreBackup(data) {
+    if (busy) return;
     busy = true;
     render();
     try {
@@ -625,6 +836,58 @@
       busy = false;
       render();
     }
+  }
+
+  // ===================================================================
+  // Destructive-action confirmation gate
+  // ===================================================================
+  function openConfirm(cfg) {
+    appWarning = null; // starting a new destructive action clears the last notice
+    confirmDialog = Object.assign(
+      { requireType: null, requirePin: false, typeValue: "", pinValue: "", error: null },
+      cfg
+    );
+    render();
+  }
+  function closeConfirm() {
+    confirmDialog = null;
+    render();
+  }
+  function setConfirmType(v) {
+    if (confirmDialog) confirmDialog.typeValue = v;
+  }
+  function setConfirmPin(v) {
+    if (confirmDialog) confirmDialog.pinValue = v;
+  }
+
+  async function submitConfirm() {
+    if (!confirmDialog || busy) return;
+    const d = confirmDialog;
+
+    if (
+      d.requireType &&
+      d.typeValue.trim().toUpperCase() !== d.requireType.toUpperCase()
+    ) {
+      d.error = `Type ${d.requireType} exactly to confirm.`;
+      return render();
+    }
+    if (d.requirePin) {
+      const pin = state.settings && state.settings.treasurer_pin;
+      if (!pin || d.pinValue !== pin) {
+        d.error = "Incorrect PIN.";
+        d.pinValue = "";
+        return render();
+      }
+    }
+
+    const { kind, ctx } = d;
+    confirmDialog = null;
+    render();
+
+    if (kind === "revert") return doRevertContribution(ctx.memberId, ctx.cycleNumber);
+    if (kind === "undoRelease") return doUnmarkPayoutReleased(ctx.round);
+    if (kind === "reset") return doReset();
+    if (kind === "restore") return doRestoreBackup(ctx.data);
   }
 
   // ===================================================================
@@ -695,33 +958,144 @@
   // ===================================================================
   function openPayoutModal(round) {
     payoutModalRound = round;
-    payoutNoteValue = getPayout(round).note || "";
+    const existing = getPayout(round);
+    payoutNoteValue = existing.note || "";
+    payoutAmountValue =
+      existing.amount != null ? String(existing.amount) : String(C.GOAL_PER_ROUND);
+    clearPayoutReceipt();
     render();
   }
   function closePayoutModal() {
     payoutModalRound = null;
     payoutNoteValue = "";
+    payoutAmountValue = "";
+    clearPayoutReceipt();
     render();
+  }
+  function clearPayoutReceipt() {
+    if (payoutReceiptPreview) URL.revokeObjectURL(payoutReceiptPreview);
+    payoutReceiptFile = null;
+    payoutReceiptPreview = null;
+  }
+  function removePayoutReceipt() {
+    clearPayoutReceipt();
+    render();
+  }
+  function onPayoutReceiptSelected(input) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    if (!file.type || !file.type.startsWith("image/")) {
+      return showError("Please choose an image file for the receipt.");
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      return showError("That image is larger than 5 MB — please choose a smaller one.");
+    }
+    if (payoutReceiptPreview) URL.revokeObjectURL(payoutReceiptPreview);
+    payoutReceiptFile = file;
+    payoutReceiptPreview = URL.createObjectURL(file);
+    render();
+  }
+
+  /** Parse the release-modal amount field. Blank => the ₱30,000 default.
+   *  This is a historical record only — it never touches round funding. */
+  function parsePayoutAmount(v) {
+    if (v == null || String(v).trim() === "") return C.GOAL_PER_ROUND;
+    const n = Number(String(v).replace(/[₱,\s]/g, ""));
+    return isFinite(n) ? n : null;
   }
 
   async function markPayoutReleased() {
     if (!payoutModalRound || busy) return;
     const round = payoutModalRound;
+    // Guard at the action level: a payout can only be released once the round
+    // has actually reached its ₱30,000 target in confirmed contributions. The
+    // button is already hidden/disabled in the UI unless the round is funded —
+    // this makes the rule hold even if the handler is reached another way, and
+    // is the real check, not just a display state.
+    if (!C.isRoundFunded(state.contributions, round)) {
+      closePayoutModal();
+      return showError(
+        `Round ${round} isn't funded yet — it needs ${C.peso(
+          C.GOAL_PER_ROUND
+        )} in confirmed contributions before its payout can be released.`
+      );
+    }
+
+    const amount = parsePayoutAmount(payoutAmountValue);
+    if (amount == null || amount < 0) {
+      return showError("Enter a valid payout amount (₱0 or more).");
+    }
+
+    // Snapshot the recipient NOW so the history stays correct even if members
+    // are later renamed, reordered, or removed.
     const recipient = sortedMembers().find((m) => m.member_order === round);
     busy = true;
     render();
     try {
+      // The receipt image is optional — if its upload fails (e.g. the storage
+      // bucket isn't set up), the payout must STILL be releasable. Degrade to
+      // a warning, don't abort.
+      let receiptUrl = null;
+      let receiptWarning = false;
+      if (payoutReceiptFile) {
+        try {
+          receiptUrl = await window.DB.uploadPayoutReceipt(payoutReceiptFile, round);
+        } catch (e) {
+          receiptWarning = true;
+          console.warn("Payout receipt upload failed:", e.message);
+        }
+      }
+
+      // The release itself uses only pre-existing columns, so it always works.
       await window.DB.updatePayout(round, {
         released: true,
         note: payoutNoteValue || null,
         released_on: todayStamp(),
       });
+
+      // The accountability snapshot needs migration 004. If it isn't there yet,
+      // the release still stands — we just tell the treasurer to run it.
+      let accWarning = false;
+      try {
+        await window.DB.updatePayout(round, {
+          amount: amount,
+          recipient_member_id: recipient ? recipient.id : null,
+          recipient_name: recipient ? recipient.name : null,
+          receipt_url: receiptUrl,
+          released_by: "treasurer",
+        });
+      } catch (e) {
+        accWarning = true;
+        console.warn("Payout accountability not recorded:", e.message);
+      }
+
       await logActivity(
-        `Payout released — Round ${round} (${recipient ? recipient.name : "—"})` +
-          (payoutNoteValue ? ": " + payoutNoteValue : "")
+        `Payout released — Round ${round} (${
+          recipient ? recipient.name : "—"
+        }) · ${C.peso(amount)}` +
+          (payoutNoteValue ? ": " + payoutNoteValue : "") +
+          (receiptWarning ? " — receipt image was NOT saved" : "")
       );
       closePayoutModal();
       await reload();
+
+      const problems = [];
+      if (receiptWarning) {
+        problems.push(
+          "the receipt image could not be uploaded — the 'payment-assets' " +
+            "storage bucket isn't set up (run supabase/migrations/003)"
+        );
+      }
+      if (accWarning) {
+        problems.push(
+          "the recipient / amount record could not be saved (run " +
+            "supabase/migrations/004) — payout history falls back to the current " +
+            "member order until then"
+        );
+      }
+      if (problems.length) {
+        showWarning("Payout released, but " + problems.join("; and ") + ".");
+      }
     } catch (e) {
       showError(e.message);
     } finally {
@@ -730,7 +1104,20 @@
     }
   }
 
-  async function unmarkPayoutReleased(round) {
+  function unmarkPayoutReleased(round) {
+    openConfirm({
+      kind: "undoRelease",
+      title: "Undo payout release?",
+      bodyHtml:
+        `Undo the Round ${round} payout release?<br><br>` +
+        `The round returns to <b>🟡 Payout Pending</b>. The recorded release date, ` +
+        `note, amount and recipient are cleared.`,
+      confirmLabel: "Yes, undo release",
+      ctx: { round },
+    });
+  }
+
+  async function doUnmarkPayoutReleased(round) {
     if (busy) return;
     const recipient = sortedMembers().find((m) => m.member_order === round);
     busy = true;
@@ -741,6 +1128,18 @@
         note: null,
         released_on: null,
       });
+      // Clear the accountability snapshot too; tolerate a DB without migration 004.
+      try {
+        await window.DB.updatePayout(round, {
+          amount: null,
+          recipient_member_id: null,
+          recipient_name: null,
+          receipt_url: null,
+          released_by: null,
+        });
+      } catch (e) {
+        console.warn("Payout accountability fields not cleared:", e.message);
+      }
       await logActivity(
         `Payout release undone — Round ${round} (${recipient ? recipient.name : "—"})`
       );
@@ -867,6 +1266,27 @@
     activityLogOpen = !activityLogOpen;
     render();
   }
+  function expandAttentionQueue() {
+    attentionQueueExpanded = true;
+    render();
+  }
+  function toggleOverdueList() {
+    overdueListOpen = !overdueListOpen;
+    render();
+  }
+
+  /** [{ name, cycle, due }] for every (member, cycle) that is overdue. */
+  function overdueRows() {
+    const out = [];
+    for (const m of sortedMembers()) {
+      for (let c = 1; c <= C.TOTAL_CYCLES; c++) {
+        if (C.isOverdue(state.contributions, state.cycles, m.id, c)) {
+          out.push({ name: m.name, cycle: c, due: C.dueDateOf(state.cycles, c) });
+        }
+      }
+    }
+    return out;
+  }
 
   // ===================================================================
   // Zoom lightbox (QR code + proof-of-payment images)
@@ -957,6 +1377,30 @@
       " · " +
       d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
     );
+  }
+
+  /** Activity-log timestamp: relative for the last day, absolute (with year for
+   *  older items) after that. Local timezone throughout. */
+  function activityTimeLabel(iso) {
+    const d = new Date(iso);
+    const diffMs = Date.now() - d.getTime();
+    const mins = Math.floor(diffMs / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins} min ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs} hr${hrs === 1 ? "" : "s"} ago`;
+    const days = Math.floor(hrs / 24);
+    if (days < 7)
+      return (
+        `${days} day${days === 1 ? "" : "s"} ago · ` +
+        d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+      );
+    const sameYear = d.getFullYear() === new Date().getFullYear();
+    return d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: sameYear ? undefined : "numeric",
+    }) + " · " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
   }
 
   function generateStatusText() {
@@ -1055,6 +1499,7 @@
       lightboxSrc ||
       startRoundConfirming ||
       qrModalOpen ||
+      confirmDialog ||
       contributePicker != null
     );
   }
@@ -1062,6 +1507,7 @@
   /** Close whatever dialog is on top (used by the Escape key). */
   function closeTopModal() {
     if (lightboxSrc) return closeLightbox();
+    if (confirmDialog) return closeConfirm();
     if (contributePicker != null) return closeContributePicker();
     if (modalTarget) return closeModal();
     if (reviewTarget) return closeReviewModal();
@@ -1204,6 +1650,191 @@
     if (appError) {
       html += `<div class="save-error-banner">⚠️ ${escapeHtml(appError)}</div>`;
     }
+    if (appWarning) {
+      html += `<div class="save-warning-banner">⚠️ ${escapeHtml(
+        appWarning
+      )} <button type="button" class="warn-dismiss" onclick="PowerFund.dismissWarning()" aria-label="Dismiss">✕</button></div>`;
+    }
+
+    // ---- Overall fund balance (whole fund, confirmed money only) ------
+    html += (function () {
+      const collected = C.totalCollected(state.contributions);
+      const remaining = C.remainingAmount(state.contributions);
+      const overallPct = Math.round(C.progressPercentOverall(state.contributions));
+      const pendingPesos = C.pendingTotal(state.contributions);
+      return `<div class="fund-total">
+        <p class="fund-total-label">Fund balance</p>
+        <div class="fund-total-amount">${C.peso(collected)} <span>/ ${C.peso(
+        C.TARGET_AMOUNT
+      )}</span></div>
+        <div class="fund-total-bar"><div class="fund-total-fill" style="width:${Math.min(
+          100,
+          Math.max(0, overallPct)
+        )}%"></div></div>
+        <div class="fund-total-meta">${
+          C.allRoundsComplete(state.contributions, rounds)
+            ? "Fund complete ✅"
+            : `${overallPct}% collected · <b>${C.peso(remaining)}</b> to go`
+        }${
+        pendingPesos > 0
+          ? ` <span class="fund-total-pending">+ ${C.peso(
+              pendingPesos
+            )} awaiting review</span>`
+          : ""
+      }</div>
+      </div>`;
+    })();
+
+    // ---- Treasurer action center: "Needs your attention" --------------
+    // Only actionable items. Hidden entirely when there is nothing to do.
+    if (unlocked && !allDone) {
+      const batches = C.pendingBatches(state.contributions);
+      const releaseRounds = [];
+      for (let r = 1; r <= C.TOTAL_ROUNDS; r++) {
+        if (C.roundStatus(state.contributions, rounds, r) === "payout_pending") {
+          releaseRounds.push(r);
+        }
+      }
+      const nextRound = curRound + 1;
+
+      if (batches.length || releaseRounds.length || canStartNext || overdueCount) {
+        html += `<div class="attention-panel">
+          <p class="attention-title">⚠ Needs your attention</p>`;
+
+        // 1) pending review queue
+        if (batches.length) {
+          const shown = attentionQueueExpanded ? batches : batches.slice(0, 6);
+          html += `<div class="attention-group">
+            <p class="attention-group-label">🔔 ${
+              batches.length === 1
+                ? "1 payment"
+                : batches.length + " payments"
+            } waiting for your review</p>
+            <div class="queue-list">
+              ${shown
+                .map((b) => {
+                  const m = state.members.find((x) => x.id === b.memberId);
+                  const name = m ? m.name : "—";
+                  const multi = b.cycles.length > 1;
+                  const firstDue = C.dueDateOf(state.cycles, b.cycles[0]);
+                  const lastDue = C.dueDateOf(
+                    state.cycles,
+                    b.cycles[b.cycles.length - 1]
+                  );
+                  const range = multi
+                    ? `${firstDue ? C.formatDate(firstDue) : "Cycle " + b.cycles[0]} – ${
+                        lastDue
+                          ? C.formatDate(lastDue)
+                          : "Cycle " + b.cycles[b.cycles.length - 1]
+                      }`
+                    : `${firstDue ? C.formatDate(firstDue) : "Cycle " + b.cycles[0]}`;
+                  return `<div class="queue-card">
+                    <div class="queue-card-info">
+                      <div class="queue-card-l1"><b>${escapeHtml(name)}</b> · ${escapeHtml(
+                    range
+                  )}${
+                    multi
+                      ? ` <span class="queue-badge">${b.cycles.length} cycles</span>`
+                      : ""
+                  }</div>
+                      <div class="queue-card-l2">${C.peso(b.amount)} · submitted ${
+                    b.submittedAt ? formatDateTime(b.submittedAt) : "—"
+                  }</div>
+                    </div>
+                    <div class="queue-card-actions">
+                      ${
+                        b.proofUrl
+                          ? `<button type="button" class="queue-thumb" onclick="PowerFund.openLightbox('${inlineArg(
+                              b.proofUrl
+                            )}')" aria-label="View ${escapeHtml(
+                              name
+                            )}'s payment screenshot larger"><img src="${escapeHtml(
+                              b.proofUrl
+                            )}" alt="Payment screenshot"></button>`
+                          : `<span class="queue-thumb queue-thumb-empty">no&nbsp;proof</span>`
+                      }
+                      <button type="button" class="queue-btn queue-btn-review" onclick="PowerFund.openReviewModal('${inlineArg(
+                        b.memberId
+                      )}', ${b.cycles[0]})">Review</button>
+                      <button type="button" class="queue-btn queue-btn-confirm" onclick="PowerFund.confirmBatch('${inlineArg(
+                        b.memberId
+                      )}', ${b.cycles[0]})" ${busy ? "disabled" : ""}>${
+                    multi ? `Confirm ${b.cycles.length}` : "Confirm"
+                  }</button>
+                    </div>
+                  </div>`;
+                })
+                .join("")}
+            </div>
+            ${
+              batches.length > shown.length
+                ? `<button type="button" class="attention-more" onclick="PowerFund.expandAttentionQueue()">Show ${
+                    batches.length - shown.length
+                  } more</button>`
+                : ""
+            }
+          </div>`;
+        }
+
+        // 2) payout(s) ready to release
+        releaseRounds.forEach((r) => {
+          const recip = members.find((m) => m.member_order === r);
+          html += `<div class="attention-group">
+            <p class="attention-group-label">🟡 Round ${r}${
+            recip ? " — " + escapeHtml(recip.name) : ""
+          } is funded — release the ${C.peso(C.GOAL_PER_ROUND)} payout</p>
+            <button class="contribute-btn payout-btn" onclick="PowerFund.openPayoutModal(${r})">Mark payout released</button>
+          </div>`;
+        });
+
+        // 3) start the next round
+        if (canStartNext) {
+          html += `<div class="attention-group">
+            ${
+              startRoundConfirming
+                ? `<p class="attention-group-label">Start Round ${nextRound}? Round ${curRound}'s payout stays pending until you release it.</p>
+                   <div class="start-round-confirm-btns">
+                     <button class="modal-btn-secondary" onclick="PowerFund.cancelStartRound()">Cancel</button>
+                     <button class="modal-btn-primary" onclick="PowerFund.confirmStartRound()" ${
+                       busy ? "disabled" : ""
+                     }>Start Round ${nextRound}</button>
+                   </div>`
+                : `<p class="attention-group-label">▶ Round ${nextRound} is ready to start</p>
+                   <button class="contribute-btn" onclick="PowerFund.askStartNextRound()">Start Round ${nextRound}</button>`
+            }
+          </div>`;
+        }
+
+        // 4) overdue contributions (nudge — not a treasurer action per se)
+        if (overdueCount) {
+          const rows = overdueListOpen ? overdueRows() : null;
+          html += `<div class="attention-group">
+            <p class="attention-group-label">⏰ ${overdueCount} contribution${
+            overdueCount === 1 ? "" : "s"
+          } overdue</p>
+            <button type="button" class="attention-more" onclick="PowerFund.toggleOverdueList()">${
+              overdueListOpen ? "Hide" : "Show"
+            } overdue</button>
+            ${
+              rows
+                ? `<div class="overdue-list">${rows
+                    .map(
+                      (o) =>
+                        `<div class="overdue-row"><span>${escapeHtml(
+                          o.name
+                        )}</span><span>${
+                          o.due ? C.formatDate(o.due) : "Cycle " + o.cycle
+                        }</span></div>`
+                    )
+                    .join("")}</div>`
+                : ""
+            }
+          </div>`;
+        }
+
+        html += `</div>`;
+      }
+    }
 
     // ---- Current round hero: round → money → to-go → who paid → CTA ----
     html += `<div class="battery-hero">
@@ -1290,63 +1921,24 @@
             }</button>`
           : ""
       }
-      ${
-        !allDone && unlocked && curStatus === "payout_pending"
-          ? `<div class="hero-payout-actions">
-               <span class="prev-round-meta">🟡 ${C.peso(
-                 C.GOAL_PER_ROUND
-               )} target reached — release the payout or start the next round.</span>
-               <div class="prev-round-actions">
-                 <button class="contribute-btn payout-btn" onclick="PowerFund.openPayoutModal(${curRound})">Mark payout released</button>
-               </div>
-             </div>`
-          : ""
-      }
-      ${
-        !allDone && unlocked && canStartNext
-          ? startRoundConfirming
-            ? `<div class="start-round-confirm">
-                 <p class="reset-confirm-text">Round ${curRound} has reached ${C.peso(
-                C.GOAL_PER_ROUND
-              )} and payout is still pending. Start Round ${curRound + 1}?</p>
-                 <div class="start-round-confirm-btns">
-                   <button class="modal-btn-secondary" onclick="PowerFund.cancelStartRound()">Cancel</button>
-                   <button class="modal-btn-primary" onclick="PowerFund.confirmStartRound()" ${
-                     busy ? "disabled" : ""
-                   }>Start Round ${curRound + 1}</button>
-                 </div>
-               </div>`
-            : `<button class="contribute-btn" onclick="PowerFund.askStartNextRound()">▶ Start Round ${
-                curRound + 1
-              }</button>`
-          : ""
-      }
       <button class="share-btn" onclick="PowerFund.openShareModal()">📋 Copy status update</button>
     </div>`;
 
     // Previous round(s) whose payout hasn't been released — shown AFTER the
     // current round and styled as history, so last round's ₱30,000 is never
-    // mistaken for the active round's progress. Starting the next round never
-    // releases these; the treasurer still uses the same "Mark payout released"
-    // modal here.
+    // mistaken for the active round's progress. The release action lives in the
+    // treasurer "Needs your attention" panel above; this card is informational.
     prevPendingRounds.forEach((r) => {
       const collected = C.roundCollected(state.contributions, r);
       const recip = members.find((m) => m.member_order === r);
       html += `<div class="prev-round">
-        <div class="prev-round-label">Awaiting payout release</div>
+        <div class="prev-round-label">Previous round</div>
         <div class="prev-round-title">Round ${r}${
         recip ? ` — ${escapeHtml(recip.name)}` : ""
-      } ${ROUND_PILL.payout_pending}</div>
+      } ${ROUND_PILL[C.roundStatus(state.contributions, rounds, r)]}</div>
         <div class="prev-round-meta">${C.peso(collected)} / ${C.peso(
         C.GOAL_PER_ROUND
       )} · historical, not part of Round ${curRound}</div>
-        ${
-          unlocked
-            ? `<div class="prev-round-actions">
-                 <button class="contribute-btn payout-btn" onclick="PowerFund.openPayoutModal(${r})">Mark payout released</button>
-               </div>`
-            : ""
-        }
       </div>`;
     });
 
@@ -1473,9 +2065,21 @@
           ${
             payout.released
               ? `<div class="payout-status-box">
-                   <div>✅ Payout released ${
-                     payout.released_on ? `on ${payoutDateText(payout.released_on)}` : ""
-                   }${payout.note ? ` — ${escapeHtml(payout.note)}` : ""}</div>
+                   <div>✅ Payout released to <b>${escapeHtml(
+                     payoutRecipientName(payout)
+                   )}</b>${
+                  payout.amount != null ? `, ${C.peso(payout.amount)}` : ""
+                }${
+                  payout.released_on
+                    ? ` on ${payoutDateText(payout.released_on)}`
+                    : ""
+                }${payout.note ? ` — ${escapeHtml(payout.note)}` : ""}${
+                  payout.receipt_url
+                    ? ` · <button type="button" class="ph-receipt" onclick="PowerFund.openLightbox('${inlineArg(
+                        payout.receipt_url
+                      )}')">🧾 receipt</button>`
+                    : ""
+                }</div>
                    ${
                      unlocked
                        ? `<button class="reset-btn" onclick="PowerFund.unmarkPayoutReleased(${r})">Undo</button>`
@@ -1496,6 +2100,35 @@
         </div>
       </div>`;
     }
+
+    // ---- Payout history: released payouts, recipient/amount as recorded ----
+    (function () {
+      const released = (state.payouts || [])
+        .filter((p) => p.released)
+        .sort((a, b) => a.round_number - b.round_number);
+      if (!released.length) return;
+      html += `<p class="section-label">Payout history</p><div class="payout-history">`;
+      released.forEach((p) => {
+        const amt =
+          p.amount != null ? C.peso(p.amount) : C.peso(C.GOAL_PER_ROUND);
+        html += `<div class="payout-history-row">
+          <div class="ph-main"><b>Round ${p.round_number}</b> — ${escapeHtml(
+          payoutRecipientName(p)
+        )} · ${amt}</div>
+          <div class="ph-meta">${
+            p.released_on ? payoutDateText(p.released_on) : "date not recorded"
+          }${p.note ? ` · ${escapeHtml(p.note)}` : ""}</div>
+          ${
+            p.receipt_url
+              ? `<button type="button" class="ph-receipt" onclick="PowerFund.openLightbox('${inlineArg(
+                  p.receipt_url
+                )}')">🧾 View receipt</button>`
+              : ""
+          }
+        </div>`;
+      });
+      html += `</div>`;
+    })();
 
     // activity log
     html += (function () {
@@ -1519,11 +2152,18 @@
                   .map(
                     (e) => `
                 <div class="activity-item">
-                  <span class="activity-time">${formatDateTime(e.created_at)}</span>
+                  <span class="activity-time">${escapeHtml(
+                    activityTimeLabel(e.created_at)
+                  )}</span>
                   <span class="activity-text">${escapeHtml(e.message)}</span>
                 </div>`
                   )
-                  .join("")}</div>`
+                  .join("")}</div>
+                ${
+                  log.length >= activityLogLimit
+                    ? `<button type="button" class="attention-more activity-more" onclick="PowerFund.loadMoreActivity()">Show older entries</button>`
+                    : ""
+                }`
           }
         </div>
       </div>`;
@@ -1543,19 +2183,16 @@
 
     if (unlocked) {
       html += `<div class="reset-row">
-        ${
-          resetConfirming
-            ? `<span class="reset-confirm-text">Reset everything?</span>
-               <button class="reset-btn confirm-yes" onclick="PowerFund.doReset()">Yes, reset</button>
-               <button class="reset-btn" onclick="PowerFund.cancelResetConfirm()">Cancel</button>`
-            : `<button class="reset-btn" onclick="PowerFund.openQrModal()">Payment QR</button>
-               <button class="reset-btn" onclick="PowerFund.openEditNamesModal()">Edit names</button>
-               <button class="reset-btn" onclick="PowerFund.exportCsv()">Export CSV</button>
-               <button class="reset-btn" onclick="PowerFund.downloadBackup()">Download backup</button>
-               <button class="reset-btn" onclick="PowerFund.pickRestoreFile()">Restore backup</button>
-               <button class="reset-btn" onclick="PowerFund.openChangePin()">Change PIN</button>
-               <button class="reset-btn" onclick="PowerFund.resetData()">Reset all data</button>`
-        }
+        <button class="reset-btn" onclick="PowerFund.openQrModal()">Payment QR</button>
+        <button class="reset-btn" onclick="PowerFund.openEditNamesModal()">Edit names</button>
+        <button class="reset-btn" onclick="PowerFund.exportCsv()">Export CSV</button>
+        <button class="reset-btn" onclick="PowerFund.downloadBackup()">Download backup</button>
+        <button class="reset-btn" onclick="PowerFund.pickRestoreFile()">Restore backup</button>
+        <button class="reset-btn" onclick="PowerFund.openChangePin()">Change PIN</button>
+      </div>
+      <div class="danger-zone">
+        <span class="danger-zone-label">⚠ Danger zone</span>
+        <button class="reset-btn danger" onclick="PowerFund.resetData()">Reset all data</button>
       </div>`;
     }
 
@@ -1695,7 +2332,7 @@
               rejectConfirming
                 ? `<p class="reject-confirm-text">Reject this claim? ${
                     multi ? `All ${rc.length} cycles go` : "It goes"
-                  } back to unpaid and the screenshot is removed.</p>
+                  } back to unpaid. The screenshot is kept in the archive.</p>
                    <button class="modal-btn-primary confirm-yes" onclick="PowerFund.doRejectReview()" ${
                      busy ? "disabled" : ""
                    }>Yes, reject</button>
@@ -1754,16 +2391,42 @@
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
           <h3 id="dlg-title">Mark payout released</h3>
           <p class="modal-sub">Round ${payoutModalRound} — ${
-        recipient ? escapeHtml(recipient.name) : ""
-      } · ${C.peso(C.GOAL_PER_ROUND)}</p>
-          <textarea class="payout-note-input" placeholder="Optional: what did they buy? (e.g. BLUETTI AC70P, ₱32,000)"
+        recipient ? escapeHtml(recipient.name) : "—"
+      } · recorded now so it stays correct if the order changes later</p>
+
+          <label class="payout-field-label" for="payout-amount">Amount paid out</label>
+          <input id="payout-amount" class="pin-input payout-amount-input" type="text"
+                 inputmode="decimal" value="${escapeHtml(payoutAmountValue)}"
+                 oninput="PowerFund.setPayoutAmount(this.value)"
+                 placeholder="${C.GOAL_PER_ROUND}">
+          <p class="payout-field-hint">Defaults to ${C.peso(
+            C.GOAL_PER_ROUND
+          )} (the round target). This is a record only — it never changes funding.</p>
+
+          <label class="payout-field-label" for="payout-note">Note (optional)</label>
+          <textarea id="payout-note" class="payout-note-input" placeholder="What did they buy? (e.g. BLUETTI AC70P, ₱32,000)"
                     oninput="PowerFund.setPayoutNote(this.value)">${escapeHtml(
                       payoutNoteValue
                     )}</textarea>
+
+          <label class="proof-upload">
+            ${
+              payoutReceiptPreview
+                ? `<img src="${payoutReceiptPreview}" class="proof-preview" alt="Receipt preview">`
+                : `<span class="proof-upload-label">🧾 Attach a receipt (optional)</span>`
+            }
+            <input type="file" accept="image/*" onchange="PowerFund.onPayoutReceiptSelected(this)" hidden>
+          </label>
+          ${
+            payoutReceiptPreview
+              ? `<button type="button" class="zoom-link" onclick="PowerFund.removePayoutReceipt()">Remove receipt</button>`
+              : ""
+          }
+
           <div class="modal-actions">
             <button class="modal-btn-primary" onclick="PowerFund.markPayoutReleased()" ${
               busy ? "disabled" : ""
-            }>Confirm released</button>
+            }>${busy ? "Working…" : "Confirm released"}</button>
             <button class="modal-btn-secondary" onclick="PowerFund.closePayoutModal()">Cancel</button>
           </div>
         </div>
@@ -1912,6 +2575,39 @@
       </div>`;
     }
 
+    // Destructive-action confirmation (revert / undo release / reset / restore)
+    if (confirmDialog) {
+      const d = confirmDialog;
+      html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeConfirm()">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <h3 id="dlg-title">${escapeHtml(d.title)}</h3>
+          <div class="confirm-body">${d.bodyHtml}</div>
+          ${
+            d.requireType
+              ? `<input type="text" class="pin-input confirm-type-input" autocomplete="off" autocapitalize="characters" spellcheck="false"
+                     placeholder="Type ${escapeHtml(d.requireType)}" value="${escapeHtml(d.typeValue)}"
+                     oninput="PowerFund.setConfirmType(this.value)">`
+              : ""
+          }
+          ${
+            d.requirePin
+              ? `<input type="password" inputmode="numeric" class="pin-input"
+                     placeholder="Treasurer PIN" value="${escapeHtml(d.pinValue)}"
+                     oninput="PowerFund.setConfirmPin(this.value)"
+                     onkeydown="if(event.key==='Enter') PowerFund.submitConfirm()">`
+              : ""
+          }
+          ${d.error ? `<p class="pin-error">${escapeHtml(d.error)}</p>` : ""}
+          <div class="modal-actions">
+            <button class="modal-btn-primary confirm-yes" onclick="PowerFund.submitConfirm()" ${
+              busy ? "disabled" : ""
+            }>${escapeHtml(d.confirmLabel)}</button>
+            <button class="modal-btn-secondary" onclick="PowerFund.closeConfirm()">Cancel</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
     // Zoom lightbox — sits above every modal
     if (lightboxSrc) {
       html += `<div class="lightbox-overlay" role="dialog" aria-modal="true" aria-label="Enlarged image" tabindex="-1" onclick="PowerFund.closeLightbox()">
@@ -2004,9 +2700,11 @@
       render();
       init();
     },
+    dismissWarning,
     toggleUnlock,
     toggleRound,
     toggleActivityLog,
+    loadMoreActivity,
     openLightbox,
     closeLightbox,
     openQrModal,
@@ -2026,16 +2724,21 @@
     openReviewModal,
     closeReviewModal,
     confirmReview,
+    confirmBatch,
+    expandAttentionQueue,
+    toggleOverdueList,
     rejectReview,
     cancelRejectConfirm,
     doRejectReview,
     moveMember,
     resetData,
-    cancelResetConfirm,
-    doReset,
     exportCsv,
     downloadBackup,
     pickRestoreFile,
+    closeConfirm,
+    setConfirmType,
+    setConfirmPin,
+    submitConfirm,
     closePinModal,
     openChangePin,
     submitPin,
@@ -2046,11 +2749,16 @@
     closePayoutModal,
     markPayoutReleased,
     unmarkPayoutReleased,
+    onPayoutReceiptSelected,
+    removePayoutReceipt,
     askStartNextRound,
     cancelStartRound,
     confirmStartRound,
     setPayoutNote: (v) => {
       payoutNoteValue = v;
+    },
+    setPayoutAmount: (v) => {
+      payoutAmountValue = v;
     },
     openShareModal,
     closeShareModal,

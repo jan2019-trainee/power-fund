@@ -230,6 +230,12 @@ body {
   align-items: center;
   gap: 7px;
   transition: border-color 0.15s ease;
+  /* Push flush right even when the header wraps to two lines on narrow
+     screens (title/subtitle can be wider than the available row) — without
+     this it lands flush left under the title instead, which reads as
+     unbalanced. Redundant with .header's justify-content:space-between on a
+     single row, so no visual change there. */
+  margin-left: auto;
 }
 .unlock-btn:hover { border-color: var(--accent); }
 .unlock-btn.unlocked { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }

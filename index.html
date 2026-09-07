@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="color-scheme" content="dark light">
   <meta name="theme-color" content="#0D1B2A">
   <title>Power Fund Tracker</title>
@@ -20,7 +20,7 @@
 </head>
 <body>
   <div class="wrap" id="app">
-    <div class="loading">Loading fund data…</div>
+    <div class="loading"><div class="loading-spinner" aria-hidden="true"></div><p>Loading fund data…</p></div>
   </div>
 
   <!-- Supabase client (UMD build exposes window.supabase). Vendored locally so

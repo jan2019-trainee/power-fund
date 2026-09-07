@@ -1760,9 +1760,12 @@
     html += `<div class="header">
       <div>
         <p class="title">⚡ Power Fund</p>
-        <p class="subtitle">${members.length}-member sinking fund · ${C.peso(
-      C.CONTRIBUTION_AMOUNT
-    )} on the 15th &amp; end of every month</p>
+        <p class="subtitle">${escapeHtml(
+          (window.APP_CONFIG && window.APP_CONFIG.SUBTITLE) ||
+            `${members.length}-member sinking fund · ${C.peso(
+              C.CONTRIBUTION_AMOUNT
+            )} on the 15th & end of every month`
+        )}</p>
       </div>
       <button class="unlock-btn ${unlocked ? "unlocked" : ""}" onclick="PowerFund.toggleUnlock()">
         ${unlocked ? "🔓 Treasurer mode on" : "🔒 Unlock treasurer mode"}

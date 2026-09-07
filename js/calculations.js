@@ -97,6 +97,33 @@ window.Calc = (function () {
     return row ? row.proof_url : null;
   }
 
+  /**
+   * The set of cycles a treasurer should review together when clicking one
+   * pending cycle: the maximal contiguous run of that member's PENDING cycles
+   * that share the same proof screenshot and the same round (i.e. one advance
+   * payment). Returns [cycleNumber] when it isn't pending.
+   */
+  function pendingRun(contributions, memberId, cycleNumber) {
+    const row = contributionFor(contributions, memberId, cycleNumber);
+    if (!row || row.status !== STATUS_PENDING) return [cycleNumber];
+    const proof = row.proof_url || null;
+    const round = roundOfCycle(cycleNumber);
+    const sameBatch = (c) => {
+      if (c < 1 || c > TOTAL_CYCLES || roundOfCycle(c) !== round) return false;
+      const r = contributionFor(contributions, memberId, c);
+      return (
+        r && r.status === STATUS_PENDING && (r.proof_url || null) === proof
+      );
+    };
+    let lo = cycleNumber;
+    let hi = cycleNumber;
+    while (sameBatch(lo - 1)) lo--;
+    while (sameBatch(hi + 1)) hi++;
+    const out = [];
+    for (let c = lo; c <= hi; c++) out.push(c);
+    return out;
+  }
+
   // ---- Totals --------------------------------------------------------
   /** Total pesos confirmed paid across the whole fund. */
   function totalCollected(contributions) {
@@ -440,6 +467,7 @@ window.Calc = (function () {
     contributionFor,
     statusOf,
     proofOf,
+    pendingRun,
 
     totalCollected,
     totalPerMember,

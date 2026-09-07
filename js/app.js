@@ -34,7 +34,7 @@
   let modalProofFile = null; // File chosen in the contribute modal
   let modalProofPreview = null; // object URL for the local preview
 
-  let reviewTarget = null; // { memberId, cycleNumber }
+  let reviewTarget = null; // { memberId, cycles: [n, ...] } — the whole advance batch
   let rejectConfirming = false;
   let resetConfirming = false;
   let startRoundConfirming = false; // inline confirm for "Start Next Round"
@@ -60,6 +60,9 @@
   let qrNewFile = null; // File the treasurer picked
   let qrNewPreview = null; // object URL for the preview
   let qrUploadMsg = null; // success / info line inside the QR panel
+
+  let contributePicker = null; // cycle number for the "who are you?" picker, or null
+  let modalWasOpen = false; // for moving focus into a dialog when it opens
 
   // ===================================================================
   // Small helpers
@@ -155,10 +158,40 @@
   // Contribute modal (member marks "I've sent this")
   // ===================================================================
   function openContributeModal(memberId, cycleNumber) {
+    // Same rule the cycle grid uses: can't pay into a round the treasurer
+    // hasn't started yet. Display guard only — no business logic here.
+    const cycleRound = C.roundOfCycle(cycleNumber);
+    if (
+      C.roundLifecycleEnabled(state.payouts) &&
+      cycleRound > C.currentRound(state.payouts, state.contributions)
+    ) {
+      return showError(
+        `Round ${cycleRound} hasn't started yet — the treasurer needs to start it first.`
+      );
+    }
+    contributePicker = null;
     modalTarget = { memberId, cycleNumber };
     modalCount = 1;
     clearProofSelection();
     render();
+  }
+
+  /** "Record a contribution" → pick which member you are for a given cycle. */
+  function openContributePicker(cycleNumber) {
+    contributePicker = cycleNumber;
+    render();
+  }
+  function closeContributePicker() {
+    contributePicker = null;
+    render();
+  }
+  function pickContributor(memberId) {
+    const cyc = contributePicker;
+    contributePicker = null;
+    if (cyc == null) return render();
+    // Route through the same handler the cycle grid uses, so a treasurer gets
+    // the review / mark-paid behaviour and a member gets the contribute modal.
+    cellClicked(memberId, cyc);
   }
 
   function closeModal() {
@@ -325,7 +358,12 @@
   // Review modal (treasurer confirms / rejects a pending claim)
   // ===================================================================
   function openReviewModal(memberId, cycleNumber) {
-    reviewTarget = { memberId, cycleNumber };
+    // Review the whole advance batch (contiguous pending cycles, same proof)
+    // in one go, not cycle by cycle.
+    reviewTarget = {
+      memberId,
+      cycles: C.pendingRun(state.contributions, memberId, cycleNumber),
+    };
     rejectConfirming = false;
     render();
   }
@@ -338,19 +376,24 @@
 
   async function confirmReview() {
     if (!reviewTarget || busy) return;
-    const { memberId, cycleNumber } = reviewTarget;
+    const { memberId, cycles } = reviewTarget;
     busy = true;
     render();
     try {
-      const row = C.contributionFor(state.contributions, memberId, cycleNumber);
-      if (row) {
-        await window.DB.updateContribution(row.id, {
-          status: C.STATUS_PAID,
-          paid_at: new Date().toISOString(),
-        });
+      const now = new Date().toISOString();
+      for (const c of cycles) {
+        const row = C.contributionFor(state.contributions, memberId, c);
+        if (row && row.status === C.STATUS_PENDING) {
+          await window.DB.updateContribution(row.id, {
+            status: C.STATUS_PAID,
+            paid_at: now,
+          });
+        }
       }
       await logActivity(
-        `Treasurer confirmed ${memberName(memberId)}'s cycle ${cycleNumber} as paid`
+        `Treasurer confirmed ${memberName(memberId)}'s ${cycleRangeLabel(
+          cycles
+        )} as paid`
       );
       closeReviewModal();
       await reload();
@@ -373,15 +416,20 @@
 
   async function doRejectReview() {
     if (!reviewTarget || busy) return;
-    const { memberId, cycleNumber } = reviewTarget;
+    const { memberId, cycles } = reviewTarget;
     busy = true;
     render();
     try {
-      const row = C.contributionFor(state.contributions, memberId, cycleNumber);
-      await window.DB.deleteContribution(memberId, cycleIdByNumber[cycleNumber]);
-      if (row && row.proof_url) await window.DB.deleteProof(row.proof_url);
+      const proof = C.proofOf(state.contributions, memberId, cycles[0]);
+      for (const c of cycles) {
+        await window.DB.deleteContribution(memberId, cycleIdByNumber[c]);
+      }
+      // The batch shares one screenshot — remove it once, after the rows are gone.
+      if (proof) await window.DB.deleteProof(proof);
       await logActivity(
-        `Treasurer rejected ${memberName(memberId)}'s cycle ${cycleNumber} claim`
+        `Treasurer rejected ${memberName(memberId)}'s ${cycleRangeLabel(
+          cycles
+        )} claim`
       );
       closeReviewModal();
       await reload();
@@ -391,6 +439,13 @@
       busy = false;
       render();
     }
+  }
+
+  /** "cycle 3" or "cycles 3–5" for activity-log / modal copy. */
+  function cycleRangeLabel(cycles) {
+    if (!cycles || !cycles.length) return "cycle";
+    if (cycles.length === 1) return `cycle ${cycles[0]}`;
+    return `cycles ${cycles[0]}–${cycles[cycles.length - 1]}`;
   }
 
   // ===================================================================
@@ -999,8 +1054,45 @@
       editNamesModalOpen ||
       lightboxSrc ||
       startRoundConfirming ||
-      qrModalOpen
+      qrModalOpen ||
+      contributePicker != null
     );
+  }
+
+  /** Close whatever dialog is on top (used by the Escape key). */
+  function closeTopModal() {
+    if (lightboxSrc) return closeLightbox();
+    if (contributePicker != null) return closeContributePicker();
+    if (modalTarget) return closeModal();
+    if (reviewTarget) return closeReviewModal();
+    if (pinModalMode) return closePinModal();
+    if (payoutModalRound) return closePayoutModal();
+    if (qrModalOpen) return closeQrModal();
+    if (editNamesModalOpen) return closeEditNamesModal();
+    if (shareModalOpen) return closeShareModal();
+    if (startRoundConfirming) return cancelStartRound();
+  }
+
+  /** Keep Tab focus inside the open dialog. */
+  function trapFocus(e) {
+    const root =
+      document.querySelector(".lightbox-overlay") ||
+      document.querySelector(".modal-overlay");
+    if (!root) return;
+    const els = root.querySelectorAll(
+      'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex="0"]'
+    );
+    if (!els.length) return;
+    const first = els[0];
+    const last = els[els.length - 1];
+    const active = document.activeElement;
+    if (e.shiftKey && (active === first || !root.contains(active))) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && (active === last || !root.contains(active))) {
+      e.preventDefault();
+      first.focus();
+    }
   }
 
   function render() {
@@ -1034,6 +1126,30 @@
 
     const pendingCount = C.pendingCount(state.contributions);
     const overdueCount = C.totalOverdueCount(state.contributions, state.cycles, state.members);
+    const remainingToGo = Math.max(0, C.GOAL_PER_ROUND - curCollected);
+
+    // The cycle to act on: earliest not-fully-paid cycle in the active round.
+    // Display helper only — cycle/round membership is unchanged.
+    let payCycle = null;
+    if (!allDone && curStatus === "collecting") {
+      const range = C.roundCycleRange(curRound);
+      for (let c = range.startCycle; c <= range.endCycle; c++) {
+        if (
+          members.some(
+            (m) => C.statusOf(state.contributions, m.id, c) !== C.STATUS_PAID
+          )
+        ) {
+          payCycle = c;
+          break;
+        }
+      }
+    }
+    const payCycleDue = payCycle ? C.dueDateOf(state.cycles, payCycle) : null;
+    const cyclePaidCount = payCycle
+      ? members.filter(
+          (m) => C.statusOf(state.contributions, m.id, payCycle) === C.STATUS_PAID
+        ).length
+      : members.length;
 
     if (!hasAutoOpened) {
       openRound = curRound;
@@ -1089,48 +1205,91 @@
       html += `<div class="save-error-banner">⚠️ ${escapeHtml(appError)}</div>`;
     }
 
-    // Previous round(s) still waiting for their payout — shown separately so
-    // nobody confuses last round's ₱30,000 with the active round's progress.
-    // Starting the next round never releases these; the treasurer still uses
-    // "Mark payout released" here (same modal as always).
-    prevPendingRounds.forEach((r) => {
-      const collected = C.roundCollected(state.contributions, r);
-      const recip = members.find((m) => m.member_order === r);
-      html += `<div class="prev-round">
-        <div class="prev-round-label">Previous round — awaiting payout</div>
-        <div class="prev-round-title">Round ${r}${
-        recip ? ` — ${escapeHtml(recip.name)}` : ""
-      } ${ROUND_PILL.payout_pending}</div>
-        <div class="prev-round-meta">${C.peso(collected)} / ${C.peso(C.GOAL_PER_ROUND)}</div>
-        ${
-          unlocked
-            ? `<div class="prev-round-actions">
-                 <button class="contribute-btn payout-btn" onclick="PowerFund.openPayoutModal(${r})">Mark payout released</button>
-               </div>`
-            : ""
-        }
-      </div>`;
-    });
-
+    // ---- Current round hero: round → money → to-go → who paid → CTA ----
     html += `<div class="battery-hero">
-      <div class="battery-hero-top">
-        <div class="battery-amount">${
+      <div class="hero-round-line">
+        ${
           allDone
-            ? `${C.peso(C.TARGET_AMOUNT)} <span>/ ${C.peso(C.TARGET_AMOUNT)}</span>`
-            : `${C.peso(curCollected)} <span>/ ${C.peso(C.GOAL_PER_ROUND)}</span>`
-        }</div>
-        <div class="battery-meta">${
-          allDone
-            ? "✅ All 5 Rounds Completed"
-            : `Round ${curRound} of ${C.TOTAL_ROUNDS} &nbsp; ${ROUND_PILL[curStatus]}`
-        }</div>
+            ? `<span class="hero-round-num">✅ All ${C.TOTAL_ROUNDS} Rounds Completed</span>`
+            : `<span class="hero-round-num">Round ${curRound} of ${C.TOTAL_ROUNDS}</span> ${ROUND_PILL[curStatus]}`
+        }
       </div>
-      <div class="battery-shell"><div class="battery-fill" style="width:${pct}%"></div></div>
-      <div class="cycle-note">${C.peso(C.CONTRIBUTION_AMOUNT)} per person via QR to treasurer${
-      pendingCount
-        ? ` · <b style="color:var(--accent)">${pendingCount} pending review</b>`
-        : ""
-    }${overdueCount ? ` · <b style="color:#E15353">${overdueCount} overdue</b>` : ""}</div>
+      <div class="battery-amount">${
+        allDone
+          ? `${C.peso(C.TARGET_AMOUNT)} <span>/ ${C.peso(C.TARGET_AMOUNT)}</span>`
+          : `${C.peso(curCollected)} <span>/ ${C.peso(C.GOAL_PER_ROUND)}</span>`
+      }</div>
+      <div class="battery-shell" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(
+        pct
+      )}" aria-label="Round ${
+      allDone ? C.TOTAL_ROUNDS : curRound
+    } funding progress"><div class="battery-fill" style="width:${pct}%"></div></div>
+      <div class="hero-progress-meta">${
+        allDone
+          ? "Fund fully funded"
+          : `<b>${C.peso(remainingToGo)}</b> to go · ${Math.round(pct)}%`
+      }</div>
+      ${
+        pendingCount || overdueCount
+          ? `<div class="cycle-note">${
+              pendingCount
+                ? `<b style="color:var(--accent)">${pendingCount} pending treasurer review</b>`
+                : ""
+            }${pendingCount && overdueCount ? " · " : ""}${
+              overdueCount
+                ? `<b style="color:#E15353">${overdueCount} overdue</b>`
+                : ""
+            }</div>`
+          : ""
+      }
+      ${
+        payCycle
+          ? `<div class="cycle-status">
+               <div class="cycle-status-head">${
+                 payCycleDue ? C.formatDate(payCycleDue) : `Cycle ${payCycle}`
+               } · <b>${cyclePaidCount} / ${members.length} paid</b> this cycle</div>
+               <div class="cycle-status-chips">
+                 ${members
+                   .map((m) => {
+                     const s = C.statusOf(state.contributions, m.id, payCycle);
+                     const cls = s === 2 ? "paid" : s === 1 ? "pending" : "unpaid";
+                     const mark = s === 2 ? "✓" : s === 1 ? "…" : "✕";
+                     const word =
+                       s === 2
+                         ? "paid"
+                         : s === 1
+                         ? "sent, awaiting review"
+                         : "not paid";
+                     // Same rule as the Rounds & cycles grid: treasurer can act
+                     // on any chip, members only on their own unpaid one.
+                     const clickable = unlocked || s === 0;
+                     const action = !clickable
+                       ? ""
+                       : unlocked
+                       ? s === 1
+                         ? " — tap to review"
+                         : s === 2
+                         ? " — tap to mark unpaid"
+                         : " — tap to record as paid"
+                       : " — tap to record your payment";
+                     return `<button type="button" class="mini-chip ${cls}" ${
+                       clickable ? "" : "disabled"
+                     } onclick="PowerFund.cellClicked('${m.id}', ${payCycle})" aria-label="${escapeHtml(
+                       m.name
+                     )}: ${word}${action}">${mark} ${escapeHtml(m.name)}</button>`;
+                   })
+                   .join("")}
+               </div>
+             </div>`
+          : ""
+      }
+      ${
+        payCycle && (unlocked || cyclePaidCount < members.length)
+          ? `<button type="button" class="hero-cta" onclick="PowerFund.openContributePicker(${payCycle})">${
+              unlocked ? "＋ Record / review a payment" : "＋ Record a contribution"
+            }</button>`
+          : ""
+      }
       ${
         !allDone && unlocked && curStatus === "payout_pending"
           ? `<div class="hero-payout-actions">
@@ -1164,6 +1323,32 @@
       }
       <button class="share-btn" onclick="PowerFund.openShareModal()">📋 Copy status update</button>
     </div>`;
+
+    // Previous round(s) whose payout hasn't been released — shown AFTER the
+    // current round and styled as history, so last round's ₱30,000 is never
+    // mistaken for the active round's progress. Starting the next round never
+    // releases these; the treasurer still uses the same "Mark payout released"
+    // modal here.
+    prevPendingRounds.forEach((r) => {
+      const collected = C.roundCollected(state.contributions, r);
+      const recip = members.find((m) => m.member_order === r);
+      html += `<div class="prev-round">
+        <div class="prev-round-label">Awaiting payout release</div>
+        <div class="prev-round-title">Round ${r}${
+        recip ? ` — ${escapeHtml(recip.name)}` : ""
+      } ${ROUND_PILL.payout_pending}</div>
+        <div class="prev-round-meta">${C.peso(collected)} / ${C.peso(
+        C.GOAL_PER_ROUND
+      )} · historical, not part of Round ${curRound}</div>
+        ${
+          unlocked
+            ? `<div class="prev-round-actions">
+                 <button class="contribute-btn payout-btn" onclick="PowerFund.openPayoutModal(${r})">Mark payout released</button>
+               </div>`
+            : ""
+        }
+      </div>`;
+    });
 
     // member cards
     html += `<p class="section-label">Members</p><div class="member-grid">`;
@@ -1214,7 +1399,9 @@
       const endDue = C.dueDateOf(state.cycles, endCycle);
 
       html += `<div class="round">
-        <div class="round-header" onclick="PowerFund.toggleRound(${r})">
+        <div class="round-header" role="button" tabindex="0" aria-expanded="${
+          isOpen ? "true" : "false"
+        }" onclick="PowerFund.toggleRound(${r})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();PowerFund.toggleRound(${r})}">
           <div class="round-title"><span class="round-chevron ${
             isOpen ? "open" : ""
           }">▸</span> Round ${r} — ${recipient ? escapeHtml(recipient.name) : "—"} ${
@@ -1314,7 +1501,9 @@
     html += (function () {
       const log = state.activityLog || [];
       return `<div class="round activity-section">
-        <div class="round-header" onclick="PowerFund.toggleActivityLog()">
+        <div class="round-header" role="button" tabindex="0" aria-expanded="${
+          activityLogOpen ? "true" : "false"
+        }" onclick="PowerFund.toggleActivityLog()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();PowerFund.toggleActivityLog()}">
           <div class="round-title"><span class="round-chevron ${
             activityLogOpen ? "open" : ""
           }">▸</span> Activity log</div>
@@ -1343,12 +1532,12 @@
     html += `<div class="footer-note">
       <b>How this works</b>
       <ul class="how-it-works-list">
-        <li>Tap a cycle box → scan the QR → mark "I've sent this"</li>
-        <li>Treasurer reviews the screenshot, then confirms or rejects</li>
-        <li><span style="color:#E15353">Red</span> = overdue (still OK to pay late) · <span style="color:var(--accent)">Amber</span> = pending review</li>
-        <li>Once a round hits ${C.peso(
+        <li><b>Members:</b> tap <b>＋ Record a contribution</b> → scan the QR → attach your payment screenshot (required) → <b>I've sent this</b></li>
+        <li><b>Treasurer:</b> reviews the screenshot, then <b>Confirm</b> or <b>Reject</b>. Paying several cycles in one transfer is reviewed together</li>
+        <li><b>Cycle status:</b> ✓ paid · … waiting for treasurer review · ✕ not paid (overdue is still fine to pay late)</li>
+        <li><b>Round status:</b> each round targets ${C.peso(
           C.GOAL_PER_ROUND
-        )}, the treasurer marks the payout released</li>
+        )} — 🟢 Collecting → 🟡 Payout Pending → ✅ Completed. "Mark payout released" and "Start next round" are separate steps, so a previous round can stay Payout Pending while a new one collects</li>
       </ul>
     </div>`;
 
@@ -1387,8 +1576,8 @@
       const total = C.CONTRIBUTION_AMOUNT * modalCount;
       const qrUrl = qrImageUrl();
       html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeModal()">
-        <div class="modal">
-          <h3>Contribute — ${member ? escapeHtml(member.name) : ""}</h3>
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <h3 id="dlg-title">Contribute — ${member ? escapeHtml(member.name) : ""}</h3>
           <p class="modal-sub">${
             modalCount === 1
               ? `Cycle due ${due ? C.formatDate(due) : "—"}`
@@ -1397,19 +1586,22 @@
                 }`
           }</p>
           <p class="qr-scan-label">Scan to Pay</p>
-          <div class="qr-box">
-            ${
-              qrUrl
-                ? `<img src="${escapeHtml(
-                    qrUrl
-                  )}" alt="Payment QR code - tap to enlarge" class="zoomable" onclick="PowerFund.openLightbox('${inlineArg(
-                    qrUrl
-                  )}')" onerror="this.onerror=null;this.src='${inlineArg(
-                    FALLBACK_QR_URL
-                  )}'">`
-                : "QR code goes here - the treasurer needs to add the InstaPay/GCash QR image"
-            }
-          </div>
+          ${
+            qrUrl
+              ? `<button type="button" class="qr-box-btn" onclick="PowerFund.openLightbox('${inlineArg(
+                  qrUrl
+                )}')" aria-label="Payment QR code — activate to enlarge">
+                   <span class="qr-box">
+                     <img src="${escapeHtml(
+                       qrUrl
+                     )}" alt="Payment QR code" onerror="this.onerror=null;this.src='${inlineArg(
+                  FALLBACK_QR_URL
+                )}'">
+                   </span>
+                 </button>
+                 <p class="qr-hint">🔍 Tap the QR to enlarge</p>`
+              : `<div class="qr-box">QR code goes here — the treasurer needs to add the InstaPay/GCash QR image</div>`
+          }
           ${
             qrUrl
               ? `<a href="${escapeHtml(
@@ -1463,45 +1655,60 @@
 
     if (reviewTarget) {
       const member = state.members.find((m) => m.id === reviewTarget.memberId);
-      const due = C.dueDateOf(state.cycles, reviewTarget.cycleNumber);
-      const proof = C.proofOf(
-        state.contributions,
-        reviewTarget.memberId,
-        reviewTarget.cycleNumber
-      );
+      const rc = reviewTarget.cycles;
+      const firstDue = C.dueDateOf(state.cycles, rc[0]);
+      const lastDue = C.dueDateOf(state.cycles, rc[rc.length - 1]);
+      const total = C.CONTRIBUTION_AMOUNT * rc.length;
+      const proof = C.proofOf(state.contributions, reviewTarget.memberId, rc[0]);
+      const multi = rc.length > 1;
       html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeReviewModal()">
-        <div class="modal">
-          <h3>Review payment — ${member ? escapeHtml(member.name) : ""}</h3>
-          <p class="modal-sub">Cycle due ${
-            due ? C.formatDate(due) : "—"
-          } · ${C.peso(C.CONTRIBUTION_AMOUNT)}</p>
-          <div class="qr-box">
-            ${
-              proof
-                ? `<img src="${escapeHtml(
-                    proof
-                  )}" alt="Submitted payment screenshot — tap to enlarge" class="zoomable" onclick="PowerFund.openLightbox('${inlineArg(
-                    proof
-                  )}')">`
-                : "No screenshot attached — member confirmed by text only"
-            }
-          </div>
-          <div class="modal-meta">${
-            proof ? "Tap the screenshot to enlarge it. " : ""
-          }Check it matches ${C.peso(
-            C.CONTRIBUTION_AMOUNT
-          )} sent to the right account before confirming.</div>
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <h3 id="dlg-title">Review payment — ${member ? escapeHtml(member.name) : ""}</h3>
+          <p class="modal-sub">${
+            multi
+              ? `Cycles ${firstDue ? C.formatDate(firstDue) : "—"} – ${
+                  lastDue ? C.formatDate(lastDue) : "—"
+                }`
+              : `Cycle due ${firstDue ? C.formatDate(firstDue) : "—"}`
+          } · <b>${C.peso(total)}</b>${
+        multi ? ` · ${rc.length} payments in one transfer` : ""
+      }</p>
+          ${
+            proof
+              ? `<button type="button" class="qr-box-btn" onclick="PowerFund.openLightbox('${inlineArg(
+                  proof
+                )}')" aria-label="Submitted payment screenshot — activate to enlarge">
+                   <span class="qr-box"><img src="${escapeHtml(
+                     proof
+                   )}" alt="Submitted payment screenshot"></span>
+                 </button>
+                 <p class="qr-hint">🔍 Tap the screenshot to enlarge</p>`
+              : `<div class="qr-box">No screenshot attached — member confirmed by text only</div>`
+          }
+          <div class="modal-meta">Check the screenshot matches <b>${C.peso(
+            total
+          )}</b> sent to the right account before confirming${
+        multi ? ` — this approves all ${rc.length} cycles at once` : ""
+      }.</div>
           <div class="modal-actions">
             ${
               rejectConfirming
-                ? `<p class="reject-confirm-text">Reject this claim? It goes back to unpaid and the screenshot is removed.</p>
+                ? `<p class="reject-confirm-text">Reject this claim? ${
+                    multi ? `All ${rc.length} cycles go` : "It goes"
+                  } back to unpaid and the screenshot is removed.</p>
                    <button class="modal-btn-primary confirm-yes" onclick="PowerFund.doRejectReview()" ${
                      busy ? "disabled" : ""
                    }>Yes, reject</button>
                    <button class="modal-btn-secondary" onclick="PowerFund.cancelRejectConfirm()">Never mind</button>`
                 : `<button class="modal-btn-primary" onclick="PowerFund.confirmReview()" ${
                     busy ? "disabled" : ""
-                  }>${busy ? "Working…" : "Confirm as paid"}</button>
+                  }>${
+                    busy
+                      ? "Working…"
+                      : multi
+                      ? `Confirm all ${rc.length} as paid`
+                      : "Confirm as paid"
+                  }</button>
                    <button class="modal-btn-secondary reject" onclick="PowerFund.rejectReview()">Reject</button>
                    <button class="modal-btn-secondary" onclick="PowerFund.closeReviewModal()">Cancel</button>`
             }
@@ -1523,8 +1730,8 @@
         change: "Set a new PIN. This replaces the current one for everyone.",
       };
       html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closePinModal()">
-        <div class="modal">
-          <h3>${titles[pinModalMode]}</h3>
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <h3 id="dlg-title">${titles[pinModalMode]}</h3>
           <p class="modal-sub">${subs[pinModalMode]}</p>
           <input type="password" inputmode="numeric" class="pin-input" placeholder="PIN" value="${escapeHtml(
             pinInputValue
@@ -1544,8 +1751,8 @@
     if (payoutModalRound) {
       const recipient = members.find((m) => m.member_order === payoutModalRound);
       html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closePayoutModal()">
-        <div class="modal">
-          <h3>Mark payout released</h3>
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <h3 id="dlg-title">Mark payout released</h3>
           <p class="modal-sub">Round ${payoutModalRound} — ${
         recipient ? escapeHtml(recipient.name) : ""
       } · ${C.peso(C.GOAL_PER_ROUND)}</p>
@@ -1565,8 +1772,8 @@
 
     if (shareModalOpen) {
       html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeShareModal()">
-        <div class="modal">
-          <h3>Status update</h3>
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <h3 id="dlg-title">Status update</h3>
           <p class="modal-sub">Copy this and paste it into your group chat</p>
           <textarea id="shareTextArea" class="share-text-area" readonly>${escapeHtml(
             generateStatusText()
@@ -1583,8 +1790,8 @@
     if (editNamesModalOpen) {
       const ordered = sortedMembers();
       html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeEditNamesModal()">
-        <div class="modal edit-names-modal">
-          <h3>Edit member names</h3>
+        <div class="modal edit-names-modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <h3 id="dlg-title">Edit member names</h3>
           <p class="modal-sub">Updates apply everywhere — payment history stays linked to each person.</p>
           ${ordered
             .map(
@@ -1613,8 +1820,8 @@
       const usingCustom = !!(state.settings && state.settings.qr_code_url);
       const updatedAt = state.settings && state.settings.qr_updated_at;
       html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeQrModal()">
-        <div class="modal">
-          <h3>Payment QR code</h3>
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <h3 id="dlg-title">Payment QR code</h3>
           <p class="modal-sub">Members scan this to pay the treasurer. Replacing it updates every member's app.</p>
           ${
             qrUploadMsg
@@ -1663,9 +1870,51 @@
       </div>`;
     }
 
+    // "Record a contribution" — pick which member you are
+    if (contributePicker != null) {
+      const cyc = contributePicker;
+      const due = C.dueDateOf(state.cycles, cyc);
+      html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeContributePicker()">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <h3 id="dlg-title">${unlocked ? "Record / review a payment" : "Record a contribution"}</h3>
+          <p class="modal-sub">${
+            due ? `Cycle due ${C.formatDate(due)}` : `Cycle ${cyc}`
+          } · ${C.peso(C.CONTRIBUTION_AMOUNT)} each — ${
+        unlocked ? "tap a member to record or review" : "tap your name"
+      }</p>
+          <div class="picker-list">
+            ${members
+              .map((m) => {
+                const s = C.statusOf(state.contributions, m.id, cyc);
+                const cls = s === 2 ? "paid" : s === 1 ? "pending" : "unpaid";
+                let status =
+                  s === 2
+                    ? "✓ Paid"
+                    : s === 1
+                    ? "… Sent — awaiting review"
+                    : "Not paid yet";
+                const clickable = unlocked || s === 0;
+                if (unlocked && s === 1) status += " · tap to review";
+                else if (unlocked && s === 2) status += " · tap to undo";
+                return `<button type="button" class="picker-row ${cls}" ${
+                  clickable ? "" : "disabled"
+                } onclick="PowerFund.pickContributor('${m.id}')">
+                  <span class="picker-name">${escapeHtml(m.name)}</span>
+                  <span class="picker-status">${status}</span>
+                </button>`;
+              })
+              .join("")}
+          </div>
+          <div class="modal-actions">
+            <button class="modal-btn-secondary" onclick="PowerFund.closeContributePicker()">Close</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
     // Zoom lightbox — sits above every modal
     if (lightboxSrc) {
-      html += `<div class="lightbox-overlay" onclick="PowerFund.closeLightbox()">
+      html += `<div class="lightbox-overlay" role="dialog" aria-modal="true" aria-label="Enlarged image" tabindex="-1" onclick="PowerFund.closeLightbox()">
         <button class="lightbox-close" onclick="PowerFund.closeLightbox()">✕ Close</button>
         <img src="${escapeHtml(
           lightboxSrc
@@ -1674,6 +1923,29 @@
     }
 
     app.innerHTML = html;
+
+    // Move focus into a dialog the first render it appears (a11y).
+    const modalNow = isAnyModalOpen();
+    if (modalNow && !modalWasOpen) {
+      requestAnimationFrame(() => {
+        const root =
+          document.querySelector(".lightbox-overlay") ||
+          document.querySelector(".modal-overlay");
+        if (!root) return;
+        const target =
+          root.querySelector(
+            'input:not([type="file"]):not([disabled]), textarea:not([disabled])'
+          ) ||
+          root.querySelector('[tabindex="-1"]') ||
+          root;
+        try {
+          target.focus();
+        } catch (e) {
+          /* no-op */
+        }
+      });
+    }
+    modalWasOpen = modalNow;
   }
 
   // ===================================================================
@@ -1708,9 +1980,18 @@
       }
     });
 
-    // Esc closes the zoom lightbox.
+    // Esc closes the top dialog; Tab is trapped inside it.
     document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && lightboxSrc) closeLightbox();
+      if (e.key === "Escape") {
+        if (lightboxSrc || isAnyModalOpen()) {
+          e.preventDefault();
+          closeTopModal();
+        }
+        return;
+      }
+      if (e.key === "Tab" && (lightboxSrc || isAnyModalOpen())) {
+        trapFocus(e);
+      }
     });
   }
 
@@ -1736,6 +2017,9 @@
     cellClicked,
     openContributeModal,
     closeModal,
+    openContributePicker,
+    closeContributePicker,
+    pickContributor,
     adjustModalCount,
     onProofSelected,
     markPending,

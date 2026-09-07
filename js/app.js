@@ -1645,7 +1645,7 @@
 
     const members = sortedMembers();
     const rounds = state.payouts;
-    const curCycle = C.currentCycle(state.cycles); // date-driven: due countdown + row highlight only
+    const curCycle = C.currentCycle(state.cycles); // date-driven: cycle-row highlight only
 
     // Round state is DB-backed (payouts.started_at / .released), so it survives
     // refresh and matches on every device. Each round's money total comes only
@@ -1758,11 +1758,14 @@
     let html = "";
 
     html += `<div class="header">
-      <div>
+      <div class="header-titles">
         <p class="title">⚡ Power Fund</p>
-        <p class="subtitle">${members.length}-member sinking fund · ${C.peso(
-      C.CONTRIBUTION_AMOUNT
-    )} on the 15th &amp; end of every month</p>
+        <p class="subtitle">${escapeHtml(
+          (window.APP_CONFIG && window.APP_CONFIG.SUBTITLE) ||
+            `${members.length}-member sinking fund · ${C.peso(
+              C.CONTRIBUTION_AMOUNT
+            )} on the 15th & end of every month`
+        )}</p>
       </div>
       <button class="unlock-btn ${unlocked ? "unlocked" : ""}" onclick="PowerFund.toggleUnlock()">
         ${unlocked ? "🔓 Treasurer mode on" : "🔒 Unlock treasurer mode"}
@@ -1794,38 +1797,10 @@
       return `<button type="button" class="my-status-setup" onclick="PowerFund.openWhoAmIPicker()">👋 Which member are you? Tap to see your personal status.</button>`;
     })();
 
-    // due countdown (only while the active round is still collecting)
-    html += (function () {
-      if (allDone || curStatus !== "collecting") return "";
-      // Skip when the My-status card above is already announcing this exact
-      // same cycle's due date ("🟡 Payment due ..."). They only diverge when
-      // this member (or the whole group) has moved ahead of the fund's
-      // date-driven "current" cycle — e.g. everyone already paid it early —
-      // in which case payCycle != curCycle and both banners stay, because
-      // they're then reporting genuinely different dates.
-      if (myMember && myStatus && myStatus.kind === "due" && payCycle === curCycle) {
-        return "";
-      }
-      const today = C.startOfDay(new Date());
-      const due = C.dueDateOf(state.cycles, curCycle);
-      if (!due) return "";
-      const daysUntil = Math.round((due - today) / 86400000);
-      let label, cls;
-      if (daysUntil <= 0) {
-        label = "Due today";
-        cls = "due-urgent";
-      } else if (daysUntil === 1) {
-        label = "Due tomorrow";
-        cls = "due-urgent";
-      } else if (daysUntil <= 3) {
-        label = `Due in ${daysUntil} days`;
-        cls = "due-soon";
-      } else {
-        label = `Due in ${daysUntil} days`;
-        cls = "due-normal";
-      }
-      return `<div class="due-countdown ${cls}">⏰ ${label} — ${C.formatDate(due)}</div>`;
-    })();
+    // The old standalone due-countdown banner was removed — the same date is
+    // always visible a little further down, either on the My-status card
+    // (once a member is identified) or on the round card's own
+    // "<date> · N/5 paid this cycle" line and the matching accordion row.
 
     if (appError) {
       html += `<div class="save-error-banner">⚠️ ${escapeHtml(appError)}</div>`;

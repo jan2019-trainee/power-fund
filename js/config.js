@@ -22,4 +22,10 @@ window.APP_CONFIG = {
   // app (Treasurer mode -> "Payment QR"), which stores it in Supabase so all
   // members see the same image. Replace assets/gcash-qr.jpg to change this default.
   QR_IMAGE_URL: "assets/gcash-qr.jpg",
+
+  // Subtitle shown under the "⚡ Power Fund" title on every page load, e.g.
+  // your group's name for this fund. Leave blank ("") to fall back to the
+  // auto-generated "N-member sinking fund · ₱X on the 15th & end of every
+  // month" summary instead.
+  SUBTITLE: "ViTAMiN Fund 2027",
 };

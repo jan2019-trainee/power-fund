@@ -86,20 +86,6 @@ body {
   flex-wrap: wrap;
 }
 
-.due-countdown {
-  margin-bottom: 16px;
-  padding: 12px 16px;
-  border-radius: 10px;
-  font-family: 'Space Grotesk', sans-serif;
-  font-weight: 600;
-  font-size: 15px;
-  text-align: center;
-  border: 1px solid var(--border);
-}
-.due-countdown.due-normal { background: var(--bg-card); color: var(--text-primary); }
-.due-countdown.due-soon { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
-.due-countdown.due-urgent { background: rgba(225,83,83,0.14); color: #E15353; border-color: #E15353; }
-
 /* ---- "My status" — personalized card for this device's remembered member ---- */
 .my-status-setup {
   display: block;
@@ -217,11 +203,19 @@ body {
 }
 .save-success-banner .warn-dismiss { color: var(--success); }
 
+.header-titles {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  min-width: 0;
+}
+
 .title {
   font-family: 'Space Grotesk', sans-serif;
   font-size: 26px;
   font-weight: 700;
-  margin: 0 0 4px;
+  margin: 0;
 }
 
 .subtitle {

@@ -18,6 +18,28 @@
     return (state && state.settings && state.settings.qr_code_url) || FALLBACK_QR_URL;
   }
 
+  // ---- "Which member is this device?" (display-only, per-device) --------
+  // A pure UI convenience: which member's status to highlight at the top of
+  // the page. Stored only in this browser's localStorage, never sent to
+  // Supabase, and never gates or changes any action — it only decides what
+  // the "My status" card shows. Absent/invalid value = card is just hidden.
+  const MY_MEMBER_KEY = "pf_my_member_id";
+  function lsGet(key) {
+    try {
+      return window.localStorage.getItem(key);
+    } catch (e) {
+      return null;
+    }
+  }
+  function lsSet(key, val) {
+    try {
+      if (val == null) window.localStorage.removeItem(key);
+      else window.localStorage.setItem(key, val);
+    } catch (e) {
+      /* private mode / storage blocked — non-fatal, card just won't persist */
+    }
+  }
+
   // ---- Data cache (filled by loadAll) ---------------------------------
   let state = null; // { members, cycles, contributions, payouts, activityLog, settings }
   let cycleIdByNumber = {}; // cycle_number -> cycle uuid  (for writes)
@@ -79,6 +101,9 @@
 
   let contributePicker = null; // cycle number for the "who are you?" picker, or null
   let modalWasOpen = false; // for moving focus into a dialog when it opens
+
+  let myMemberId = lsGet(MY_MEMBER_KEY); // this device's remembered member, or null
+  let whoAmIPickerOpen = false; // "Which member are you?" picker modal
 
   // ===================================================================
   // Small helpers
@@ -268,6 +293,27 @@
     // Route through the same handler the cycle grid uses, so a treasurer gets
     // the review / mark-paid behaviour and a member gets the contribute modal.
     cellClicked(memberId, cyc);
+  }
+
+  // ===================================================================
+  // "Which member are you?" — this device's remembered member (display only)
+  // ===================================================================
+  function openWhoAmIPicker() {
+    whoAmIPickerOpen = true;
+    render();
+  }
+  function closeWhoAmIPicker() {
+    whoAmIPickerOpen = false;
+    render();
+  }
+  function setMyMember(memberId) {
+    myMemberId = memberId || null;
+    lsSet(MY_MEMBER_KEY, myMemberId);
+    whoAmIPickerOpen = false;
+    render();
+  }
+  function clearMyMember() {
+    setMyMember(null);
   }
 
   function closeModal() {
@@ -1540,7 +1586,8 @@
       startRoundConfirming ||
       qrModalOpen ||
       confirmDialog ||
-      contributePicker != null
+      contributePicker != null ||
+      whoAmIPickerOpen
     );
   }
 
@@ -1549,6 +1596,7 @@
     if (lightboxSrc) return closeLightbox();
     if (confirmDialog) return closeConfirm();
     if (contributePicker != null) return closeContributePicker();
+    if (whoAmIPickerOpen) return closeWhoAmIPicker();
     if (modalTarget) return closeModal();
     if (reviewTarget) return closeReviewModal();
     if (pinModalMode) return closePinModal();
@@ -1642,6 +1690,59 @@
         ).length
       : members.length;
 
+    // ---- "My status" — personalized status for this device's remembered
+    // member (if any). Display only: derived entirely from data already
+    // computed above, never gates any action. ---------------------------
+    const myMember = myMemberId ? members.find((m) => m.id === myMemberId) : null;
+    let myStatus = null;
+    if (myMember) {
+      if (allDone) {
+        myStatus = {
+          kind: "done",
+          label: `🎉 All ${C.TOTAL_ROUNDS} rounds complete — thanks, ${escapeHtml(
+            myMember.name
+          )}!`,
+          actionCycle: null,
+        };
+      } else if (payCycle == null) {
+        // Current round is fully funded (payout pending) — since every cycle
+        // in it costs exactly members.length × CONTRIBUTION_AMOUNT to fund,
+        // that only happens once every member has paid every cycle in it.
+        myStatus = {
+          kind: "paid",
+          label: `🟢 You're paid up — Round ${curRound} is fully funded`,
+          actionCycle: null,
+        };
+      } else {
+        const myOverdue = C.memberOverdueCount(state.contributions, state.cycles, myMember.id);
+        const myCycleStatus = C.statusOf(state.contributions, myMember.id, payCycle);
+        const canAct = myCycleStatus === C.STATUS_UNPAID;
+        if (myOverdue > 0) {
+          myStatus = {
+            kind: "overdue",
+            label: `🔴 Payment overdue — ${myOverdue} cycle${
+              myOverdue === 1 ? "" : "s"
+            } unpaid past due`,
+            actionCycle: canAct ? payCycle : null,
+          };
+        } else if (myCycleStatus === C.STATUS_PENDING) {
+          myStatus = {
+            kind: "pending",
+            label: "🟣 Submitted — awaiting treasurer verification",
+            actionCycle: null,
+          };
+        } else if (myCycleStatus === C.STATUS_PAID) {
+          myStatus = { kind: "paid", label: "🟢 You're paid up", actionCycle: null };
+        } else {
+          myStatus = {
+            kind: "due",
+            label: `🟡 Payment due${payCycleDue ? " " + C.formatDate(payCycleDue) : ""}`,
+            actionCycle: payCycle,
+          };
+        }
+      }
+    }
+
     if (!hasAutoOpened) {
       openRound = curRound;
       hasAutoOpened = true;
@@ -1667,6 +1768,31 @@
         ${unlocked ? "🔓 Treasurer mode on" : "🔒 Unlock treasurer mode"}
       </button>
     </div>`;
+
+    // ---- My status: personalized, only shown once a member has set "who
+    // am I on this device" — never forced, never gates anything. ----------
+    html += (function () {
+      if (myMember && myStatus) {
+        return `<div class="my-status-card my-status-${myStatus.kind}">
+          <div class="my-status-row">
+            <span class="my-status-text"><b>${escapeHtml(
+              myMember.name
+            )}</b> — ${myStatus.label}</span>
+            <button type="button" class="my-status-change" onclick="PowerFund.openWhoAmIPicker()">Not you?</button>
+          </div>
+          ${
+            myStatus.actionCycle
+              ? `<button type="button" class="my-status-cta" onclick="PowerFund.openContributeModal('${inlineArg(
+                  myMember.id
+                )}', ${myStatus.actionCycle})">＋ Record my payment — ${C.peso(
+                  C.CONTRIBUTION_AMOUNT
+                )}</button>`
+              : ""
+          }
+        </div>`;
+      }
+      return `<button type="button" class="my-status-setup" onclick="PowerFund.openWhoAmIPicker()">👋 Which member are you? Tap to see your personal status.</button>`;
+    })();
 
     // due countdown (only while the active round is still collecting)
     html += (function () {
@@ -1707,7 +1833,10 @@
     }
 
     // ---- Overall fund balance (whole fund, confirmed money only) ------
-    html += (function () {
+    // Built here but appended AFTER the treasurer's "Needs your attention"
+    // panel below, so a treasurer sees what needs action before a passive
+    // stat — see fundTotalHtml usage after that panel.
+    const fundTotalHtml = (function () {
       const collected = C.totalCollected(state.contributions);
       const remaining = C.remainingAmount(state.contributions);
       const overallPct = Math.round(C.progressPercentOverall(state.contributions));
@@ -1886,6 +2015,10 @@
       }
     }
 
+    // Fund balance renders here — after "Needs your attention" for a
+    // treasurer, and simply here (there's nothing before it) for a member.
+    html += fundTotalHtml;
+
     // ---- Current round hero: round → money → to-go → who paid → CTA ----
     html += `<div class="battery-hero">
       <div class="hero-round-line">
@@ -1959,7 +2092,10 @@
                          ? " — tap to mark unpaid"
                          : " — tap to record as paid"
                        : " — tap to record your payment";
-                     return `<button type="button" class="mini-chip ${cls}" ${
+                     const treasurerTap = unlocked && s !== 0;
+                     return `<button type="button" class="mini-chip ${cls} ${
+                       treasurerTap ? "treasurer-tap" : ""
+                     }" ${
                        clickable ? "" : "disabled"
                      } onclick="PowerFund.cellClicked('${m.id}', ${payCycle})" aria-label="${escapeHtml(
                        m.name
@@ -2000,12 +2136,19 @@
 
     // member cards
     html += `<p class="section-label">Members</p><div class="member-grid">`;
+    // Cycles due so far (date-based) — the denominator for each member's
+    // "caught up" ratio. Cycles not yet due aren't counted against anyone.
+    const cyclesDueSoFar = C.completedCyclesCount(state.cycles);
     members.forEach((m) => {
       const total = C.totalPerMember(state.contributions, m.id);
       const payoutCycle = m.member_order * C.CYCLES_PER_ROUND;
       const payoutDue = C.dueDateOf(state.cycles, payoutCycle);
       const mOverdue = C.memberOverdueCount(state.contributions, state.cycles, m.id);
       const paidOut = getPayout(m.member_order).released;
+      let mPaidSoFar = 0;
+      for (let c = 1; c <= cyclesDueSoFar; c++) {
+        if (C.statusOf(state.contributions, m.id, c) === C.STATUS_PAID) mPaidSoFar++;
+      }
       html += `<div class="member-card ${paidOut ? "paid-out" : ""}">
         <div class="member-order-row">
           <span class="member-order-num">#${m.member_order} in order</span>
@@ -2025,6 +2168,13 @@
         <p class="member-name">${escapeHtml(m.name)}</p>
         <div class="member-contrib-label">Contributed</div>
         <div class="member-contrib">${C.peso(total)}</div>
+        ${
+          cyclesDueSoFar > 0
+            ? `<div class="member-ratio ${
+                mPaidSoFar < cyclesDueSoFar ? "behind" : ""
+              }">${mPaidSoFar}/${cyclesDueSoFar} cycles paid</div>`
+            : ""
+        }
         <div class="member-payout-date">Payout target: ${
           payoutDue ? C.formatDate(payoutDue) : "—"
         }${paidOut ? ' <span class="payout-done-tag">✅ done</span>' : ""}</div>
@@ -2101,8 +2251,15 @@
                         : overdue
                         ? "Overdue — tap to contribute"
                         : "Tap to contribute";
+                    // Treasurer mode makes every chip clickable, including
+                    // paid/pending ones that would otherwise look like plain
+                    // status badges — a dashed border marks those as also
+                    // being buttons (tap to revert / review), not just info.
+                    const treasurerTap = unlocked && status !== 0;
                     return `<span class="member-chip ${cls} ${
                       clickable ? "editable" : ""
+                    } ${
+                      treasurerTap ? "treasurer-tap" : ""
                     }" onclick="PowerFund.cellClicked('${m.id}', ${c})" title="${escapeHtml(
                       m.name
                     )}: ${tip}">${escapeHtml(m.name)}${icon ? ` ${icon}` : ""}</span>`;
@@ -2631,6 +2788,36 @@
       </div>`;
     }
 
+    // "Which member are you?" — sets the "My status" card for this device only
+    if (whoAmIPickerOpen) {
+      html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeWhoAmIPicker()">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <h3 id="dlg-title">Which member are you?</h3>
+          <p class="modal-sub">Remembered only on this device — never sent anywhere. Used just to show your personal status at the top of the page.</p>
+          <div class="picker-list">
+            ${members
+              .map(
+                (m) => `<button type="button" class="picker-row ${
+                  m.id === myMemberId ? "paid" : ""
+                }" onclick="PowerFund.setMyMember('${m.id}')">
+                  <span class="picker-name">${escapeHtml(m.name)}</span>
+                  ${m.id === myMemberId ? `<span class="picker-status">✓ This is me</span>` : ""}
+                </button>`
+              )
+              .join("")}
+          </div>
+          <div class="modal-actions">
+            ${
+              myMemberId
+                ? `<button class="modal-btn-secondary" onclick="PowerFund.clearMyMember()">Not on this device</button>`
+                : ""
+            }
+            <button class="modal-btn-secondary" onclick="PowerFund.closeWhoAmIPicker()">Cancel</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
     // Destructive-action confirmation (revert / undo release / reset / restore)
     if (confirmDialog) {
       const d = confirmDialog;
@@ -2774,6 +2961,10 @@
     closeModal,
     openContributePicker,
     closeContributePicker,
+    openWhoAmIPicker,
+    closeWhoAmIPicker,
+    setMyMember,
+    clearMyMember,
     pickContributor,
     adjustModalCount,
     onProofSelected,

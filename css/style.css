@@ -203,11 +203,19 @@ body {
 }
 .save-success-banner .warn-dismiss { color: var(--success); }
 
+.header-titles {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  min-width: 0;
+}
+
 .title {
   font-family: 'Space Grotesk', sans-serif;
   font-size: 26px;
   font-weight: 700;
-  margin: 0 0 4px;
+  margin: 0;
 }
 
 .subtitle {

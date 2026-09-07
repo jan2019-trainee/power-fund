@@ -1758,7 +1758,7 @@
     let html = "";
 
     html += `<div class="header">
-      <div>
+      <div class="header-titles">
         <p class="title">⚡ Power Fund</p>
         <p class="subtitle">${escapeHtml(
           (window.APP_CONFIG && window.APP_CONFIG.SUBTITLE) ||

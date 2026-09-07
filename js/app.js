@@ -1797,6 +1797,15 @@
     // due countdown (only while the active round is still collecting)
     html += (function () {
       if (allDone || curStatus !== "collecting") return "";
+      // Skip when the My-status card above is already announcing this exact
+      // same cycle's due date ("🟡 Payment due ..."). They only diverge when
+      // this member (or the whole group) has moved ahead of the fund's
+      // date-driven "current" cycle — e.g. everyone already paid it early —
+      // in which case payCycle != curCycle and both banners stay, because
+      // they're then reporting genuinely different dates.
+      if (myMember && myStatus && myStatus.kind === "due" && payCycle === curCycle) {
+        return "";
+      }
       const today = C.startOfDay(new Date());
       const due = C.dueDateOf(state.cycles, curCycle);
       if (!due) return "";
@@ -2107,7 +2116,15 @@
           : ""
       }
       ${
-        payCycle && (unlocked || cyclePaidCount < members.length)
+        // Skip this generic "pick your name" CTA when the My-status card
+        // above already offers the exact same action for the exact same
+        // cycle (one tap, no picker) — showing both is two buttons that do
+        // the same thing. Still shown when unlocked (treasurer needs the
+        // picker to act on ANY member) or when this device isn't tied to a
+        // member yet, so a shared device can still be used by anyone.
+        payCycle &&
+        (unlocked || cyclePaidCount < members.length) &&
+        !(!unlocked && myMember && myStatus && myStatus.actionCycle)
           ? `<button type="button" class="hero-cta" onclick="PowerFund.openContributePicker(${payCycle})">${
               unlocked ? "＋ Record / review a payment" : "＋ Record a contribution"
             }</button>`
@@ -2299,13 +2316,14 @@
                        : ""
                    }
                  </div>`
-              : unlocked && fullyFunded
-              ? `<div class="payout-status-box pending-box">
-                   <div>🟡 Payout Pending — ${C.peso(C.GOAL_PER_ROUND)} reached</div>
-                   <button class="contribute-btn payout-btn" onclick="PowerFund.openPayoutModal(${r})">Mark payout released</button>
-                 </div>`
               : fullyFunded
-              ? `<div class="payout-status-box pending-box"><div>🟡 Payout Pending — ${C.peso(
+              ? // No "Mark payout released" button here even when unlocked —
+                // every payout-pending round is already listed with that
+                // exact button in the "Needs your attention" panel above,
+                // which is visible on every render (not just while this
+                // round's accordion happens to be expanded). Two buttons
+                // for the same action on the same page is just noise.
+                `<div class="payout-status-box pending-box"><div>🟡 Payout Pending — ${C.peso(
                   C.GOAL_PER_ROUND
                 )} reached</div></div>`
               : ""

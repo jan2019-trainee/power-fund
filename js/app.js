@@ -2107,7 +2107,15 @@
           : ""
       }
       ${
-        payCycle && (unlocked || cyclePaidCount < members.length)
+        // Skip this generic "pick your name" CTA when the My-status card
+        // above already offers the exact same action for the exact same
+        // cycle (one tap, no picker) — showing both is two buttons that do
+        // the same thing. Still shown when unlocked (treasurer needs the
+        // picker to act on ANY member) or when this device isn't tied to a
+        // member yet, so a shared device can still be used by anyone.
+        payCycle &&
+        (unlocked || cyclePaidCount < members.length) &&
+        !(!unlocked && myMember && myStatus && myStatus.actionCycle)
           ? `<button type="button" class="hero-cta" onclick="PowerFund.openContributePicker(${payCycle})">${
               unlocked ? "＋ Record / review a payment" : "＋ Record a contribution"
             }</button>`

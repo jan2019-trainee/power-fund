@@ -128,6 +128,17 @@ async function tabsRender(browser, label, viewport, errors, wide) {
   const attention = await page.locator(".attention-panel").count();
   check(`${label}/attention panel`, attention === 1, `panels=${attention}`);
 
+  // The review queue formats a submission time. That call lived in app.js's
+  // closure while the view could not see it, and the branch only runs when the
+  // pending row carries a timestamp — so it rendered fine here and threw in
+  // production. Assert the formatted time actually appears.
+  const queueText = (await page.locator(".attention-panel").innerText()).replace(/\s+/g, " ");
+  check(
+    `${label}/review queue renders its timestamp`,
+    /\d{1,2}:\d{2}\s*(AM|PM)?/i.test(queueText) || /\b\w{3}\s+\d{1,2}\b/.test(queueText),
+    JSON.stringify(queueText.slice(0, 140))
+  );
+
   // Members has to stay reachable on mobile even though it left the bar:
   // Home's roster "See all" is its entry point, and it opens with a way back.
   if (!wide) {

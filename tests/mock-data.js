@@ -51,6 +51,9 @@ let cid = 1000;
   });
 });
 // One pending-review claim so the treasurer attention panel has content.
+// created_at matters: the review queue formats a submission time, and with the
+// field absent that branch never ran, which is how a ReferenceError in it
+// reached production green.
 CONTRIBUTIONS.push({
   id: uuid(cid++),
   cycle_id: CYCLES[6].id,
@@ -59,6 +62,7 @@ CONTRIBUTIONS.push({
   amount: 1000,
   proof_url: 'https://example.invalid/proof.jpg',
   paid_at: null,
+  created_at: '2026-09-21T02:15:00Z',
 });
 
 const ACTIVITY_LOG = [

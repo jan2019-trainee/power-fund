@@ -2475,9 +2475,16 @@
       state, unlocked, busy, openRound, myMemberId, attentionQueueExpanded,
       overdueListOpen, startRoundConfirming, isWide, selectedMemberId,
       payoutQrMemberId,
-      // helpers the views render with
+      // Helpers the views render with.
+      //
+      // A view file is a separate script with no access to this closure, so
+      // anything it calls has to arrive here. Miss one and the view throws a
+      // ReferenceError the moment that branch is reached — which can be long
+      // after the feature ships, if the branch is treasurer-only or needs data
+      // the fixtures don't have. tests/views.test.js guards against that.
       escapeHtml, inlineArg, icon, memberAvatar, memberStanding, batteryCell,
-      getPayout, payoutRecipientName, payoutDateText, sparkline, C,
+      getPayout, payoutRecipientName, payoutDateText, sparkline,
+      formatDateTime, overdueRows, C,
     };
 
     const view = window.PFViews && window.PFViews[currentView];

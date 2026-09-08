@@ -17,7 +17,8 @@ window.PFViews.home = function (ctx) {
     myMember, myStatus, ROUND_PILL, state, unlocked, busy,
     attentionQueueExpanded, overdueListOpen, startRoundConfirming,
     escapeHtml, inlineArg, icon, batteryCell, memberAvatar, memberStanding,
-    sparkline, C
+    sparkline, C,
+    formatDateTime, overdueRows
   } = ctx;
   // Cycles due so far — the denominator behind each member's standing ring.
   const cyclesDueSoFar = C.completedCyclesCount(state.cycles);

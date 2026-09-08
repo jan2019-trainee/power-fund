@@ -2391,3 +2391,103 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   }
   .cta-spacer { display: none; }
 }
+
+/* ---------------------------------------------------------------------------
+ * Member detail — the drill-down behind a roster card.
+ * ------------------------------------------------------------------------- */
+.detail-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 4px 4px 0;
+  margin-bottom: 10px;
+}
+.detail-back:hover { color: var(--text-primary); }
+.detail-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.detail-ident { flex: 1; min-width: 0; }
+.detail-name {
+  margin: 0;
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-size: 21px;
+  font-weight: 700;
+}
+.detail-order { margin: 2px 0 0; font-size: 12.5px; color: var(--text-muted); }
+.detail-standing {
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.detail-standing.standing-current { background: rgba(76, 175, 131, 0.16); color: var(--success); }
+.detail-standing.standing-overdue { background: rgba(225, 83, 83, 0.16); color: var(--danger); }
+.detail-standing.standing-pending { background: rgba(155, 127, 224, 0.16); color: var(--pending-review); }
+.detail-standing.standing-paid-out { background: var(--accent-soft); color: var(--accent); }
+.detail-stats { margin-bottom: 4px; }
+
+.detail-rounds { display: flex; flex-direction: column; gap: 10px; }
+.detail-round {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.detail-round-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.detail-round-name {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.detail-round-status { font-size: 11.5px; color: var(--text-muted); text-transform: capitalize; }
+.detail-cycles { display: flex; flex-direction: column; }
+.detail-cycle {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  font-size: 12.5px;
+}
+.detail-cycle:last-child { border-bottom: none; }
+.detail-cycle-n { color: var(--text-primary); font-weight: 600; }
+.detail-cycle-date { color: var(--text-muted); }
+.detail-cycle-state {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-muted);
+}
+.detail-cycle.paid .detail-cycle-state { background: rgba(76, 175, 131, 0.16); color: var(--success); }
+.detail-cycle.pending .detail-cycle-state { background: rgba(155, 127, 224, 0.16); color: var(--pending-review); }
+.detail-cycle.overdue .detail-cycle-state { background: rgba(225, 83, 83, 0.16); color: var(--danger); }
+
+.member-card { cursor: pointer; }
+.member-card:hover { border-color: rgba(255, 255, 255, 0.2); }
+
+@media (min-width: 900px) {
+  .detail-rounds { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+}

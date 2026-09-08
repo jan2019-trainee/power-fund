@@ -1845,3 +1845,92 @@ body { padding-top: calc(28px + var(--pf-bar-h, 0px)); }
 .view-placeholder p:first-child { font-size: 16px; color: var(--text-primary); margin-bottom: 8px; }
 .view-placeholder-note { font-size: 12.5px; }
 
+
+/* ===========================================================================
+ * Visual layer — the depth treatments from the design mockup.
+ *
+ * Applied as overrides at the end of the file so the structural rules above
+ * stay readable and this layer can be reasoned about (or reverted) as one
+ * unit. Colours still come from the same tokens; only surface, depth and
+ * emphasis change.
+ * ======================================================================== */
+
+/* Ambient glow behind everything. Pseudo-elements on body rather than real
+   DOM, so no view has to remember to render them. */
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: -1;
+}
+body::before {
+  top: -120px;
+  left: -140px;
+  width: 340px;
+  height: 340px;
+  background: radial-gradient(circle, rgba(245, 166, 35, 0.30), transparent 70%);
+  filter: blur(34px);
+}
+body::after {
+  top: 90px;
+  right: -150px;
+  width: 320px;
+  height: 320px;
+  background: radial-gradient(circle, rgba(76, 217, 192, 0.20), transparent 70%);
+  filter: blur(38px);
+}
+
+/* Glass hero: the one card that carries the round's headline number. */
+.battery-hero {
+  background: linear-gradient(160deg, rgba(20, 42, 66, 0.72), rgba(27, 58, 87, 0.5));
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 24px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08) inset,
+    0 24px 44px -26px rgba(0, 0, 0, 0.65);
+}
+
+/* Everything else that reads as a "card" gets the softer radius and a lift,
+   so the hero sits on a consistent family rather than alone. */
+.fund-total,
+.attention-panel,
+.round,
+.menu-list,
+.menu-locked-note,
+.stat-tile,
+.round-bars,
+.leaderboard,
+.payout-history,
+.footer-note {
+  border-radius: 18px;
+  box-shadow: 0 12px 28px -22px rgba(0, 0, 0, 0.75);
+}
+.member-card { border-radius: 14px; }
+
+/* Primary actions read as the accent, not an outline of it. */
+.contribute-btn,
+.my-status-cta {
+  background: linear-gradient(135deg, #F5A623, #FFC966);
+  border: none;
+  color: #14213D;
+  font-weight: 700;
+  border-radius: 24px;
+  box-shadow: 0 14px 26px -12px rgba(245, 166, 35, 0.55),
+    0 0 0 1px rgba(255, 255, 255, 0.10) inset;
+}
+.contribute-btn:hover,
+.my-status-cta:hover { filter: brightness(1.05); }
+.contribute-btn:active,
+.my-status-cta:active { transform: scale(0.985); }
+
+/* The nav is chrome sitting over content — give it the same glass treatment
+   rather than a flat panel. */
+.tab-bar {
+  background: rgba(13, 27, 42, 0.86);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-top-color: rgba(255, 255, 255, 0.08);
+}

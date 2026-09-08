@@ -1638,6 +1638,45 @@ body { padding-top: calc(28px + var(--pf-bar-h, 0px)); }
 .view-sub { margin: 3px 0 0; font-size: 12.5px; color: var(--text-muted); }
 .activity-list-tab { max-height: none; }
 
+/* Menu tab — settings rows, replacing the cramped button row the tools used to
+   share at the bottom of the old single page. */
+.menu-list {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+.menu-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+.menu-row:last-child { border-bottom: none; }
+.menu-row:hover { background: var(--bg-card-alt); }
+.menu-row-chevron { color: var(--text-muted); font-size: 18px; line-height: 1; }
+.menu-locked-note {
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+
 .view-placeholder {
   text-align: center;
   color: var(--text-muted);

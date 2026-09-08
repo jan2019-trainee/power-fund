@@ -1625,6 +1625,19 @@ body { padding-top: calc(28px + var(--pf-bar-h, 0px)); }
 .tab-item .tab-icon { font-size: 18px; line-height: 1; }
 .tab-item.active { color: var(--accent); font-weight: 600; }
 
+/* Per-view heading, for tabs that are a screen in their own right rather than
+   a section competing for room on the old single-page layout. */
+.view-head { margin: 4px 0 14px; }
+.view-title {
+  margin: 0;
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.view-sub { margin: 3px 0 0; font-size: 12.5px; color: var(--text-muted); }
+.activity-list-tab { max-height: none; }
+
 .view-placeholder {
   text-align: center;
   color: var(--text-muted);

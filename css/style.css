@@ -2056,3 +2056,61 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   }
   .tab-item, .menu-row, .contribute-btn, .my-status-cta { transition: none; }
 }
+
+/* Roster & status language — avatars carry a colour ring for standing, and
+   status pills use a dot instead of an emoji. Colour is never the only cue:
+   every avatar sits beside the member's name and figures, and every pill
+   still spells its state out in words. */
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--bg-card-alt);
+  color: var(--text-primary);
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 600;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.avatar-current { box-shadow: 0 0 0 2.5px var(--success), 0 0 14px 1px rgba(76, 175, 131, 0.35); }
+.avatar-overdue { box-shadow: 0 0 0 2.5px var(--danger); }
+.avatar-pending { box-shadow: 0 0 0 2.5px var(--pending-review); }
+.avatar-paid-out { box-shadow: 0 0 0 2.5px var(--accent); }
+.avatar-idle { box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.14); color: var(--text-muted); }
+
+.member-ident { display: flex; align-items: center; gap: 11px; margin: 10px 0 2px; }
+.member-ident .member-name { margin: 0; }
+
+.round-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  margin-right: 6px;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+.round-state { display: inline-flex; align-items: center; }
+.round-dot.pending { color: var(--accent); }
+
+.my-status-text .status-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 8px;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+.my-status-paid .status-dot { background: var(--success); }
+.my-status-due .status-dot { background: var(--accent); }
+.my-status-overdue .status-dot { background: var(--danger); }
+.my-status-pending .status-dot { background: var(--pending-review); }
+.my-status-done .status-dot { background: var(--accent); }
+
+.overdue-badge { display: inline-flex; align-items: center; gap: 5px; }
+.payout-done-tag,
+.ph-receipt,
+.proof-upload-label { display: inline-flex; align-items: center; gap: 5px; }

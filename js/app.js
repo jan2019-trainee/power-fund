@@ -1382,6 +1382,8 @@
     alert:
       '<path d="M10.3 4.6 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.6a2 2 0 0 0-3.4 0Z"/><path d="M12 9.5v4"/><circle cx="12" cy="17" r=".9" fill="currentColor" stroke="none"/>',
     check: '<polyline points="4 12 10 18 20 6"/>',
+    bell: '<path d="M6 8a6 6 0 0 1 12 0c0 4 1.5 5.5 2 6H4c.5-.5 2-2 2-6Z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+    party: '<path d="M4 20l4.5-11L19 19.5 4 20Z"/><path d="M14 4.5v2M18.5 8h2M16.8 6.2l1.4-1.4"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
     trash:
       '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/><path d="M9 7V4h6v3"/>',
@@ -2489,19 +2491,27 @@
       }
       const nextRound = curRound + 1;
 
-      if (batches.length || releaseRounds.length || canStartNext || overdueCount) {
+      if (!(batches.length || releaseRounds.length || canStartNext || overdueCount)) {
+        // Nothing waiting. Say so explicitly — an absent panel is ambiguous
+        // (is it clear, or did it fail to load?), and a caught-up queue is
+        // the normal state most days.
+        html += `<div class="attention-panel caught-up">
+          <p class="attention-title">${icon("check", 15)}<span>All caught up</span></p>
+          <p class="attention-caught-up-note">No payments waiting for review, nothing overdue, and no payout to release right now.</p>
+        </div>`;
+      } else {
         html += `<div class="attention-panel">
-          <p class="attention-title">⚠ Needs your attention</p>`;
+          <p class="attention-title">${icon("alert", 15)}<span>Needs your attention</span></p>`;
 
         // 1) pending review queue
         if (batches.length) {
           const shown = attentionQueueExpanded ? batches : batches.slice(0, 6);
           html += `<div class="attention-group">
-            <p class="attention-group-label">🔔 ${
+            <p class="attention-group-label">${icon("bell", 14)}<span>${
               batches.length === 1
                 ? "1 payment"
                 : batches.length + " payments"
-            } waiting for your review</p>
+            } waiting for your review</span></p>
             <div class="queue-list">
               ${shown
                 .map((b) => {
@@ -2633,11 +2643,14 @@
     html += fundTotalHtml;
 
     // ---- Current round hero: round → money → to-go → who paid → CTA ----
-    html += `<div class="battery-hero">
+    html += `<div class="battery-hero ${allDone ? "fund-complete" : ""}">
       <div class="hero-round-line">
         ${
           allDone
-            ? `<span class="hero-round-num">${icon("check", 16)} All ${C.TOTAL_ROUNDS} Rounds Completed</span>`
+            ? `<span class="hero-round-num">${icon(
+                "party",
+                17
+              )}<span>Fund complete — all ${C.TOTAL_ROUNDS} rounds paid out</span></span>`
             : `<span class="hero-round-num">Round ${curRound} of ${C.TOTAL_ROUNDS}${
                 heroRecipient ? ` — ${escapeHtml(heroRecipient.name)}` : ""
               }</span> ${ROUND_PILL[curStatus]}`
@@ -2655,7 +2668,9 @@
     } funding progress">
         <div class="hero-batt">
           ${batteryCell(pct, 96)}
-          <div class="hero-batt-label">
+          <div class="hero-batt-label ${
+            pct >= 55 ? "on-fill" : ""
+          }">
             <span class="hero-batt-pct">${Math.round(pct)}%</span>
             <span class="hero-batt-cap">funded</span>
           </div>

@@ -3059,3 +3059,263 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   /* The pinned mobile CTA has no place in a layout with a real header button. */
   .view-home .floating-cta, .view-home .cta-spacer { display: none; }
 }
+
+/* ===================================================================
+ * Members — accordion rows (mobile) / master-detail (desktop)
+ * =================================================================== */
+.member-list { display: flex; flex-direction: column; gap: 8px; }
+
+.member-row-wrap {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.member-row-wrap.open { border-color: rgba(245, 166, 35, 0.32); }
+
+.member-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+.member-row:hover { background: rgba(255, 255, 255, 0.03); }
+
+.member-row-avatar { position: relative; flex-shrink: 0; }
+.member-row-order {
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.member-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.member-row-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.member-row-name {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--text-primary);
+}
+.member-row-sub { font-size: 11.8px; color: var(--text-muted); line-height: 1.4; }
+
+/* Payout-order language, shared with the onboarding Payout Order screen so the
+   same three words mean the same thing wherever a member appears. */
+.member-tag {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 700;
+  padding: 2.5px 7px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+.member-tag.paid-out { background: var(--accent-soft); color: var(--accent); }
+.member-tag.this-round { background: var(--success-soft); color: var(--success); }
+.member-tag.overdue, .member-tag.rejected { background: var(--danger-soft); color: var(--danger); }
+.member-tag.pending { background: var(--pending-review-soft); color: var(--pending-review); }
+.member-tag.upcoming { background: rgba(255, 255, 255, 0.06); color: var(--text-muted); }
+
+/* The chevron carries the open/closed state, so it turns rather than swapping
+   for a different glyph. */
+.member-row-chevron {
+  display: flex;
+  color: var(--text-muted);
+  transition: transform 0.18s ease;
+  flex-shrink: 0;
+}
+.member-row.open .member-row-chevron { transform: rotate(90deg); color: var(--accent); }
+
+.member-row-panel {
+  padding: 2px 14px 14px;
+  border-top: 1px solid var(--border);
+  margin-top: -1px;
+}
+
+/* One line per round: finished rounds collapse to a count, the running round
+   is spelled out, everything not started is a single line. */
+.round-lines { display: flex; flex-direction: column; gap: 7px; padding-top: 12px; }
+.round-line { font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
+.round-line b { color: var(--text-primary); font-weight: 600; }
+.round-line.muted { opacity: 0.65; }
+.round-line-state.paid { color: var(--success); }
+.round-line-state.pending-review { color: var(--pending-review); }
+.round-line-state.rejected, .round-line-state.overdue { color: var(--danger); }
+
+.payout-dest-block { margin-top: 14px; }
+
+@media (min-width: 900px) {
+  .members-split {
+    display: grid;
+    grid-template-columns: minmax(0, 360px) minmax(0, 1fr);
+    gap: 18px;
+    align-items: start;
+  }
+  .members-detail {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px 20px;
+  }
+  /* An empty pane should say what it is waiting for; blank reads as broken. */
+  .members-detail-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--text-muted);
+  }
+  .members-detail-empty p { margin: 0; font-size: 13px; max-width: 32ch; line-height: 1.5; }
+}
+
+/* ===================================================================
+ * Menu — grouped settings, mode card, member profile card
+ * =================================================================== */
+.mode-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 15px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-card);
+  margin-bottom: 6px;
+}
+.mode-card.on { border-color: rgba(245, 166, 35, 0.4); background: var(--accent-soft); }
+.mode-card-main { display: flex; align-items: center; gap: 11px; }
+.mode-card-main .icon { color: var(--accent); flex-shrink: 0; }
+.mode-card-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+.mode-card-note { font-size: 11.5px; color: var(--text-muted); margin-top: 1px; }
+.mode-card-state {
+  font-size: 10.5px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.profile-card {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 14px 15px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-card);
+  margin-bottom: 6px;
+}
+.profile-card-main { flex: 1; min-width: 0; }
+.profile-card-label {
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.profile-card-name {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 17px;
+  color: var(--text-primary);
+  margin: 1px 0;
+}
+.profile-card-note { font-size: 11.5px; color: var(--text-muted); }
+.profile-card-change {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.profile-card-change:hover { color: var(--accent); }
+
+/* Rows can carry a second line now, so the label stacks rather than centring. */
+.menu-row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.menu-row-label { font-size: 14px; color: var(--text-primary); }
+.menu-row-note { font-size: 11.3px; color: var(--text-muted); line-height: 1.4; }
+.menu-row-main { align-items: flex-start; }
+.menu-row-main .icon { margin-top: 2px; }
+
+/* Reorder payout order — the Menu's Group section. */
+.reorder-list { display: flex; flex-direction: column; gap: 7px; margin-bottom: 12px; }
+.reorder-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-card-alt);
+}
+.reorder-pos {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.reorder-name { flex: 1; font-size: 14px; color: var(--text-primary); min-width: 0; }
+.reorder-btns { display: flex; gap: 5px; flex-shrink: 0; }
+.reorder-btns button {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 14px;
+  cursor: pointer;
+}
+.reorder-btns button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.07); }
+.reorder-btns button:disabled { opacity: 0.3; cursor: default; }
+.reorder-note {
+  display: flex;
+  gap: 7px;
+  margin: 0 0 4px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+.reorder-note .icon { color: var(--accent); flex-shrink: 0; margin-top: 1px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .member-row-chevron { transition: none; }
+}

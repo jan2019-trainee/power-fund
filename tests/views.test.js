@@ -158,9 +158,13 @@ for (const f of files) {
       !own.has(n) &&
       // Mentioned as a bare identifier: not after a dot, and not as an object
       // key or a string. Word boundaries either side.
-      // Excluding a leading hyphen keeps CSS class names like "detail-rounds"
-      // from reading as a use of `rounds`.
-      new RegExp("(?<![.\\w$\"'-])" + n + "(?![\\w$-])").test(src)
+      // Used as code, not as prose. A leading hyphen would make it a CSS class
+      // ("detail-rounds"); a following letter makes it a sentence ("rounds in
+      // total"). A real reference is followed by punctuation — `.`, `)`, `?`,
+      // an operator, a comma — or nothing at all.
+      new RegExp(
+        "(?<![.\\w$\"'-])" + n + "(?![\\w$-])\\s*(?=[.,;:?)\\]}=<>+\\-*/&|!]|$)"
+      ).test(src)
   );
   check(
     `${f}: no undeclared ctx names`,

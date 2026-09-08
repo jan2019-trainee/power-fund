@@ -1,7 +1,15 @@
 /* ---------------------------------------------------------------------------
  * View: members
  *
- * The roster: one card per member, in payout order.
+ * The roster, in payout order.
+ *
+ * Two shells, one set of facts:
+ *   mobile  — a list whose rows expand inline. The design tried a full detail
+ *             screen first and dropped it: "overkill for what's just a few
+ *             lines of cycle history" (canvas.json, members-notes). Reached as
+ *             a drill-down from Home, so it carries its own way back.
+ *   desktop — the same list as a master column beside a detail pane, which is
+ *             what the room allows and what DesktopMembers shows.
  *
  * Returns an HTML string; it never touches the DOM and never writes. Everything
  * it needs arrives on `ctx`, rebuilt by render() each pass, so a view is a pure
@@ -11,21 +19,20 @@ window.PFViews = window.PFViews || {};
 
 window.PFViews.members = function (ctx) {
   const {
-    members, state, unlocked, escapeHtml, icon, memberAvatar,
+    members, rounds, state, unlocked, escapeHtml, icon, memberAvatar,
     memberStanding, getPayout, selectedMemberId, isWide, C
   } = ctx;
-  let html = "";
 
-  // Drill-down: one member's full record, reached from their card.
+  const cyclesDueSoFar = C.completedCyclesCount(state.cycles);
   const selected = selectedMemberId
     ? members.find((m) => m.id === selectedMemberId)
     : null;
-  if (selected) return renderMemberDetail(selected, ctx);
 
-  // On mobile the roster is a drill-down from Home rather than a tab, so it
-  // needs its own way back — nothing in the bottom bar is lit while it is
-  // open. On desktop it IS a sidebar item, and a back button would be a
-  // dead-end control pointing at a screen the nav already reaches.
+  let html = "";
+
+  // On mobile this screen is a drill-down from Home and lights no tab, so it
+  // needs its own way back. On desktop it is a sidebar item and a back button
+  // would point at a screen the nav already reaches.
   if (!isWide) {
     html += `<button type="button" class="detail-back" onclick="PowerFund.setView('home')">
       ${icon("chevronLeft", 15)}<span>Home</span>
@@ -34,78 +41,31 @@ window.PFViews.members = function (ctx) {
 
   html += `<div class="view-head">
     <h2 class="view-title">Members</h2>
-    <p class="view-sub">${members.length} members · paid in payout order · ${C.peso(
-      C.CONTRIBUTION_AMOUNT
-    )} per cycle each</p>
+    <p class="view-sub">${members.length} members · sorted by payout order</p>
   </div>`;
 
-  // member cards (the view heading above already names this section)
-  html += `<div class="member-grid">`;
-  // Cycles due so far (date-based) — the denominator for each member's
-  // "caught up" ratio. Cycles not yet due aren't counted against anyone.
-  const cyclesDueSoFar = C.completedCyclesCount(state.cycles);
-  members.forEach((m) => {
-    const total = C.totalPerMember(state.contributions, m.id);
-    const payoutCycle = m.member_order * C.CYCLES_PER_ROUND;
-    const payoutDue = C.dueDateOf(state.cycles, payoutCycle);
-    const mOverdue = C.memberOverdueCount(state.contributions, state.cycles, m.id);
-    const paidOut = getPayout(m.member_order).released;
-    let mPaidSoFar = 0;
-    for (let c = 1; c <= cyclesDueSoFar; c++) {
-      if (C.statusOf(state.contributions, m.id, c) === C.STATUS_PAID) mPaidSoFar++;
-    }
-    const standing = memberStanding(m.id, cyclesDueSoFar, paidOut);
-    html += `<div class="member-card ${
-      paidOut ? "paid-out" : ""
-    }" role="button" tabindex="0" onclick="PowerFund.openMemberDetail('${
-      m.id
-    }')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();PowerFund.openMemberDetail('${
-      m.id
-    }')}">
-      <div class="member-order-row">
-        <span class="member-order-num">#${m.member_order} in order</span>
-        ${
-          unlocked
-            ? `<div class="reorder-arrows">
-                 <button onclick="event.stopPropagation();PowerFund.moveMember('${m.id}', -1)" ${
-                m.member_order === 1 ? "disabled" : ""
-              }>↑</button>
-                 <button onclick="event.stopPropagation();PowerFund.moveMember('${m.id}', 1)" ${
-                m.member_order === members.length ? "disabled" : ""
-              }>↓</button>
-               </div>`
-            : ""
-        }
-      </div>
-      <div class="member-ident">
-        ${memberAvatar(m.name, standing, 40)}
-        <p class="member-name">${escapeHtml(m.name)}</p>
-      </div>
-      <div class="member-contrib-label">Contributed</div>
-      <div class="member-contrib">${C.peso(total)}</div>
-      ${
-        cyclesDueSoFar > 0
-          ? `<div class="member-ratio ${
-              mPaidSoFar < cyclesDueSoFar ? "behind" : ""
-            }">${mPaidSoFar}/${cyclesDueSoFar} cycles paid</div>`
-          : ""
-      }
-      <div class="member-payout-date">Payout target: ${
-        payoutDue ? C.formatDate(payoutDue) : "—"
-      }${paidOut ? ' <span class="payout-done-tag">paid out</span>' : ""}</div>
-      ${
-        mOverdue
-          ? `<div class="overdue-badge">${icon(
-              "alert",
-              13
-            )}<span>${mOverdue} overdue</span></div>`
-          : ""
-      }
-    </div>`;
-  });
-  html += `</div>`;
+  const list = `<div class="member-list">${members
+    .map((m) => memberRow(m, ctx, cyclesDueSoFar, isWide))
+    .join("")}</div>`;
 
-  return html;
+  if (!isWide) return html + list;
+
+  // Desktop: master beside detail. With nothing picked the pane says so rather
+  // than sitting empty, which would read as a failure to load.
+  return (
+    html +
+    `<div class="members-split">
+      <div class="members-master">${list}</div>
+      <div class="members-detail">${
+        selected
+          ? memberDetail(selected, ctx, cyclesDueSoFar)
+          : `<div class="members-detail-empty">
+               ${icon("members", 22)}
+               <p>Pick a member to see their cycle history and where their payout goes.</p>
+             </div>`
+      }</div>
+    </div>`
+  );
 };
 
 /** Escape a value being dropped into an inline onclick string literal. */
@@ -114,14 +74,235 @@ function inlineArgSafe(v) {
 }
 
 /**
- * One member's full record: standing, the money, where their payout goes, and
- * every cycle grouped by round. Payment history is read-only by design —
- * recording and reviewing stays on the cycle grids in Rounds, so this can't
- * become a second, divergent way to change what someone has paid.
+ * One roster row: who they are, where they stand, and — on mobile — their
+ * history folded in underneath.
  */
-function renderMemberDetail(m, ctx) {
-  const { state, unlocked, escapeHtml, icon, memberAvatar, memberStanding, getPayout, C } = ctx;
-  const cyclesDueSoFar = C.completedCyclesCount(state.cycles);
+function memberRow(m, ctx, cyclesDueSoFar, isWide) {
+  const {
+    state, rounds, escapeHtml, icon, memberAvatar, memberStanding, getPayout,
+    selectedMemberId, C
+  } = ctx;
+
+  const paidOut = getPayout(m.member_order).released;
+  const standing = memberStanding(m.id, cyclesDueSoFar, paidOut);
+  const open = selectedMemberId === m.id;
+  const curRound = C.currentRound(state.payouts, state.contributions);
+
+  // The tag reuses the onboarding Payout Order screen's language, so the same
+  // three words mean the same thing wherever a member appears.
+  const tag = paidOut
+    ? { cls: "paid-out", word: "Paid out" }
+    : m.member_order === curRound
+    ? { cls: "this-round", word: "This round" }
+    : standing === "rejected"
+    ? { cls: "rejected", word: "Rejected" }
+    : standing === "overdue"
+    ? { cls: "overdue", word: "Overdue" }
+    : standing === "pending"
+    ? { cls: "pending", word: "In review" }
+    : { cls: "upcoming", word: "Upcoming" };
+
+  // What this member is doing in the round that is actually running — the
+  // earliest cycle of THAT round they haven't settled. currentCycle() answers a
+  // different question (the next cycle by date, which can still belong to the
+  // previous round), and using it here labelled a Round-1 cycle as Round 2's.
+  const range = C.roundCycleRange(curRound);
+  let openCycle = null;
+  for (let c = range.startCycle; c <= range.endCycle; c++) {
+    if (C.statusOf(state.contributions, m.id, c) !== C.STATUS_PAID) {
+      openCycle = c;
+      break;
+    }
+  }
+  let cycWord;
+  if (openCycle === null) {
+    cycWord = "all paid";
+  } else {
+    const st = C.statusOf(state.contributions, m.id, openCycle);
+    cycWord =
+      st === C.STATUS_PENDING
+        ? "pending review"
+        : st === C.STATUS_REJECTED
+        ? "rejected"
+        : C.isOverdue(state.contributions, state.cycles, m.id, openCycle)
+        ? "overdue"
+        : "not due yet";
+  }
+
+  return `<div class="member-row-wrap ${open ? "open" : ""}">
+    <button type="button" class="member-row ${open ? "open" : ""}"
+      aria-expanded="${open ? "true" : "false"}"
+      onclick="PowerFund.openMemberDetail('${inlineArgSafe(m.id)}')">
+      <span class="member-row-avatar">
+        ${memberAvatar(m.name, standing, 40)}
+        <span class="member-row-order">${m.member_order}</span>
+      </span>
+      <span class="member-row-main">
+        <span class="member-row-top">
+          <span class="member-row-name">${escapeHtml(m.name)}</span>
+          <span class="member-tag ${tag.cls}">${tag.word}</span>
+        </span>
+        <span class="member-row-sub">Payout order #${m.member_order} · Round ${
+    curRound
+  }: ${cycWord}</span>
+      </span>
+      <span class="member-row-chevron">${icon("chevron", 15)}</span>
+    </button>
+    ${
+      // Desktop shows the record in the pane beside the list, so folding it in
+      // here as well would print the same thing twice.
+      open && !isWide
+        ? `<div class="member-row-panel">${roundSummaries(m, ctx)}${payoutDest(m, ctx)}</div>`
+        : ""
+    }
+  </div>`;
+}
+
+/**
+ * The cycle history, one line per round rather than thirty rows.
+ *
+ * The design's shape: a finished round collapses to a count, the running round
+ * is spelled out cycle by cycle, and everything not started is a single line —
+ * "Rounds 3–5 — not started".
+ */
+function roundSummaries(m, ctx) {
+  const { state, rounds, escapeHtml, C } = ctx;
+  const curRound = C.currentRound(state.payouts, state.contributions);
+  let out = "";
+
+  for (let r = 1; r <= C.TOTAL_ROUNDS; r++) {
+    const status = C.roundStatus(state.contributions, rounds, r);
+    if (status === "not_started" && r > curRound) continue; // folded up below
+
+    const { startCycle, endCycle } = C.roundCycleRange(r);
+    let paid = 0;
+    for (let c = startCycle; c <= endCycle; c++) {
+      if (C.statusOf(state.contributions, m.id, c) === C.STATUS_PAID) paid++;
+    }
+
+    if (r < curRound) {
+      const gotPayout = getPayoutReleased(rounds, r) && m.member_order === r;
+      out += `<div class="round-line">
+        <b>Round ${r}</b> — ${paid} of ${C.CYCLES_PER_ROUND} paid${
+        gotPayout ? " · received the payout" : ""
+      }
+      </div>`;
+      continue;
+    }
+
+    // The round in progress: name the cycles that are actually live, then say
+    // how many more are behind them rather than listing all six.
+    const parts = [];
+    let shown = 0;
+    for (let c = startCycle; c <= endCycle && shown < 2; c++) {
+      const due = C.dueDateOf(state.cycles, c);
+      if (!due) continue;
+      const st = C.statusOf(state.contributions, m.id, c);
+      const late = C.isOverdue(state.contributions, state.cycles, m.id, c);
+      const word =
+        st === C.STATUS_PAID
+          ? "paid"
+          : st === C.STATUS_PENDING
+          ? "pending review"
+          : st === C.STATUS_REJECTED
+          ? "rejected"
+          : late
+          ? "overdue"
+          : "not due";
+      parts.push(
+        `Cycle ${c}: <span class="round-line-state ${word.replace(
+          / /g,
+          "-"
+        )}">${word}</span> (${C.formatDate(due)})`
+      );
+      shown++;
+    }
+    const more = endCycle - startCycle + 1 - shown;
+    out += `<div class="round-line">
+      <b>Round ${r}</b> — ${parts.join(" · ")}${
+      more > 0 ? ` · +${more} more this round` : ""
+    }
+    </div>`;
+  }
+
+  const firstNotStarted = curRound + 1;
+  if (firstNotStarted <= C.TOTAL_ROUNDS) {
+    out += `<div class="round-line muted"><b>Round${
+      firstNotStarted === C.TOTAL_ROUNDS ? "" : "s"
+    } ${firstNotStarted}${
+      firstNotStarted === C.TOTAL_ROUNDS ? "" : "–" + C.TOTAL_ROUNDS
+    }</b> — not started</div>`;
+  }
+  return `<div class="round-lines">${out}</div>`;
+}
+
+function getPayoutReleased(rounds, r) {
+  const row = (rounds || []).find((p) => p.round_number === r);
+  return !!(row && row.released);
+}
+
+/**
+ * Where this member's payout goes. Shown to everyone so a member can check
+ * their own details are right, but only editable in treasurer mode — the app
+ * has no per-member authentication, so a member-only gate would be decorative.
+ */
+function payoutDest(m, ctx) {
+  const { escapeHtml, icon, unlocked } = ctx;
+  const has =
+    m.payout_qr_url || m.payout_bank || m.payout_account_name || m.payout_account_number;
+
+  return `<div class="payout-dest-block">
+    <p class="section-label">Payout destination</p>
+    <div class="payout-dest">
+      ${
+        has
+          ? `<div class="payout-dest-main">
+               ${
+                 m.payout_qr_url
+                   ? `<button type="button" class="payout-dest-qr" onclick="PowerFund.openLightbox('${inlineArgSafe(
+                       m.payout_qr_url
+                     )}')"><img src="${escapeHtml(m.payout_qr_url)}" alt="${escapeHtml(
+                       m.name
+                     )}'s payout QR code"></button>`
+                   : ""
+               }
+               <div class="payout-dest-lines">
+                 ${
+                   m.payout_bank
+                     ? `<div class="payout-dest-bank">${escapeHtml(m.payout_bank)}</div>`
+                     : ""
+                 }
+                 ${
+                   m.payout_account_name
+                     ? `<div class="payout-dest-name">${escapeHtml(m.payout_account_name)}</div>`
+                     : ""
+                 }
+                 ${
+                   m.payout_account_number
+                     ? `<div class="payout-dest-num">${escapeHtml(m.payout_account_number)}</div>`
+                     : ""
+                 }
+                 ${m.payout_qr_url ? "" : `<div class="payout-dest-num">No QR on file</div>`}
+               </div>
+             </div>`
+          : `<p class="payout-dest-empty">Nothing on file yet — the treasurer records where this payout should be sent.</p>`
+      }
+      ${
+        unlocked
+          ? `<button type="button" class="payout-dest-edit" onclick="PowerFund.openPayoutQrModal('${inlineArgSafe(
+              m.id
+            )}')">${icon(has ? "qr" : "upload", 14)}<span>${
+              has ? "Edit payout details" : "Add payout details"
+            }</span></button>`
+          : ""
+      }
+    </div>
+  </div>`;
+}
+
+/** Desktop's right-hand pane: the same record, with room for the numbers. */
+function memberDetail(m, ctx, cyclesDueSoFar) {
+  const { state, escapeHtml, memberAvatar, memberStanding, getPayout, C } = ctx;
   const paidOut = getPayout(m.member_order).released;
   const standing = memberStanding(m.id, cyclesDueSoFar, paidOut);
   const total = C.totalPerMember(state.contributions, m.id);
@@ -143,10 +324,7 @@ function renderMemberDetail(m, ctx) {
     idle: "Nothing due yet",
   };
 
-  let html = `<button type="button" class="detail-back" onclick="PowerFund.closeMemberDetail()">
-    ${icon("chevronLeft", 15)}<span>All members</span>
-  </button>
-  <div class="detail-head">
+  return `<div class="detail-head">
     ${memberAvatar(m.name, standing, 60)}
     <div class="detail-ident">
       <h2 class="detail-name">${escapeHtml(m.name)}</h2>
@@ -171,99 +349,9 @@ function renderMemberDetail(m, ctx) {
       ? "no dated payments yet"
       : "paid on time (" + onTime.onTime + "/" + onTime.counted + ")"
   }</div></div>
-  </div>`;
+  </div>
 
-  // Where this member's payout goes. Shown to everyone (so a member can check
-  // their own details are right) but only editable in treasurer mode.
-  const hasPayoutDetails =
-    m.payout_qr_url || m.payout_bank || m.payout_account_name || m.payout_account_number;
-  html += `<p class="section-label">Payout destination</p>
-  <div class="payout-dest">
-    ${
-      hasPayoutDetails
-        ? `<div class="payout-dest-main">
-             ${
-               m.payout_qr_url
-                 ? `<button type="button" class="payout-dest-qr" onclick="PowerFund.openLightbox('${inlineArgSafe(
-                     m.payout_qr_url
-                   )}')"><img src="${escapeHtml(
-                     m.payout_qr_url
-                   )}" alt="${escapeHtml(m.name)}'s payout QR code"></button>`
-                 : ""
-             }
-             <div class="payout-dest-lines">
-               ${
-                 m.payout_bank
-                   ? `<div class="payout-dest-bank">${escapeHtml(m.payout_bank)}</div>`
-                   : ""
-               }
-               ${
-                 m.payout_account_name
-                   ? `<div class="payout-dest-name">${escapeHtml(
-                       m.payout_account_name
-                     )}</div>`
-                   : ""
-               }
-               ${
-                 m.payout_account_number
-                   ? `<div class="payout-dest-num">${escapeHtml(
-                       m.payout_account_number
-                     )}</div>`
-                   : ""
-               }
-               ${
-                 m.payout_qr_url ? "" : `<div class="payout-dest-num">No QR on file</div>`
-               }
-             </div>
-           </div>`
-        : `<p class="payout-dest-empty">Nothing on file yet — the treasurer records where this payout should be sent.</p>`
-    }
-    ${
-      unlocked
-        ? `<button type="button" class="payout-dest-edit" onclick="PowerFund.openPayoutQrModal('${m.id}')">${icon(
-            hasPayoutDetails ? "qr" : "upload",
-            14
-          )}<span>${hasPayoutDetails ? "Edit payout details" : "Add payout details"}</span></button>`
-        : ""
-    }
-  </div>`;
-
-  // Grouped by round rather than one flat run of 30 rows, so the history
-  // reads against the structure the fund actually works in.
-  html += `<p class="section-label">Cycle history</p><div class="detail-rounds">`;
-  for (let r = 1; r <= C.TOTAL_ROUNDS; r++) {
-    const range = C.roundCycleRange(r);
-    const rStatus = C.roundStatus(state.contributions, state.payouts, r);
-    html += `<div class="detail-round">
-      <div class="detail-round-head">
-        <span class="detail-round-name">Round ${r}</span>
-        <span class="detail-round-status">${rStatus.replace(/_/g, " ")}</span>
-      </div>
-      <div class="detail-cycles">`;
-    for (let c = range.startCycle; c <= range.endCycle; c++) {
-      const st = C.statusOf(state.contributions, m.id, c);
-      const due = C.dueDateOf(state.cycles, c);
-      const late = C.isOverdue(state.contributions, state.cycles, m.id, c);
-      const cls =
-        st === 2 ? "paid" : st === 1 ? "pending" : st === 3 ? "rejected" : late ? "overdue" : "unpaid";
-      const word =
-        st === 2
-          ? "paid"
-          : st === 1
-          ? "in review"
-          : st === 3
-          ? "rejected"
-          : late
-          ? "overdue"
-          : "not due";
-      html += `<div class="detail-cycle ${cls}">
-        <span class="detail-cycle-n">Cycle ${c}</span>
-        <span class="detail-cycle-date">${due ? C.formatDate(due) : "—"}</span>
-        <span class="detail-cycle-state">${word}</span>
-      </div>`;
-    }
-    html += `</div></div>`;
-  }
-  html += `</div>`;
-  return html;
+  <p class="section-label">Cycle history</p>
+  ${roundSummaries(m, ctx)}
+  ${payoutDest(m, ctx)}`;
 }

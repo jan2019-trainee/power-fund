@@ -119,9 +119,24 @@ async function tabsRender(browser, label, viewport, errors, wide) {
     : page.locator(".tab-item", { hasText: "Menu" })
   ).click();
   await page.waitForTimeout(250);
-  const rows = await page.locator(".menu-row").count();
-  const danger = await page.locator(".danger-zone").count();
-  check(`${label}/treasurer settings`, rows === 6 && danger === 1, `rows=${rows} danger=${danger}`);
+  // The treasurer menu is grouped, and every action the design lists is
+  // present. Counting rows alone would pass a menu missing the right ones.
+  const menuText = (await page.locator(".view-menu").innerText()).replace(/\s+/g, " ");
+  const wantRows = [
+    "Payment QR code", "Export CSV summary", "Backup data", "Restore from backup",
+    "Edit member names", "Reorder payout order", "Share fund status",
+    "Change PIN", "Lock treasurer mode",
+  ];
+  const missingRows = wantRows.filter((r) => !menuText.includes(r));
+  check(`${label}/treasurer menu rows`, missingRows.length === 0, missingRows.join(", "));
+  const wantGroups = ["Payments", "Data", "Group", "Security"];
+  const missingGroups = wantGroups.filter((g) => !menuText.includes(g));
+  check(`${label}/treasurer menu groups`, missingGroups.length === 0, missingGroups.join(", "));
+  check(
+    `${label}/treasurer mode card + danger zone`,
+    (await page.locator(".mode-card.on").count()) === 1 &&
+      (await page.locator(".danger-zone").count()) === 1
+  );
 
   await page.locator(".tab-item", { hasText: "Home" }).click();
   await page.waitForTimeout(250);
@@ -503,6 +518,130 @@ async function homeComposition(browser, errors) {
   await page.close();
 }
 
+
+/** Members is an accordion on mobile and a master-detail pair on desktop, and
+ *  the Menu splits by role. Both are phase-5 rewrites. */
+async function membersAndMenu(browser, errors) {
+  const ME = M.MEMBERS[2];
+
+  // --- mobile: rows expand in place, no separate screen ------------------
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`members: ${e}`));
+  await serve(page, M.TABLE_DATA);
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1500);
+  await page.locator(".roster-strip-all").click();
+  await page.waitForTimeout(350);
+
+  check(
+    "members/mobile: one row per member",
+    (await page.locator(".member-row").count()) === M.MEMBERS.length
+  );
+  check("members/mobile: starts collapsed", (await page.locator(".member-row-panel").count()) === 0);
+
+  await page.locator(".member-row").first().click();
+  await page.waitForTimeout(300);
+  check(
+    "members/mobile: row expands in place",
+    (await page.locator(".member-row-panel").count()) === 1 &&
+      (await page.locator(".member-row-panel .round-line").count()) > 0
+  );
+  check(
+    "members/mobile: expanded row is marked open",
+    (await page.locator(".member-row[aria-expanded='true']").count()) === 1
+  );
+
+  // Tapping the same row again closes it — what an accordion has to do.
+  await page.locator(".member-row").first().click();
+  await page.waitForTimeout(300);
+  check("members/mobile: tapping again collapses", (await page.locator(".member-row-panel").count()) === 0);
+
+  // The design dropped the full-screen detail; it must not come back.
+  check(
+    "members/mobile: no drill-down screen",
+    (await page.locator(".members-split").count()) === 0
+  );
+  await page.close();
+
+  // --- desktop: master list beside a detail pane -------------------------
+  const wide = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  wide.on("pageerror", (e) => errors.push(`members/desktop: ${e}`));
+  await serve(wide, M.TABLE_DATA);
+  await wide.goto(BASE, { waitUntil: "domcontentloaded" });
+  await wide.waitForTimeout(1500);
+  await wide.locator(".tab-item", { hasText: "Members" }).click();
+  await wide.waitForTimeout(350);
+
+  check("members/desktop: split layout", (await wide.locator(".members-split").count()) === 1);
+  check(
+    "members/desktop: empty pane explains itself",
+    (await wide.locator(".members-detail-empty").count()) === 1
+  );
+  await wide.locator(".member-row").nth(1).click();
+  await wide.waitForTimeout(300);
+  check(
+    "members/desktop: picking fills the pane",
+    (await wide.locator(".members-detail .detail-name").count()) === 1 &&
+      (await wide.locator(".members-detail .round-line").count()) > 0
+  );
+  check(
+    "members/desktop: history not duplicated inline",
+    (await wide.locator(".member-row-panel").count()) === 0
+  );
+  await wide.close();
+
+  // --- member menu -------------------------------------------------------
+  const mem = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  mem.on("pageerror", (e) => errors.push(`menu/member: ${e}`));
+  await serve(mem, M.TABLE_DATA);
+  await mem.addInitScript((id) => {
+    try { localStorage.setItem("pf_my_member_id", id); } catch (e) {}
+  }, ME.id);
+  await mem.goto(BASE, { waitUntil: "domcontentloaded" });
+  await mem.waitForTimeout(1500);
+  await mem.locator(".tab-item", { hasText: "Menu" }).click();
+  await mem.waitForTimeout(300);
+
+  const memText = (await mem.locator(".view-menu").innerText()).replace(/\s+/g, " ");
+  check(
+    "menu/member: profile card names them",
+    (await mem.locator(".profile-card").count()) === 1 && memText.includes(ME.name)
+  );
+  check(
+    "menu/member: view-only QR + payout destination",
+    /the treasurer manages this/i.test(memText) && /payout destination/i.test(memText)
+  );
+  // Nothing a member cannot act on should be reachable here.
+  const forbidden = ["Export CSV", "Backup data", "Restore from backup", "Change PIN",
+                     "Reset all fund data", "Edit member names", "Reorder payout order"];
+  const leaked = forbidden.filter((f) => memText.includes(f));
+  check("menu/member: no treasurer tools", leaked.length === 0, leaked.join(", "));
+  check("menu/member: no danger zone", (await mem.locator(".danger-zone").count()) === 0);
+  await mem.close();
+
+  // --- reorder screen ----------------------------------------------------
+  const tre = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  tre.on("pageerror", (e) => errors.push(`menu/reorder: ${e}`));
+  await serve(tre, M.TABLE_DATA);
+  await tre.goto(BASE, { waitUntil: "domcontentloaded" });
+  await tre.waitForTimeout(1500);
+  await unlockTreasurer(tre);
+  await tre.locator(".tab-item", { hasText: "Menu" }).click();
+  await tre.waitForTimeout(300);
+  await tre.locator(".menu-row", { hasText: "Reorder payout order" }).click();
+  await tre.waitForTimeout(350);
+  check(
+    "menu/reorder opens its own screen",
+    (await tre.locator(".reorder-list .reorder-row").count()) === M.MEMBERS.length
+  );
+  check(
+    "menu/reorder: end arrows disabled",
+    (await tre.locator(".reorder-row").first().locator("button").first().isDisabled()) === true &&
+      (await tre.locator(".reorder-row").last().locator("button").last().isDisabled()) === true
+  );
+  await tre.close();
+}
+
 (async () => {
   const browser = await chromium.launch({
     executablePath: process.env.PF_CHROMIUM || undefined,
@@ -524,6 +663,8 @@ async function homeComposition(browser, errors) {
   await breakpointCrossing(browser, errors);
   console.log("\nHome composition");
   await homeComposition(browser, errors);
+  console.log("\nMembers & Menu");
+  await membersAndMenu(browser, errors);
 
   await browser.close();
 

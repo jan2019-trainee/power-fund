@@ -102,6 +102,7 @@
   let attentionQueueExpanded = false; // "show N more" in the review queue
   let overdueListOpen = false; // overdue detail list in the attention panel
 
+  let reorderModalOpen = false; // "Reorder payout order", from Menu → Group
   let editNamesModalOpen = false;
   let editNamesValues = {};
   let editNamesError = null;
@@ -1381,6 +1382,15 @@
   // ===================================================================
   // Edit names
   // ===================================================================
+  function openReorderModal() {
+    reorderModalOpen = true;
+    render();
+  }
+  function closeReorderModal() {
+    reorderModalOpen = false;
+    render();
+  }
+
   function openEditNamesModal() {
     editNamesValues = {};
     state.members.forEach((m) => (editNamesValues[m.id] = m.name));
@@ -1661,8 +1671,17 @@
     currentView = view;
     render();
   }
+  /**
+   * Open one member's record.
+   *
+   * The same state drives two presentations: on mobile it is the row expanded
+   * inline (the design rejected a full detail screen as overkill for a few
+   * lines of history), on desktop it is which member the detail pane shows.
+   * Tapping the open row again closes it, which is what an accordion has to do
+   * and what the master-detail pane can do harmlessly.
+   */
   function openMemberDetail(memberId) {
-    selectedMemberId = memberId;
+    selectedMemberId = selectedMemberId === memberId ? null : memberId;
     currentView = "members";
     render();
   }
@@ -2224,6 +2243,7 @@
       payoutModalRound ||
       shareModalOpen ||
       editNamesModalOpen ||
+      reorderModalOpen ||
       lightboxSrc ||
       startRoundConfirming ||
       qrModalOpen ||
@@ -2244,6 +2264,7 @@
     if (pinModalMode) return closePinModal();
     if (payoutModalRound) return closePayoutModal();
     if (qrModalOpen) return closeQrModal();
+    if (reorderModalOpen) return closeReorderModal();
     if (editNamesModalOpen) return closeEditNamesModal();
     if (shareModalOpen) return closeShareModal();
     if (startRoundConfirming) return cancelStartRound();
@@ -2897,6 +2918,48 @@
       </div>`;
     }
 
+    if (reorderModalOpen) {
+      // Up/down arrows rather than drag: the design keeps the app's existing
+      // interaction because drag "is easy to fumble one-handed". There is no
+      // save step — each tap swaps a pair and writes immediately, which is what
+      // moveMember() already did from the roster.
+      html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeReorderModal()">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <h3 id="dlg-title">Reorder payout order</h3>
+          <p class="modal-sub">Round N always pays whoever is in position N. Changes apply immediately — there is no separate save.</p>
+          <div class="reorder-list">
+            ${members
+              .map(
+                (m) => `<div class="reorder-row">
+                  <span class="reorder-pos">${m.member_order}</span>
+                  <span class="reorder-name">${escapeHtml(m.name)}</span>
+                  <span class="reorder-btns">
+                    <button type="button" onclick="PowerFund.moveMember('${inlineArg(
+                      m.id
+                    )}', -1)" ${
+                  m.member_order === 1 || busy ? "disabled" : ""
+                } aria-label="Move ${escapeHtml(m.name)} up">↑</button>
+                    <button type="button" onclick="PowerFund.moveMember('${inlineArg(
+                      m.id
+                    )}', 1)" ${
+                  m.member_order === members.length || busy ? "disabled" : ""
+                } aria-label="Move ${escapeHtml(m.name)} down">↓</button>
+                  </span>
+                </div>`
+              )
+              .join("")}
+          </div>
+          <p class="reorder-note">${icon(
+            "alert",
+            13
+          )}<span>Rounds already paid out keep their recipient — reordering only affects rounds that haven't started.</span></p>
+          <div class="modal-actions">
+            <button class="modal-btn-secondary" onclick="PowerFund.closeReorderModal()">Done</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
     if (editNamesModalOpen) {
       const ordered = sortedMembers();
       html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeEditNamesModal()">
@@ -3338,6 +3401,8 @@
     openShareModal,
     closeShareModal,
     copyShareText,
+    openReorderModal,
+    closeReorderModal,
     openEditNamesModal,
     closeEditNamesModal,
     saveEditNames,

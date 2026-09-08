@@ -440,6 +440,30 @@ window.Calc = (function () {
   }
 
   /**
+   * How reliably one member pays on time, as { onTime, counted, rate }.
+   *
+   * Only CONFIRMED contributions are counted, and only those carrying a
+   * paid_at — a row recorded before that column existed can't be judged, and
+   * guessing would quietly punish members for a schema change. A payment
+   * counts as on time when it was paid on or before its cycle's due date.
+   * `rate` is null when nothing is countable yet, so callers can say "no data"
+   * instead of showing a misleading 0%.
+   */
+  function onTimeStats(contributions, cycles, memberId) {
+    let onTime = 0;
+    let counted = 0;
+    for (let c = 1; c <= TOTAL_CYCLES; c++) {
+      const row = contributionFor(contributions, memberId, c);
+      if (!row || row.status !== STATUS_PAID || !row.paid_at) continue;
+      const due = dueDateOf(cycles, c);
+      if (!due) continue;
+      counted++;
+      if (startOfDay(new Date(row.paid_at)) <= startOfDay(due)) onTime++;
+    }
+    return { onTime, counted, rate: counted ? (onTime / counted) * 100 : null };
+  }
+
+  /**
    * Every (member, cycle) pair that is past due and not confirmed paid.
    * A pending claim still counts as "not yet collected".
    */
@@ -573,6 +597,7 @@ window.Calc = (function () {
     isOverdue,
     memberOverdueCount,
     totalOverdueCount,
+    onTimeStats,
     missedContributions,
 
     currentCycle,

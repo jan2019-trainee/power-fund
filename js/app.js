@@ -1435,6 +1435,96 @@
         : ""
     }`;
   }
+  /** Insights tab — read-only summary of what the fund data already says.
+   * Every number here is derived from confirmed contributions via Calc; this
+   * view never writes and never gates an action. */
+  function renderInsightsView(members) {
+    const contributions = state.contributions;
+    const collected = C.totalCollected(contributions);
+    const roundsDone = C.completedRoundsCount(contributions, state.payouts);
+    const overdue = C.totalOverdueCount(contributions, state.cycles, state.members);
+    const pending = C.pendingCount(contributions);
+
+    const tile = (value, label, tone) =>
+      `<div class="stat-tile"><div class="stat-value ${
+        tone || ""
+      }">${value}</div><div class="stat-label">${label}</div></div>`;
+
+    let html = `<div class="view-head">
+      <h2 class="view-title">Insights</h2>
+      <p class="view-sub">How the fund is tracking, from confirmed payments only</p>
+    </div>
+    <div class="stat-grid">
+      ${tile(C.peso(collected), `collected of ${C.peso(C.TARGET_AMOUNT)}`)}
+      ${tile(
+        `${Math.round(C.progressPercentOverall(contributions))}%`,
+        "of the full fund"
+      )}
+      ${tile(`${roundsDone} / ${C.TOTAL_ROUNDS}`, "rounds completed")}
+      ${tile(
+        String(overdue),
+        overdue === 1 ? "overdue cycle" : "overdue cycles",
+        overdue ? "danger" : "success"
+      )}
+      ${tile(String(pending), pending === 1 ? "awaiting review" : "awaiting review", pending ? "pending" : "")}
+    </div>`;
+
+    // Per-round bar chart. Inline markup sized by percentage — the same
+    // approach the battery hero already uses, so no charting library.
+    html += `<p class="section-label">Collected per round</p>
+    <div class="round-bars">`;
+    for (let r = 1; r <= C.TOTAL_ROUNDS; r++) {
+      const amt = C.roundCollected(contributions, r);
+      const pctOfGoal = Math.min(100, (amt / C.GOAL_PER_ROUND) * 100);
+      const recipient = members.find((m) => m.member_order === r);
+      const full = amt >= C.GOAL_PER_ROUND;
+      html += `<div class="round-bar-row">
+        <div class="round-bar-label">R${r}<span class="round-bar-name">${
+        recipient ? escapeHtml(recipient.name) : "—"
+      }</span></div>
+        <div class="round-bar-track" role="img" aria-label="Round ${r}: ${C.peso(
+        amt
+      )} of ${C.peso(C.GOAL_PER_ROUND)} collected">
+          <div class="round-bar-fill ${
+            full ? "full" : ""
+          }" style="width:${pctOfGoal}%"></div>
+        </div>
+        <div class="round-bar-amt">${C.peso(amt)}</div>
+      </div>`;
+    }
+    html += `</div>`;
+
+    // On-time leaderboard. Members with nothing countable yet sort last and
+    // say so, rather than being shown as 0%.
+    const ranked = members
+      .map((m) => ({ m, s: C.onTimeStats(contributions, state.cycles, m.id) }))
+      .sort((a, b) => {
+        if (a.s.rate === null && b.s.rate === null) return 0;
+        if (a.s.rate === null) return 1;
+        if (b.s.rate === null) return -1;
+        return b.s.rate - a.s.rate;
+      });
+
+    html += `<p class="section-label">Paid on time</p><div class="leaderboard">`;
+    ranked.forEach(({ m, s }) => {
+      const pct = s.rate === null ? null : Math.round(s.rate);
+      html += `<div class="leader-row">
+        <div class="leader-name">${escapeHtml(m.name)}</div>
+        <div class="leader-track"><div class="leader-fill" style="width:${
+          pct === null ? 0 : pct
+        }%"></div></div>
+        <div class="leader-val">${
+          pct === null
+            ? '<span class="leader-nodata">no data yet</span>'
+            : `${pct}% <span class="leader-sub">${s.onTime}/${s.counted}</span>`
+        }</div>
+      </div>`;
+    });
+    html += `</div>
+    <p class="insights-note">On-time counts confirmed payments that carry a payment date, compared against each cycle's due date.</p>`;
+
+    return html;
+  }
   function renderTabBar(active) {
     return `<nav class="tab-bar" aria-label="Main">
       ${TAB_VIEWS.map(
@@ -1905,6 +1995,8 @@
     // time; tabs whose content hasn't moved across yet show a placeholder.
     if (currentView === "activity") {
       html += renderActivityView();
+    } else if (currentView === "insights") {
+      html += renderInsightsView(members);
     } else if (currentView === "rounds") {
 
     html += `<div class="view-head">

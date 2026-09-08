@@ -1638,6 +1638,97 @@ body { padding-top: calc(28px + var(--pf-bar-h, 0px)); }
 .view-sub { margin: 3px 0 0; font-size: 12.5px; color: var(--text-muted); }
 .activity-list-tab { max-height: none; }
 
+/* Insights tab — stat tiles, per-round bars and the on-time leaderboard. All
+   plain markup sized by percentage; no charting library. */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.stat-tile {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+}
+.stat-value {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.stat-value.success { color: var(--success); }
+.stat-value.danger { color: var(--danger); }
+.stat-value.pending { color: var(--pending-review); }
+.stat-label { font-size: 11.5px; color: var(--text-muted); margin-top: 3px; }
+
+.round-bars {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 6px;
+}
+.round-bar-row {
+  display: grid;
+  grid-template-columns: 84px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+}
+.round-bar-label { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.round-bar-name {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+.round-bar-track {
+  height: 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+.round-bar-fill {
+  height: 100%;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #E8941A, var(--accent));
+}
+.round-bar-fill.full { background: var(--success); }
+.round-bar-amt { font-size: 11.5px; color: var(--text-muted); white-space: nowrap; }
+
+.leaderboard {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+.leader-row {
+  display: grid;
+  grid-template-columns: 84px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+}
+.leader-name { font-size: 12.5px; font-weight: 600; }
+.leader-track {
+  height: 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+.leader-fill { height: 100%; border-radius: 6px; background: var(--success); }
+.leader-val { font-size: 12px; color: var(--text-primary); white-space: nowrap; }
+.leader-sub { color: var(--text-muted); font-size: 10.5px; }
+.leader-nodata { color: var(--text-muted); font-size: 11.5px; }
+.insights-note {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin: 10px 2px 0;
+}
+
 /* Menu tab — settings rows, replacing the cramped button row the tools used to
    share at the bottom of the old single page. */
 .menu-list {

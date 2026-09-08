@@ -72,6 +72,27 @@ see a no-proof route.*
 > here in case a true blank-slate setup is ever needed, but don't prioritize
 > implementing it."
 
+## Deliberate deviations from the design
+
+**`ForgotPinReset.dc.html` is not implemented, and won't be.** The artboard
+specifies a PIN-independent destructive reset from the locked screen: type
+`RESET`, wipe contributions/activity/payout status, keep members and names, then
+set a new PIN. The `forgot-pin-notes` annotation explains why it can't reuse the
+existing Reset All Data screen, and its reasoning is correct — that screen
+requires the very PIN that has been forgotten, and preserves it anyway.
+
+*Project decision (Sep 2026): solved with a **master PIN** instead
+(`app_settings.master_pin`, migration 006). A static second PIN, set by hand and
+never shown or changed in the app, always unlocks treasurer mode; the group then
+sets a new PIN through the normal Change PIN flow. This is non-destructive —
+no contributions, activity log or proof screenshots are lost — and far simpler
+for a five-person group. Every master-PIN unlock is written to the activity log.*
+
+*Both the master PIN and `treasurer_pin` live in a world-readable database whose
+URL and anon key are published in this public repository. Neither is a security
+control; they prevent accidents, not attackers. See README "Security
+limitations".*
+
 ## Two things the artboards do not tell you
 
 **There is no approved Member Detail screen.** `MemberDetail.dc.html` was drafted

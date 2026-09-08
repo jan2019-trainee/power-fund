@@ -457,6 +457,14 @@ body {
 .member-chip.paid { background: var(--success-soft); border-color: var(--success); color: var(--success); }
 .member-chip.pending { background: rgba(245,166,35,0.16); border-color: var(--accent); color: var(--accent); }
 .member-chip.overdue { border-color: #E15353; color: #E15353; background: rgba(225,83,83,0.1); }
+/* Rejected: same danger hue as overdue, but struck through so the two read
+   apart at a glance — one was never sent, the other was sent and refused. */
+.member-chip.rejected {
+  border-color: #E15353;
+  color: #E15353;
+  background: rgba(225, 83, 83, 0.1);
+  border-style: dashed;
+}
 
 /* Treasurer mode makes every paid/pending chip clickable (revert / review),
    not just unpaid ones — a dashed border marks those as also being buttons,
@@ -2483,6 +2491,7 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
 }
 .detail-cycle.paid .detail-cycle-state { background: rgba(76, 175, 131, 0.16); color: var(--success); }
 .detail-cycle.pending .detail-cycle-state { background: rgba(155, 127, 224, 0.16); color: var(--pending-review); }
+.detail-cycle.rejected .detail-cycle-state { background: var(--danger-soft); color: var(--danger); }
 .detail-cycle.overdue .detail-cycle-state { background: rgba(225, 83, 83, 0.16); color: var(--danger); }
 
 .member-card { cursor: pointer; }
@@ -2673,3 +2682,149 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
 }
 .qr-empty { margin: 4px 0 8px; font-size: 12.5px; color: var(--text-muted); }
 .file-input { font-size: 12.5px; color: var(--text-muted); }
+
+/* ===================================================================
+ * Rejected payment (migration 006)
+ *
+ * The member-facing half of rejection: the only Home state that asks the
+ * person to do something, so it leads the screen and carries the danger
+ * colour the roster ring also uses.
+ * =================================================================== */
+.rejected-card {
+  background: var(--danger-soft);
+  border: 1px solid rgba(225, 83, 83, 0.3);
+  border-left: 3px solid var(--danger);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.rejected-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.rejected-head .icon { color: var(--danger); flex-shrink: 0; }
+.rejected-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 14.5px;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+.rejected-note {
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 8px;
+  padding: 9px 11px;
+  margin-bottom: 9px;
+}
+.rejected-note-label {
+  display: block;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+}
+.rejected-note-text {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  /* A treasurer's note is free text: let it wrap rather than overflow. */
+  overflow-wrap: anywhere;
+}
+.rejected-hint { margin: 0 0 11px; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
+.rejected-cta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  padding: 11px;
+  border: none;
+  border-radius: 9px;
+  background: var(--danger);
+  color: #fff;
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+}
+.rejected-cta:hover { filter: brightness(1.08); }
+.rejected-cta:active { transform: scale(0.985); }
+
+/* Roster ring + detail pill for a member with a refused claim. */
+.avatar-rejected { box-shadow: 0 0 0 2.5px var(--danger); }
+.detail-standing.standing-rejected { background: var(--danger-soft); color: var(--danger); }
+
+/* Treasurer's reason, inside the review sheet's reject confirmation. */
+.reject-note-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 4px 0 5px;
+  text-align: left;
+}
+.reject-note-input {
+  width: 100%;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  font-size: 13.5px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.reject-note-input:focus { border-color: var(--accent); outline: none; }
+
+/* ===================================================================
+ * PIN keypad
+ *
+ * Replaces the text field: faster one-handed, no autofill or autocorrect
+ * to fight, and it matches how banking apps ask for a PIN. Deliberately
+ * no auto-submit — PINs here can be longer than four digits.
+ * =================================================================== */
+.pin-dots {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin: 6px 0 18px;
+  min-height: 15px;
+}
+.pin-dot {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.28);
+  background: transparent;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+.pin-dot.filled { background: var(--accent); border-color: var(--accent); }
+
+.pin-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 9px;
+  margin-bottom: 14px;
+}
+.pin-key {
+  padding: 14px 0;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--bg-card-alt);
+  color: var(--text-primary);
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 20px;
+  font-weight: 600;
+  cursor: pointer;
+  /* A mis-tap on a PIN pad is annoying; keep the targets comfortably large. */
+  min-height: 48px;
+}
+.pin-key:hover { background: rgba(255, 255, 255, 0.06); }
+.pin-key:active { transform: scale(0.96); }
+.pin-key:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pin-key-util { font-size: 16px; color: var(--text-muted); }
+
+@media (prefers-reduced-motion: reduce) {
+  .pin-dot { transition: none; }
+  .pin-key:active, .rejected-cta:active { transform: none; }
+}

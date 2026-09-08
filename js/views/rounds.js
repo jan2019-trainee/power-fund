@@ -76,22 +76,37 @@ window.PFViews.rounds = function (ctx) {
                     m.id,
                     c
                   );
+                  // Rejected (status 3, migration 006) reads as its own state
+                  // rather than folding into "unpaid": the member did submit,
+                  // and the treasurer needs to see that they refused it.
                   const cls =
                     status === 2
                       ? "paid"
                       : status === 1
                       ? "pending"
+                      : status === 3
+                      ? "rejected"
                       : overdue
                       ? "overdue"
                       : "";
                   const icon =
-                    status === 2 ? "✓" : status === 1 ? "…" : overdue ? "!" : "";
-                  const clickable = unlocked || status === 0;
+                    status === 2
+                      ? "✓"
+                      : status === 1
+                      ? "…"
+                      : status === 3
+                      ? "✕"
+                      : overdue
+                      ? "!"
+                      : "";
+                  const clickable = unlocked || status === 0 || status === 3;
                   const tip =
                     status === 1
                       ? "Pending treasurer review"
                       : status === 2
                       ? "Confirmed paid"
+                      : status === 3
+                      ? "Rejected — tap to resubmit"
                       : overdue
                       ? "Overdue — tap to contribute"
                       : "Tap to contribute";
@@ -99,7 +114,7 @@ window.PFViews.rounds = function (ctx) {
                   // paid/pending ones that would otherwise look like plain
                   // status badges — a dashed border marks those as also
                   // being buttons (tap to revert / review), not just info.
-                  const treasurerTap = unlocked && status !== 0;
+                  const treasurerTap = unlocked && status !== 0 && status !== 3;
                   return `<span class="member-chip ${cls} ${
                     clickable ? "editable" : ""
                   } ${

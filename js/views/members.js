@@ -127,6 +127,7 @@ function renderMemberDetail(m, ctx) {
   // The ring colour is never the only cue — the same standing is spelled out.
   const STANDING_WORD = {
     "paid-out": "Payout received",
+    rejected: "Payment rejected — needs resending",
     overdue: overdue === 1 ? "1 cycle overdue" : overdue + " cycles overdue",
     pending: "Payment awaiting review",
     current: "Caught up",
@@ -234,8 +235,18 @@ function renderMemberDetail(m, ctx) {
       const st = C.statusOf(state.contributions, m.id, c);
       const due = C.dueDateOf(state.cycles, c);
       const late = C.isOverdue(state.contributions, state.cycles, m.id, c);
-      const cls = st === 2 ? "paid" : st === 1 ? "pending" : late ? "overdue" : "unpaid";
-      const word = st === 2 ? "paid" : st === 1 ? "in review" : late ? "overdue" : "not due";
+      const cls =
+        st === 2 ? "paid" : st === 1 ? "pending" : st === 3 ? "rejected" : late ? "overdue" : "unpaid";
+      const word =
+        st === 2
+          ? "paid"
+          : st === 1
+          ? "in review"
+          : st === 3
+          ? "rejected"
+          : late
+          ? "overdue"
+          : "not due";
       html += `<div class="detail-cycle ${cls}">
         <span class="detail-cycle-n">Cycle ${c}</span>
         <span class="detail-cycle-date">${due ? C.formatDate(due) : "—"}</span>

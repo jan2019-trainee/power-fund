@@ -26,6 +26,39 @@ window.PFViews.home = function (ctx) {
   let html = "";
 
 
+  // ---- Rejected payment: the one thing that needs acting on -----------
+  // Sits above the status card because it is the only state where the member
+  // has to do something and would otherwise never learn why their payment
+  // vanished. Needs migration 006 — before that no row can be rejected, so
+  // latestRejection() returns null and nothing renders.
+  const myRejection =
+    myMember && C.latestRejection ? C.latestRejection(state.contributions, myMember.id) : null;
+  if (myRejection) {
+    const cyc = myRejection.cycles;
+    const cycLabel =
+      cyc.length > 1 ? `Cycles ${cyc[0]}–${cyc[cyc.length - 1]}` : `Cycle ${cyc[0]}`;
+    html += `<div class="rejected-card" role="alert">
+      <div class="rejected-head">
+        ${icon("alert", 16)}
+        <span class="rejected-title">Your proof for ${cycLabel} wasn't accepted</span>
+      </div>
+      ${
+        myRejection.note
+          ? `<div class="rejected-note">
+               <span class="rejected-note-label">Treasurer's note</span>
+               <p class="rejected-note-text">${escapeHtml(myRejection.note)}</p>
+             </div>`
+          : ""
+      }
+      <p class="rejected-hint">${
+        cyc.length > 1 ? "These cycles are" : "This cycle is"
+      } still due. Send the payment again and attach a clearer screenshot.</p>
+      <button type="button" class="rejected-cta" onclick="PowerFund.openContributeModal('${inlineArg(
+        myMember.id
+      )}', ${cyc[0]})">${icon("upload", 15)}<span>Resubmit payment</span></button>
+    </div>`;
+  }
+
   // ---- My status: personalized, only shown once a member has set "who
   // am I on this device" — never forced, never gates anything. ----------
   html += (function () {

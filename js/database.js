@@ -214,6 +214,49 @@ window.DB = (function () {
     );
   }
 
+  /**
+   * Reject a reviewed claim, keeping the record.
+   *
+   * Rejection used to DELETE the rows, which threw away the only evidence that
+   * a member ever submitted anything and left them with no way to learn why.
+   * Migration 006 turns it into a state change instead — status 3, the
+   * treasurer's reason, and a timestamp — so the member sees the refusal and
+   * can resubmit.
+   *
+   * The screenshot is deliberately NOT archived here: the surviving row still
+   * points at it, and moving the file would leave proof_url dangling.
+   *
+   * Returns true when the rejection was recorded. Returns false when this
+   * database has not had migration 006 applied yet, so the caller can fall
+   * back to the old destructive path rather than failing the treasurer's
+   * action outright.
+   */
+  async function rejectContributions(ids, note) {
+    if (!ids || !ids.length) return true;
+    const res = await client
+      .from("contributions")
+      .update({
+        status: 3,
+        rejection_note: note && note.trim() ? note.trim() : null,
+        rejected_at: new Date().toISOString(),
+      })
+      .in("id", ids);
+
+    if (!res.error) return true;
+
+    // Un-migrated database: either the columns are absent, or the older
+    // status check — which only allows 0/1/2 — refuses the value 3.
+    const msg = res.error.message || "";
+    if (/rejection_note|rejected_at|status_check/i.test(msg)) {
+      console.warn(
+        "Migration 006 not applied — falling back to delete-on-reject:",
+        msg
+      );
+      return false;
+    }
+    unwrap(res, "Couldn't reject the claim");
+  }
+
   // ===================================================================
   // Payment proof screenshots (Supabase Storage)
   // ===================================================================
@@ -579,6 +622,30 @@ window.DB = (function () {
     for (let r = 1; r <= 5; r++) {
       await updatePayout(r, { released: false, note: null, released_on: null });
     }
+    // Clear the payout accountability fields too (migration 004). Without
+    // this a reset left every round claiming it had paid a named recipient a
+    // real amount, with a receipt, while released was false — stale financial
+    // records surviving the action whose whole job is to remove them. Skipped
+    // silently on databases that predate migration 004, like started_at below.
+    for (let r = 1; r <= 5; r++) {
+      const res = await client
+        .from("payouts")
+        .update({
+          amount: null,
+          recipient_member_id: null,
+          recipient_name: null,
+          receipt_url: null,
+          released_by: null,
+        })
+        .eq("round_number", r);
+      if (res.error) {
+        console.warn(
+          "Skipped clearing payout accountability fields (run migration 004):",
+          res.error.message
+        );
+        break;
+      }
+    }
     // Reset the round lifecycle too, but only if migration 002 has been run —
     // skip silently otherwise so reset still works on the older schema.
     for (let r = 1; r <= 5; r++) {
@@ -749,6 +816,7 @@ window.DB = (function () {
     upsertContributions,
     updateContribution,
     deleteContribution,
+    rejectContributions,
     uploadProof,
     deleteProof,
     archiveProof,

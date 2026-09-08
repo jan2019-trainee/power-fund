@@ -68,6 +68,8 @@
 
   let reviewTarget = null; // { memberId, cycles: [n, ...] } — the whole advance batch
   let rejectConfirming = false;
+  let rejectNoteValue = ""; // the treasurer's reason — shown to the member
+  let rejectError = null;
   let startRoundConfirming = false; // inline confirm for "Start Next Round"
 
   // Generic "are you sure?" gate for destructive treasurer actions. Nothing
@@ -80,6 +82,11 @@
   let pinModalMode = null; // null | 'setup' | 'enter' | 'change'
   let pinInputValue = "";
   let pinError = null;
+  // Treasurer mode was entered with the master PIN rather than the group's own.
+  // Only used to nudge them toward setting a working PIN again — it grants no
+  // different powers, because the master PIN exists precisely so a locked-out
+  // group gets full treasurer access back.
+  let unlockedViaMaster = false;
 
   let payoutModalRound = null;
   let payoutNoteValue = "";
@@ -443,7 +450,9 @@
     const status = C.statusOf(state.contributions, memberId, cycleNumber);
 
     if (!unlocked) {
-      if (status === C.STATUS_UNPAID) {
+      // Rejected behaves like unpaid here: the cycle is still owed, and
+      // tapping it is how the member sends a fresh screenshot.
+      if (C.isOwed(status)) {
         // With migration 002 active, members can only pay into a round the
         // treasurer has started, so a new round always begins at ₱0. Without it
         // this check is a no-op (currentRound == first unfunded round).
@@ -487,7 +496,11 @@
       return;
     }
 
-    // Unpaid → treasurer records it as paid directly (cash). Not destructive.
+    // Unpaid or rejected → treasurer records it as paid directly (cash).
+    // Not destructive. Rejected lands here too, and should: a refused
+    // screenshot is often followed by the member simply handing over cash.
+    // The rejection note stays on the row as history; the member's banner
+    // clears because it only reads rows still in the rejected state.
     busy = true;
     render();
     try {
@@ -588,12 +601,16 @@
       cycles: C.pendingRun(state.contributions, memberId, cycleNumber),
     };
     rejectConfirming = false;
+    rejectNoteValue = "";
+    rejectError = null;
     render();
   }
 
   function closeReviewModal() {
     reviewTarget = null;
     rejectConfirming = false;
+    rejectNoteValue = "";
+    rejectError = null;
     render();
   }
 
@@ -649,12 +666,22 @@
   }
   function cancelRejectConfirm() {
     rejectConfirming = false;
+    rejectNoteValue = "";
+    rejectError = null;
     render();
   }
 
   async function doRejectReview() {
     if (!reviewTarget || busy) return;
     const { memberId, cycles } = reviewTarget;
+    const note = rejectNoteValue.trim();
+    if (!note) {
+      // A rejection the member can't understand is the thing this whole flow
+      // exists to fix, so the reason is required here even though the column
+      // is nullable.
+      rejectError = "Say why it wasn't accepted — the member sees this.";
+      return render();
+    }
     busy = true;
     render();
     try {
@@ -664,27 +691,48 @@
       const proof =
         (rows[0] && rows[0].proof_url) ||
         C.proofOf(state.contributions, memberId, cycles[0]);
-      const removedIds = rows.map((r) => r.id);
+      const ids = rows.map((r) => r.id);
 
-      for (const c of cycles) {
-        await window.DB.deleteContribution(memberId, cycleIdByNumber[c]);
+      // Preferred path: keep the rows and mark them rejected, so the member
+      // sees the reason and can resubmit. The screenshot stays where it is —
+      // the surviving rows still point at it.
+      const kept = await window.DB.rejectContributions(ids, note);
+
+      let logSuffix = "";
+      let warning = false;
+      if (!kept) {
+        // Migration 006 hasn't been run. Fall back to the old behaviour rather
+        // than blocking the treasurer: delete the rows and archive the proof.
+        for (const c of cycles) {
+          await window.DB.deleteContribution(memberId, cycleIdByNumber[c]);
+        }
+        const outcome = await preserveProof(proof, ids);
+        logSuffix = outcome.logSuffix;
+        warning = outcome.warning;
       }
-
-      // The batch shares one screenshot — keep it (archive), don't delete it.
-      const outcome = await preserveProof(proof, removedIds);
 
       await logActivity(
         `Treasurer rejected ${memberName(memberId)}'s ${cycleRangeLabel(
           cycles
-        )} claim` + outcome.logSuffix
+        )} claim — "${note}"` + logSuffix
       );
       closeReviewModal();
       await reload();
-      if (outcome.warning) {
+      if (!kept) {
+        showWarning(
+          "The claim was rejected, but this database hasn't had " +
+            "supabase/migrations/006_redesign_foundation.sql run yet, so the " +
+            "record was removed instead of kept and " +
+            memberName(memberId) +
+            " won't see the reason in the app."
+        );
+      } else if (warning) {
         showWarning(
           "The claim was rejected, but its payment screenshot could not be " +
             "archived — it is still at its original URL. See the activity log."
         );
+      } else {
+        showSuccess("Claim rejected — " + memberName(memberId) + " can resubmit.");
       }
     } catch (e) {
       showError(e.message);
@@ -995,6 +1043,7 @@
   function toggleUnlock() {
     if (unlocked) {
       unlocked = false;
+      unlockedViaMaster = false;
       render();
       return;
     }
@@ -1041,15 +1090,49 @@
       }
     } else {
       // enter
-      if (pinInputValue === (state.settings && state.settings.treasurer_pin)) {
+      const settings = state.settings || {};
+      const entered = pinInputValue;
+      if (entered && entered === settings.treasurer_pin) {
         unlocked = true;
+        unlockedViaMaster = false;
         closePinModal();
-      } else {
-        pinError = "Incorrect PIN. Try again.";
-        pinInputValue = "";
-        render();
+        return;
       }
+      // The master PIN (migration 006) is the way back in when the group's own
+      // PIN has been forgotten. It is set by hand in the database and never
+      // shown, changed or removed from inside the app. Absent = not configured,
+      // and the lockout behaves exactly as it did before.
+      if (entered && settings.master_pin && entered === settings.master_pin) {
+        unlocked = true;
+        unlockedViaMaster = true;
+        closePinModal();
+        // Logged so a master-PIN entry is visible after the fact, the same way
+        // migration 005 makes payout-QR changes auditable.
+        try {
+          await logActivity("Treasurer mode unlocked with the master PIN");
+          await reload();
+        } catch (e) {
+          console.warn("Could not log the master-PIN unlock:", e.message);
+        }
+        showWarning(
+          "Unlocked with the master PIN. Set a new treasurer PIN from " +
+            "Menu → Change PIN so the group can use their own again."
+        );
+        return;
+      }
+      pinError = "Incorrect PIN. Try again.";
+      pinInputValue = "";
+      render();
     }
+  }
+
+  /** Numeric-keypad entry: append one digit, or clear/backspace. */
+  function pinKey(key) {
+    if (key === "clear") pinInputValue = "";
+    else if (key === "back") pinInputValue = pinInputValue.slice(0, -1);
+    else if (/^[0-9]$/.test(key) && pinInputValue.length < 12) pinInputValue += key;
+    pinError = null;
+    render();
   }
 
   // ===================================================================
@@ -1456,6 +1539,10 @@
   /** One member's standing, used for the avatar ring and the card's wording. */
   function memberStanding(memberId, cyclesDueSoFar, paidOut) {
     if (paidOut) return "paid-out";
+    // A refused claim outranks the rest: it is the one state the member has to
+    // act on, and it should read that way even before the cycle falls due.
+    if (C.latestRejection && C.latestRejection(state.contributions, memberId))
+      return "rejected";
     if (C.memberOverdueCount(state.contributions, state.cycles, memberId) > 0)
       return "overdue";
     for (let c = 1; c <= C.TOTAL_CYCLES; c++) {
@@ -2470,7 +2557,20 @@
               rejectConfirming
                 ? `<p class="reject-confirm-text">Reject this claim? ${
                     multi ? `All ${rc.length} cycles go` : "It goes"
-                  } back to unpaid. The screenshot is kept in the archive.</p>
+                  } back to unpaid and stay due. ${
+                    memberName(reviewTarget.memberId)
+                  } sees your reason and can send a new screenshot.</p>
+                   <label class="reject-note-label" for="reject-note">Why wasn't it accepted?</label>
+                   <textarea id="reject-note" class="reject-note-input" rows="2"
+                     placeholder="e.g. The screenshot doesn't show the amount or the date clearly."
+                     oninput="PowerFund.setRejectNote(this.value)">${escapeHtml(
+                       rejectNoteValue
+                     )}</textarea>
+                   ${
+                     rejectError
+                       ? `<p class="pin-error" role="alert">${escapeHtml(rejectError)}</p>`
+                       : ""
+                   }
                    <button class="modal-btn-primary confirm-yes" onclick="PowerFund.doRejectReview()" ${
                      busy ? "disabled" : ""
                    }>Yes, reject</button>
@@ -2502,29 +2602,60 @@
         setup:
           "This protects treasurer actions. Anyone with the PIN can edit — share it only with whoever holds that role.",
         enter:
-          "Enter the PIN to unlock treasurer actions. A forgotten PIN can't be recovered — ask whoever else in the group has it.",
+          state.settings && state.settings.master_pin
+            ? "Enter the PIN to unlock treasurer actions. Forgotten it? The group's master PIN also works, then set a new one from Menu → Change PIN."
+            : "Enter the PIN to unlock treasurer actions. A forgotten PIN can't be recovered — ask whoever else in the group has it.",
         change: "Set a new PIN. This replaces the current one for everyone.",
       };
       // There is deliberately no PIN recovery: any reset that worked without
       // the PIN would let whoever is holding the phone take treasurer control.
       // That is a fine trade only if people are told BEFORE they forget, so
       // the warning sits on the screens where a PIN is chosen.
+      const hasMaster = !!(state.settings && state.settings.master_pin);
       const noRecovery =
         pinModalMode === "enter"
           ? ""
-          : `<p class="pin-warning">${icon(
-              "alert",
-              14
-            )}<span>There is no way to recover a forgotten PIN. Write it down somewhere safe, and make sure a second person in the group knows it.</span></p>`;
+          : `<p class="pin-warning">${icon("alert", 14)}<span>${
+              hasMaster
+                ? "If this PIN is forgotten, the group's master PIN is the only way back in — keep that one somewhere safe."
+                : "There is no way to recover a forgotten PIN. Write it down somewhere safe, and make sure a second person in the group knows it."
+            }</span></p>`;
+
+      // Dot-and-keypad entry, replacing a text field: it is faster one-handed,
+      // gives no keyboard autofill or autocorrect to fight, and matches how
+      // banking apps ask for a PIN. The hidden live region is what a screen
+      // reader announces, since the dots themselves carry no text.
+      //
+      // There is deliberately NO auto-submit on the 4th digit: PINs here may be
+      // longer than four (setup only enforces a minimum), and submitting early
+      // would make a longer PIN impossible to type — a wrong attempt clears the
+      // field. The confirm button costs one tap and always works.
+      const dots = Array.from(
+        { length: Math.max(4, pinInputValue.length) },
+        (_, i) =>
+          `<span class="pin-dot ${i < pinInputValue.length ? "filled" : ""}"></span>`
+      ).join("");
+      const keypad =
+        `<div class="pin-dots" role="img" aria-label="${pinInputValue.length} digit${
+          pinInputValue.length === 1 ? "" : "s"
+        } entered">${dots}</div>` +
+        `<div class="pin-keypad">` +
+        [1, 2, 3, 4, 5, 6, 7, 8, 9].
+          map(
+            (n) =>
+              `<button type="button" class="pin-key" onclick="PowerFund.pinKey('${n}')">${n}</button>`
+          )
+          .join("") +
+        `<button type="button" class="pin-key pin-key-util" onclick="PowerFund.pinKey('clear')" aria-label="Clear">C</button>` +
+        `<button type="button" class="pin-key" onclick="PowerFund.pinKey('0')">0</button>` +
+        `<button type="button" class="pin-key pin-key-util" onclick="PowerFund.pinKey('back')" aria-label="Delete last digit">⌫</button>` +
+        `</div>`;
       html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closePinModal()">
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
           <h3 id="dlg-title">${titles[pinModalMode]}</h3>
           <p class="modal-sub">${subs[pinModalMode]}</p>
-          <input type="password" inputmode="numeric" autocomplete="off" class="pin-input" placeholder="PIN" value="${escapeHtml(
-            pinInputValue
-          )}"
-                 oninput="PowerFund.setPinInput(this.value)" onkeydown="if(event.key==='Enter') PowerFund.submitPin()">
-          ${pinError ? `<p class="pin-error">${escapeHtml(pinError)}</p>` : ""}
+          ${keypad}
+          ${pinError ? `<p class="pin-error" role="alert">${escapeHtml(pinError)}</p>` : ""}
           ${noRecovery}
           <div class="modal-actions">
             <button class="modal-btn-primary" onclick="PowerFund.submitPin()">${
@@ -2990,6 +3121,25 @@
       }
       if (e.key === "Tab" && (lightboxSrc || isAnyModalOpen())) {
         trapFocus(e);
+        return;
+      }
+      // The PIN keypad has no text field, so a physical keyboard has to be
+      // wired up explicitly — otherwise the modal is mouse-only on desktop.
+      // Ignored while another control has focus so typing elsewhere (the
+      // confirm dialog's own PIN field) still behaves normally.
+      if (pinModalMode) {
+        const tag = (document.activeElement && document.activeElement.tagName) || "";
+        if (tag === "INPUT" || tag === "TEXTAREA") return;
+        if (/^[0-9]$/.test(e.key)) {
+          e.preventDefault();
+          pinKey(e.key);
+        } else if (e.key === "Backspace") {
+          e.preventDefault();
+          pinKey("back");
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          submitPin();
+        }
       }
     });
   }
@@ -3044,6 +3194,10 @@
     expandAttentionQueue,
     toggleOverdueList,
     rejectReview,
+    setRejectNote: (v) => {
+      rejectNoteValue = v;
+      rejectError = null;
+    },
     cancelRejectConfirm,
     doRejectReview,
     moveMember,
@@ -3058,9 +3212,7 @@
     closePinModal,
     openChangePin,
     submitPin,
-    setPinInput: (v) => {
-      pinInputValue = v;
-    },
+    pinKey,
     openPayoutModal,
     closePayoutModal,
     markPayoutReleased,

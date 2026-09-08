@@ -189,6 +189,106 @@ async function reducedMotion(browser) {
   }
 }
 
+
+/** Rejection (migration 006) and the master-PIN recovery, both new in phase 2. */
+async function rejectionAndMasterPin(browser, errors) {
+  const MEMBER = M.MEMBERS[2]; // Jan
+  const rejected = {
+    ...M.TABLE_DATA,
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234", master_pin: "999111" },
+    contributions: [
+      ...M.CONTRIBUTIONS,
+      {
+        id: "00000000-0000-0000-0000-000000009999",
+        cycle_id: M.CYCLES[6].id,
+        member_id: MEMBER.id,
+        status: 3,
+        amount: 1000,
+        proof_url: "https://example.invalid/rejected.jpg",
+        paid_at: null,
+        rejection_note: "Screenshot didn't show the amount clearly.",
+        rejected_at: "2026-09-21T10:00:00Z",
+      },
+    ],
+  };
+
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`rejection: ${e}`));
+  await serve(page, rejected);
+  // Identify this device as the rejected member, so Home shows their banner.
+  await page.addInitScript((id) => {
+    try { localStorage.setItem("pf_my_member_id", id); } catch (e) {}
+  }, MEMBER.id);
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1500);
+
+  // The member is told, and told why.
+  const card = page.locator(".rejected-card");
+  check("rejection: banner shown", (await card.count()) === 1);
+  const noteText = (await page.locator(".rejected-note-text").innerText().catch(() => "")).trim();
+  check(
+    "rejection: treasurer's note shown",
+    noteText.includes("amount clearly"),
+    JSON.stringify(noteText)
+  );
+  check("rejection: resubmit CTA", (await page.locator(".rejected-cta").count()) === 1);
+
+  // Resubmitting opens the contribute sheet rather than dead-ending.
+  await page.locator(".rejected-cta").click();
+  await page.waitForTimeout(300);
+  check("rejection: resubmit opens contribute", (await page.locator(".modal-overlay").count()) >= 1);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(200);
+
+  // The rejected cycle reads as its own state in the Rounds grid, and the
+  // member's ring goes red rather than looking idle.
+  await page.locator(".tab-item", { hasText: "Rounds" }).click();
+  await page.waitForTimeout(400);
+  check(
+    "rejection: chip marked in Rounds",
+    (await page.locator(".member-chip.rejected").count()) >= 1
+  );
+  await page.locator(".tab-item", { hasText: "Members" }).click();
+  await page.waitForTimeout(300);
+  check(
+    "rejection: roster ring is red",
+    (await page.locator(".avatar-rejected").count()) >= 1
+  );
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/rejection.png` });
+
+  // --- master PIN -------------------------------------------------------
+  // The keypad replaced the text field, so entry is dots + keys.
+  await page.locator(".unlock-btn").click();
+  await page.waitForTimeout(400);
+  check("pin: keypad rendered", (await page.locator(".pin-key").count()) === 12);
+  check("pin: dots rendered", (await page.locator(".pin-dot").count()) >= 4);
+
+  // A wrong PIN is refused and clears the dots.
+  await page.keyboard.type("0000");
+  await page.locator(".modal-btn-primary").first().click();
+  await page.waitForTimeout(300);
+  check("pin: wrong PIN refused", (await page.locator(".pin-error").count()) === 1);
+  check("pin: dots cleared", (await page.locator(".pin-dot.filled").count()) === 0);
+
+  // The master PIN is the way back in when the group's own is forgotten.
+  await page.keyboard.type("999111");
+  await page.locator(".modal-btn-primary").first().click();
+  await page.waitForTimeout(700);
+  check(
+    "pin: master PIN unlocks",
+    (await page.locator(".unlock-btn.unlocked").count()) === 1
+  );
+  const warn = (await page.locator(".save-warning-banner").allInnerTexts().catch(() => [])).join(" ");
+  check(
+    "pin: master unlock nudges toward a new PIN",
+    /master PIN/i.test(warn),
+    JSON.stringify(warn.slice(0, 120))
+  );
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/master-pin.png` });
+
+  await page.close();
+}
+
 (async () => {
   const browser = await chromium.launch({
     executablePath: process.env.PF_CHROMIUM || undefined,
@@ -204,6 +304,8 @@ async function reducedMotion(browser) {
   await moneyStates(browser, errors);
   console.log("\nMotion");
   await reducedMotion(browser);
+  console.log("\nRejection & master PIN");
+  await rejectionAndMasterPin(browser, errors);
 
   await browser.close();
 

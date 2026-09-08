@@ -16,8 +16,13 @@ window.PFViews.home = function (ctx) {
     overdueCount, remainingToGo, payCycle, payCycleDue, cyclePaidCount,
     myMember, myStatus, ROUND_PILL, state, unlocked, busy,
     attentionQueueExpanded, overdueListOpen, startRoundConfirming,
-    escapeHtml, inlineArg, icon, batteryCell, C
+    escapeHtml, inlineArg, icon, batteryCell, memberAvatar, memberStanding,
+    sparkline, C
   } = ctx;
+  // Cycles due so far — the denominator behind each member's standing ring.
+  const cyclesDueSoFar = C.completedCyclesCount(state.cycles);
+  // Set when the pinned action renders, so the view can reserve room for it.
+  let hasFloatingCta = false;
   let html = "";
 
 
@@ -279,12 +284,13 @@ window.PFViews.home = function (ctx) {
           <span class="hero-batt-cap">funded</span>
         </div>
       </div>
-      <div class="hero-gauge-meta">${
-        allDone
-          ? "<b>Fund fully funded</b>"
-          : `<b>${C.peso(remainingToGo)}</b> still to collect this round`
-      }</div>
+      ${sparkline(state.contributions, C)}
     </div>
+    <div class="hero-gauge-meta">${
+      allDone
+        ? "<b>Fund fully funded</b>"
+        : `<b>${C.peso(remainingToGo)}</b> still to collect this round`
+    }</div>
     ${
       pendingCount || overdueCount
         ? `<div class="cycle-note">${
@@ -346,23 +352,75 @@ window.PFViews.home = function (ctx) {
            </div>`
         : ""
     }
-    ${
-      // Skip this generic "pick your name" CTA when the My-status card
-      // above already offers the exact same action for the exact same
-      // cycle (one tap, no picker) — showing both is two buttons that do
-      // the same thing. Still shown when unlocked (treasurer needs the
-      // picker to act on ANY member) or when this device isn't tied to a
-      // member yet, so a shared device can still be used by anyone.
-      payCycle &&
-      (unlocked || cyclePaidCount < members.length) &&
-      !(!unlocked && myMember && myStatus && myStatus.actionCycle)
-        ? `<button type="button" class="hero-cta" onclick="PowerFund.openContributePicker(${payCycle})">${
-            unlocked ? "＋ Record / review a payment" : "＋ Record a contribution"
-          }</button>`
-        : ""
-    }
-    <button class="share-btn" onclick="PowerFund.openShareModal()">📋 Copy status update</button>
+    <button class="share-btn" onclick="PowerFund.openShareModal()">${icon(
+      "sheet",
+      14
+    )}<span>Copy status update</span></button>
   </div>`;
+
+  // Skip this generic "pick your name" action when the My-status card above
+  // already offers the same one for the same cycle — two buttons doing one
+  // thing. Still shown when unlocked (a treasurer acts on ANY member) or when
+  // this device isn't tied to a member yet, so a shared phone still works.
+  hasFloatingCta =
+    payCycle &&
+    (unlocked || cyclePaidCount < members.length) &&
+    !(!unlocked && myMember && myStatus && myStatus.actionCycle);
+  if (hasFloatingCta) {
+    html += `<div class="floating-cta"><button type="button" class="hero-cta" onclick="PowerFund.openContributePicker(${payCycle})">${
+      unlocked ? "＋ Record / review a payment" : "＋ Record a contribution"
+    }</button></div>`;
+  }
+
+  // ---- Roster strip: the whole group at a glance, without leaving Home.
+  // The Members tab is the full detail; this is the "who still owes" glance
+  // a treasurer wants while looking at the round.
+  html += `<div class="roster-strip-wrap">
+    <div class="roster-strip-head">
+      <span class="roster-strip-title">Members</span>
+      <button type="button" class="roster-strip-all" onclick="PowerFund.setView('members')">See all ${icon(
+        "chevron",
+        13
+      )}</button>
+    </div>
+    <div class="roster-strip">
+      ${members
+        .map((m) => {
+          const paidOut = C.roundStatus(state.contributions, rounds, m.member_order) === "completed";
+          const standing = memberStanding(m.id, cyclesDueSoFar, paidOut);
+          const cycleStatus = payCycle
+            ? C.statusOf(state.contributions, m.id, payCycle)
+            : null;
+          const mark =
+            cycleStatus === 2 ? "check" : cycleStatus === 1 ? "clock" : null;
+          return `<button type="button" class="roster-chip" onclick="PowerFund.setView('members')" aria-label="${escapeHtml(
+            m.name
+          )} — ${standing.replace("-", " ")}">
+            <span class="roster-avatar-wrap">
+              ${memberAvatar(m.name, standing, 52)}
+              <span class="roster-order">${m.member_order}</span>
+            </span>
+            <span class="roster-name">${
+              mark ? `<span class="roster-mark ${mark}">${icon(mark, 10)}</span>` : ""
+            }${escapeHtml(m.name)}</span>
+          </button>`;
+        })
+        .join("")}
+    </div>
+  </div>`;
+
+  // ---- Compact link out to the Rounds screen, mirroring the design: Home
+  // summarises the round, Rounds is where you work through it.
+  html += `<button type="button" class="rounds-link" onclick="PowerFund.setView('rounds')">
+    <span class="rounds-link-main">
+      <span class="rounds-link-title">Round ${allDone ? C.TOTAL_ROUNDS : curRound}</span>
+      ${allDone ? "" : ROUND_PILL[curStatus]}
+      <span class="rounds-link-meta">${C.peso(curCollected)} / ${C.peso(
+    C.GOAL_PER_ROUND
+  )}</span>
+    </span>
+    ${icon("chevron", 15)}
+  </button>`;
 
   // Previous round(s) whose payout hasn't been released — shown AFTER the
   // current round and styled as history, so last round's ₱30,000 is never
@@ -381,6 +439,8 @@ window.PFViews.home = function (ctx) {
     )} · historical, not part of Round ${curRound}</div>
     </div>`;
   });
+
+  if (hasFloatingCta) html += `<div class="cta-spacer" aria-hidden="true"></div>`;
 
   return html;
 };

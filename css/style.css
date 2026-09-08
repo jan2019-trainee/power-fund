@@ -1944,7 +1944,7 @@ body::after {
   display: flex;
   align-items: center;
   gap: 18px;
-  margin: 4px 0 6px;
+  margin: 4px 0 10px;
 }
 .hero-batt { position: relative; flex-shrink: 0; line-height: 0; }
 .hero-batt-label {
@@ -2173,7 +2173,10 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   }
   .view-home > .fund-total,
   .view-home > .battery-hero,
-  .view-home > .prev-round { grid-column: 1; }
+  .view-home > .prev-round,
+  .view-home > .roster-strip-wrap,
+  .view-home > .rounds-link,
+  .view-home > .cta-spacer { grid-column: 1; }
   .view-home > .my-status-card,
   .view-home > .my-status-setup,
   .view-home > .attention-panel { grid-column: 2; margin-bottom: 0; }
@@ -2234,4 +2237,157 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
     text-align: center;
     padding: 40px 12px;
   }
+}
+
+/* ---------------------------------------------------------------------------
+ * Home composition — the pieces the design puts on Home that the port had
+ * left out: a growth sparkline in the hero, the roster at a glance, a link
+ * through to Rounds, and the primary action pinned where the thumb is.
+ * ------------------------------------------------------------------------- */
+.hero-spark { flex: 1; min-width: 0; }
+.hero-spark-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.hero-spark .spark { width: 100%; height: 40px; display: block; }
+.hero-spark-total { font-size: 11.5px; color: var(--success); font-weight: 600; margin-top: 4px; }
+
+.roster-strip-wrap { margin: 20px 0; }
+.roster-strip-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.roster-strip-title {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+}
+.roster-strip-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px;
+}
+/* Overflow padding is cancelled by the negative margin so the avatar rings
+   aren't clipped by the scroll container. */
+.roster-strip {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  padding: 16px 8px 8px;
+  margin: -16px -8px -8px;
+  scrollbar-width: none;
+}
+.roster-strip::-webkit-scrollbar { display: none; }
+.roster-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  width: 58px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.roster-avatar-wrap { position: relative; line-height: 0; }
+.roster-order {
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: var(--bg-primary);
+  border: 1.5px solid rgba(255, 255, 255, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.roster-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.roster-mark.check { color: var(--success); }
+.roster-mark.clock { color: var(--pending-review); }
+
+.rounds-link {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  cursor: pointer;
+  text-align: left;
+  margin-bottom: 16px;
+}
+.rounds-link:hover { background: var(--bg-card-alt); }
+.rounds-link-main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.rounds-link-title {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.rounds-link-meta { font-size: 12px; color: var(--text-muted); }
+.rounds-link .icon { color: var(--text-muted); }
+
+/* The primary action rides above the tab bar so it stays in reach however far
+   down the page you are. The spacer keeps it from covering the last card. */
+.floating-cta {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+  z-index: 15;
+  padding: 28px 16px 12px;
+  background: linear-gradient(to top, var(--bg-primary) 55%, transparent);
+  pointer-events: none;
+}
+.floating-cta .hero-cta {
+  pointer-events: auto;
+  max-width: 728px;
+  margin: 0 auto;
+  display: block;
+}
+.cta-spacer { height: 84px; }
+
+@media (min-width: 900px) {
+  /* With a sidebar there is no thumb zone to hug — the action returns to the
+     flow of the column it belongs to. */
+  .floating-cta {
+    position: static;
+    padding: 0;
+    background: none;
+    grid-column: 1;
+  }
+  .cta-spacer { display: none; }
 }

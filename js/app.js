@@ -1387,6 +1387,7 @@
     alert:
       '<path d="M10.3 4.6 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.6a2 2 0 0 0-3.4 0Z"/><path d="M12 9.5v4"/><circle cx="12" cy="17" r=".9" fill="currentColor" stroke="none"/>',
     check: '<polyline points="4 12 10 18 20 6"/>',
+    chevron: '<polyline points="9 6 15 12 9 18"/>',
     bell: '<path d="M6 8a6 6 0 0 1 12 0c0 4 1.5 5.5 2 6H4c.5-.5 2-2 2-6Z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
     party: '<path d="M4 20l4.5-11L19 19.5 4 20Z"/><path d="M14 4.5v2M18.5 8h2M16.8 6.2l1.4-1.4"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
@@ -1461,6 +1462,59 @@
       if (paid >= cyclesDueSoFar) return "current";
     }
     return "idle";
+  }
+
+  /**
+   * Fund-growth sparkline: cumulative confirmed money over time.
+   *
+   * Built from the payments themselves (paid_at on confirmed contributions),
+   * so it reflects when money actually arrived rather than a schedule. Rows
+   * without a paid_at can't be placed on a timeline and are skipped; if fewer
+   * than two points survive there is no trend to draw and it renders nothing
+   * rather than an invented straight line.
+   */
+  function sparkline(contributions, Calc) {
+    const paid = (contributions || [])
+      .filter((c) => c.status === Calc.STATUS_PAID && c.paid_at)
+      .map((c) => ({ t: new Date(c.paid_at).getTime(), amt: c.amount || Calc.CONTRIBUTION_AMOUNT }))
+      .filter((c) => !isNaN(c.t))
+      .sort((a, b) => a.t - b.t);
+    if (paid.length < 2) return "";
+
+    let running = 0;
+    const pts = paid.map((p) => {
+      running += p.amt;
+      return { t: p.t, total: running };
+    });
+    const t0 = pts[0].t;
+    const tSpan = pts[pts.length - 1].t - t0 || 1;
+    const max = pts[pts.length - 1].total || 1;
+    const W = 140;
+    const H = 40;
+    const xy = pts.map((p) => {
+      const x = ((p.t - t0) / tSpan) * W;
+      const y = H - (p.total / max) * (H - 4) - 2;
+      return `${x.toFixed(1)} ${y.toFixed(1)}`;
+    });
+
+    return `<div class="hero-spark">
+      <div class="hero-spark-label">Fund growth</div>
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="spark" aria-hidden="true" focusable="false">
+        <defs>
+          <linearGradient id="sparkStroke" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#F5A623"/>
+            <stop offset="100%" stop-color="#4CD9C0"/>
+          </linearGradient>
+          <linearGradient id="sparkFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#4CD9C0" stop-opacity="0.3"/>
+            <stop offset="100%" stop-color="#4CD9C0" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <path d="M${xy[0]} L${xy.join(" L")} L${W} ${H} L0 ${H} Z" fill="url(#sparkFill)"/>
+        <polyline points="${xy.join(" ")}" fill="none" stroke="url(#sparkStroke)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+      </svg>
+      <div class="hero-spark-total">${Calc.peso(max)} collected to date</div>
+    </div>`;
   }
 
   /** Inline SVG for one icon, sized in px and inheriting the caller's colour. */
@@ -2138,7 +2192,7 @@
       overdueListOpen, startRoundConfirming, isWide,
       // helpers the views render with
       escapeHtml, inlineArg, icon, memberAvatar, memberStanding, batteryCell,
-      getPayout, payoutRecipientName, payoutDateText, C,
+      getPayout, payoutRecipientName, payoutDateText, sparkline, C,
     };
 
     const view = window.PFViews && window.PFViews[currentView];

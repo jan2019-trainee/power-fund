@@ -2404,9 +2404,21 @@
       const subs = {
         setup:
           "This protects treasurer actions. Anyone with the PIN can edit — share it only with whoever holds that role.",
-        enter: "Enter the PIN to unlock treasurer actions.",
+        enter:
+          "Enter the PIN to unlock treasurer actions. A forgotten PIN can't be recovered — ask whoever else in the group has it.",
         change: "Set a new PIN. This replaces the current one for everyone.",
       };
+      // There is deliberately no PIN recovery: any reset that worked without
+      // the PIN would let whoever is holding the phone take treasurer control.
+      // That is a fine trade only if people are told BEFORE they forget, so
+      // the warning sits on the screens where a PIN is chosen.
+      const noRecovery =
+        pinModalMode === "enter"
+          ? ""
+          : `<p class="pin-warning">${icon(
+              "alert",
+              14
+            )}<span>There is no way to recover a forgotten PIN. Write it down somewhere safe, and make sure a second person in the group knows it.</span></p>`;
       html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closePinModal()">
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
           <h3 id="dlg-title">${titles[pinModalMode]}</h3>
@@ -2416,6 +2428,7 @@
           )}"
                  oninput="PowerFund.setPinInput(this.value)" onkeydown="if(event.key==='Enter') PowerFund.submitPin()">
           ${pinError ? `<p class="pin-error">${escapeHtml(pinError)}</p>` : ""}
+          ${noRecovery}
           <div class="modal-actions">
             <button class="modal-btn-primary" onclick="PowerFund.submitPin()">${
               pinModalMode === "enter" ? "Unlock" : "Save PIN"

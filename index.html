@@ -27,10 +27,16 @@
        the app shell has no runtime CDN dependency and works offline. -->
   <script src="js/vendor/supabase-2.45.4.min.js"></script>
 
-  <!-- App code: config -> calculations -> database -> app -> pwa -->
+  <!-- App code: config -> calculations -> database -> views -> app -> pwa.
+       Views register themselves on window.PFViews and are called by render(),
+       so they must load before app.js. -->
   <script src="js/config.js"></script>
   <script src="js/calculations.js"></script>
   <script src="js/database.js"></script>
+  <script src="js/views/home.js"></script>
+  <script src="js/views/rounds.js"></script>
+  <script src="js/views/members.js"></script>
+  <script src="js/views/menu.js"></script>
   <script src="js/app.js"></script>
   <script src="js/pwa.js"></script>
 </body>

@@ -1,0 +1,103 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .pf-modal { opacity: 0; animation: pfModalIn .32s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfModalIn { from { opacity: 0; transform: translate(-50%,-50%) translateY(10px) scale(0.98); } to { opacity: 1; transform: translate(-50%,-50%) translateY(0) scale(1); } }
+    .pf-cta:active { transform: scale(0.98); }
+    @keyframes pfSpin { to { transform: rotate(360deg); } }
+    .pf-spinner { animation: pfSpin .8s linear infinite; }
+  </style>
+</helmet>
+
+<div style="position:relative; width:1440px; height:900px; overflow:hidden; background:#0D1B2A; border-radius:16px; border:1px solid rgba(255,255,255,0.08); font-family:'Inter',sans-serif; color:#EDEFF2;">
+
+  <div style="opacity:0.35; filter:blur(1.5px); display:flex; height:100%;">
+    <div style="width:240px; height:100%; background:rgba(255,255,255,0.02); border-right:1px solid rgba(255,255,255,0.08);"></div>
+    <div style="flex:1; padding:32px 40px;"><div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:24px;">Good evening, Cathy</div></div>
+  </div>
+  <div style="position:absolute; inset:0; background:rgba(5,10,18,0.6);"></div>
+
+  <div class="pf-modal" style="position:absolute; top:50%; left:50%; width:440px; background:linear-gradient(180deg, rgba(20,42,66,0.98), rgba(13,27,42,0.99)); border:1px solid rgba(255,255,255,0.12); border-radius:22px; box-shadow:0 30px 80px -20px rgba(0,0,0,0.7); padding:28px 30px;">
+
+    <div style="margin-bottom:16px;">
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:17px;">Submitting payment</div>
+      <div style="font-size:12px; color:#93A2B8; margin-top:2px;">Reference sheet — what happens after "I've sent this"</div>
+    </div>
+
+    <div style="display:flex; align-items:center; gap:12px; padding:12px; border-radius:14px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1); margin-bottom:22px;">
+      <div style="width:44px; height:44px; border-radius:10px; background:linear-gradient(135deg, #2A4A68, #3D6488); flex-shrink:0;"></div>
+      <div style="flex:1;">
+        <div style="font-size:13px; font-weight:600;">Cycle 7 &middot; Round 2</div>
+        <div style="font-size:11.5px; color:#93A2B8;">payment-screenshot.jpg &middot; &#8369;1,000</div>
+      </div>
+    </div>
+
+    <div id="pf-state-idle">
+      <button id="pf-submit-btn" class="pf-cta" style="width:100%; height:52px; border:none; border-radius:16px; background:linear-gradient(135deg, #F5A623, #FFC966); color:#14213D; font-family:'Inter',sans-serif; font-weight:700; font-size:14.5px; cursor:pointer;">I've sent this &middot; &#8369;1,000</button>
+    </div>
+
+    <div id="pf-state-uploading" style="display:none;">
+      <div style="width:100%; height:52px; border-radius:16px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); display:flex; align-items:center; justify-content:center; gap:10px;">
+        <svg class="icon pf-spinner" viewBox="0 0 24 24" style="width:18px; height:18px; color:#F5A623;"><path d="M12 2a10 10 0 0 1 10 10"/></svg>
+        <span style="font-size:14px; font-weight:600; color:#EDEFF2;">Uploading proof&hellip;</span>
+      </div>
+    </div>
+
+    <div id="pf-state-error" style="display:none;">
+      <div style="display:flex; align-items:center; gap:10px; padding:13px 16px; border-radius:14px; background:rgba(225,83,83,0.1); border:1px solid rgba(225,83,83,0.4); margin-bottom:14px;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:16px; height:16px; color:#E15353; stroke-width:2.4; flex-shrink:0;"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span style="flex:1; font-size:12.5px; font-weight:600; color:#EDEFF2;">Upload failed &mdash; check your connection</span>
+      </div>
+      <button id="pf-retry-btn" class="pf-cta" style="width:100%; height:52px; border:none; border-radius:16px; background:linear-gradient(135deg, #F5A623, #FFC966); color:#14213D; font-family:'Inter',sans-serif; font-weight:700; font-size:14.5px; cursor:pointer;">Retry</button>
+    </div>
+
+    <div id="pf-state-success" style="display:none; text-align:center; padding:6px 0 2px;">
+      <div style="width:54px; height:54px; border-radius:50%; background:rgba(76,175,131,0.16); display:flex; align-items:center; justify-content:center; margin:0 auto 14px;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:24px; height:24px; color:#4CAF83; stroke-width:2.6;"><polyline points="4 12 10 18 20 6"/></svg>
+      </div>
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:15.5px; margin-bottom:4px;">Payment submitted</div>
+      <div style="font-size:12px; color:#93A2B8;">The treasurer will review it shortly.</div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {
+  componentDidMount() {
+    var idle = document.getElementById('pf-state-idle');
+    var uploading = document.getElementById('pf-state-uploading');
+    var error = document.getElementById('pf-state-error');
+    var success = document.getElementById('pf-state-success');
+    var submitBtn = document.getElementById('pf-submit-btn');
+    var retryBtn = document.getElementById('pf-retry-btn');
+    var attempt = 0;
+    function show(el) {
+      [idle, uploading, error, success].forEach(function (s) { s.style.display = 'none'; });
+      el.style.display = 'block';
+    }
+    function upload() {
+      show(uploading);
+      attempt += 1;
+      setTimeout(function () {
+        if (attempt === 1) { show(error); } else { show(success); }
+      }, 1300);
+    }
+    if (submitBtn) submitBtn.addEventListener('click', upload);
+    if (retryBtn) retryBtn.addEventListener('click', upload);
+  }
+}
+</script>
+</body>
+</html>

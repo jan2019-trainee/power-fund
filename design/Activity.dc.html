@@ -1,0 +1,226 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    a { color: #F5A623; }
+    a:hover { color: #ffb733; }
+    .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .pf-fade { opacity: 0; animation: pfFadeUp .5s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfFadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pfDrift1 { 0%, 100% { transform: translate(-8%, -6%) scale(1); } 50% { transform: translate(6%, 4%) scale(1.1); } }
+    .pf-chip:active { transform: scale(0.96); }
+  </style>
+</helmet>
+
+<div style="position:relative; width:390px; height:980px; overflow:hidden; background:#0D1B2A; border-radius:38px; border:1px solid rgba(255,255,255,0.08); font-family:'Inter',sans-serif; color:#EDEFF2;">
+
+  <div class="pf-glow1" style="position:absolute; top:-80px; right:-100px; width:280px; height:280px; border-radius:50%; background:radial-gradient(circle, rgba(76,217,192,0.18), transparent 70%); filter:blur(32px); animation:pfDrift1 18s ease-in-out infinite;"></div>
+
+  <div style="position:relative; z-index:1; padding:28px 20px 24px; height:100%; overflow:hidden;">
+
+    <div class="pf-fade" style="margin-bottom:18px;">
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:20px; margin-bottom:3px;">Activity</div>
+      <div style="font-size:12.5px; color:#93A2B8;">Every contribution, payout &amp; admin action</div>
+    </div>
+
+    <div class="pf-fade" style="animation-delay:.04s; display:flex; gap:8px; overflow-x:auto; margin-bottom:20px; scrollbar-width:none;">
+      <span class="pf-chip pf-filter-chip active" data-cat="all" style="flex-shrink:0; padding:8px 14px; border-radius:20px; background:#F5A623; color:#14213D; font-size:12.5px; font-weight:700; cursor:pointer;">All</span>
+      <span class="pf-chip pf-filter-chip" data-cat="payment" style="flex-shrink:0; padding:8px 14px; border-radius:20px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); color:#93A2B8; font-size:12.5px; font-weight:600; cursor:pointer;">Payments</span>
+      <span class="pf-chip pf-filter-chip" data-cat="payout" style="flex-shrink:0; padding:8px 14px; border-radius:20px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); color:#93A2B8; font-size:12.5px; font-weight:600; cursor:pointer;">Payouts</span>
+      <span class="pf-chip pf-filter-chip" data-cat="admin" style="flex-shrink:0; padding:8px 14px; border-radius:20px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); color:#93A2B8; font-size:12.5px; font-weight:600; cursor:pointer;">Admin</span>
+    </div>
+
+    <div class="pf-fade" style="animation-delay:.08s;">
+
+      <div id="pf-empty-filter" style="display:none; flex-direction:column; align-items:center; text-align:center; padding:50px 10px;">
+        <div style="width:48px; height:48px; border-radius:50%; background:rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; margin-bottom:14px;">
+          <svg class="icon" viewBox="0 0 24 24" style="width:22px; height:22px; color:#93A2B8;"><line x1="8" y1="7" x2="20" y2="7"/><line x1="8" y1="12" x2="20" y2="12"/><line x1="8" y1="17" x2="14" y2="17"/></svg>
+        </div>
+        <div style="font-size:13.5px; font-weight:600; margin-bottom:4px;">Nothing here yet</div>
+        <div style="font-size:12px; color:#93A2B8;">No activity matches this filter.</div>
+      </div>
+
+      <div class="pf-day-group">
+      <div class="pf-day-label" style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:#93A2B8; margin-bottom:6px;">Today</div>
+
+      <div class="pf-activity-row" data-cat="payment" style="display:flex; align-items:center; gap:12px; padding:11px 0; border-bottom:1px solid rgba(255,255,255,0.08);">
+        <div style="width:36px; height:36px; border-radius:50%; background:rgba(245,166,35,0.14); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+          <svg class="icon" viewBox="0 0 24 24" style="width:16px; height:16px; color:#F5A623;"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+        </div>
+        <div style="flex:1; min-width:0;">
+          <div style="font-size:13.5px; color:#EDEFF2; line-height:1.4;">Ben marked cycle 8 as sent</div>
+          <div style="font-size:11px; color:#93A2B8; margin-top:1px;">10:42 AM</div>
+        </div>
+        <div style="text-align:right; flex-shrink:0;">
+          <div style="font-family:'Space Grotesk',sans-serif; font-size:14px; font-weight:700; color:#F5A623;">&#8369;1,000</div>
+          <div style="font-size:9.5px; color:#F5A623; font-weight:600;">Pending review</div>
+        </div>
+      </div>
+
+      <div class="pf-activity-row" data-cat="payment" style="display:flex; align-items:center; gap:12px; padding:11px 0; border-bottom:1px solid rgba(255,255,255,0.08);">
+        <div style="width:36px; height:36px; border-radius:50%; background:rgba(76,175,131,0.14); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+          <svg class="icon" viewBox="0 0 24 24" style="width:16px; height:16px; color:#4CAF83; stroke-width:2.6;"><polyline points="4 12 10 18 20 6"/></svg>
+        </div>
+        <div style="flex:1; min-width:0;">
+          <div style="font-size:13.5px; color:#EDEFF2; line-height:1.4;">Treasurer confirmed Cathy's cycle 7</div>
+          <div style="font-size:11px; color:#93A2B8; margin-top:1px;">9:15 AM</div>
+        </div>
+        <div style="text-align:right; flex-shrink:0;">
+          <div style="font-family:'Space Grotesk',sans-serif; font-size:14px; font-weight:700; color:#4CAF83;">+&#8369;1,000</div>
+        </div>
+      </div>
+      </div>
+
+      <div class="pf-day-group">
+      <div class="pf-day-label" style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:#93A2B8; margin:16px 0 6px;">Yesterday</div>
+
+      <div class="pf-activity-row" data-cat="payout" style="display:flex; align-items:center; gap:12px; padding:11px 0; border-bottom:1px solid rgba(255,255,255,0.08);">
+        <div style="width:36px; height:36px; border-radius:50%; background:rgba(245,166,35,0.14); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+          <svg class="icon" viewBox="0 0 24 24" style="width:16px; height:16px; color:#F5A623; stroke-width:1.8;">
+            <rect x="3" y="6.5" width="18" height="13" rx="2.5"/>
+            <path d="M16.5 6.5V5.3A1.8 1.8 0 0 0 14.7 3.5H6A2.5 2.5 0 0 0 3.5 6"/>
+            <circle cx="17" cy="13" r="1.3" fill="currentColor" stroke="none"/>
+          </svg>
+        </div>
+        <div style="flex:1; min-width:0;">
+          <div style="font-size:13.5px; color:#EDEFF2; line-height:1.4;">Payout released &mdash; Round 1 to Ana</div>
+          <div style="font-size:11px; color:#93A2B8; margin-top:1px;">4:02 PM</div>
+        </div>
+        <div style="text-align:right; flex-shrink:0;">
+          <div style="font-family:'Space Grotesk',sans-serif; font-size:14px; font-weight:700; color:#EDEFF2;">&#8369;30,000</div>
+        </div>
+      </div>
+
+      <div class="pf-activity-row" data-cat="admin" style="display:flex; align-items:center; gap:12px; padding:11px 0; border-bottom:1px solid rgba(255,255,255,0.08);">
+        <div style="width:36px; height:36px; border-radius:50%; background:rgba(255,255,255,0.06); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+          <svg class="icon" viewBox="0 0 24 24" style="width:16px; height:16px; color:#93A2B8;"><path d="M9 14 4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-2"/></svg>
+        </div>
+        <div style="flex:1; min-width:0;">
+          <div style="font-size:13.5px; color:#EDEFF2; line-height:1.4;">Dan's cycle 6 reverted to unpaid</div>
+          <div style="font-size:11px; color:#93A2B8; margin-top:1px;">11:20 AM</div>
+        </div>
+        <div style="text-align:right; flex-shrink:0;">
+          <div style="font-family:'Space Grotesk',sans-serif; font-size:14px; font-weight:700; color:#93A2B8;">&minus;&#8369;1,000</div>
+        </div>
+      </div>
+      </div>
+
+      <div class="pf-day-group">
+      <div class="pf-day-label" style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:#93A2B8; margin:16px 0 6px;">Sep 3</div>
+
+      <div class="pf-activity-row" data-cat="admin" style="display:flex; align-items:center; gap:12px; padding:11px 0; border-bottom:1px solid rgba(255,255,255,0.08);">
+        <div style="width:36px; height:36px; border-radius:50%; background:rgba(76,217,192,0.14); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+          <svg class="icon" viewBox="0 0 24 24" style="width:16px; height:16px; color:#4CD9C0;"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg>
+        </div>
+        <div style="flex:1; min-width:0;">
+          <div style="font-size:13.5px; color:#EDEFF2; line-height:1.4;">Treasurer started Round 2</div>
+          <div style="font-size:11px; color:#93A2B8; margin-top:1px;">8:00 AM</div>
+        </div>
+      </div>
+
+      <div class="pf-activity-row" data-cat="admin" style="display:flex; align-items:center; gap:12px; padding:11px 0; border-bottom:1px solid rgba(255,255,255,0.08);">
+        <div style="width:36px; height:36px; border-radius:50%; background:rgba(255,255,255,0.06); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+          <svg class="icon" viewBox="0 0 24 24" style="width:16px; height:16px; color:#93A2B8;"><circle cx="9" cy="8" r="3.2"/><path d="M2.8 20.2c.5-3.6 3-5.6 6.2-5.6s5.7 2 6.2 5.6"/><circle cx="17.3" cy="8.6" r="2.4"/><path d="M15.9 14.3c2.3.5 4 2.3 4.3 5.4"/></svg>
+        </div>
+        <div style="flex:1; min-width:0;">
+          <div style="font-size:13.5px; color:#EDEFF2; line-height:1.4;">Payout order: Cathy swapped with Dan</div>
+          <div style="font-size:11px; color:#93A2B8; margin-top:1px;">7:45 AM</div>
+        </div>
+      </div>
+
+      <div class="pf-activity-row" data-cat="payment" style="display:flex; align-items:center; gap:12px; padding:11px 0;">
+        <div style="width:36px; height:36px; border-radius:50%; background:rgba(225,83,83,0.12); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+          <svg class="icon" viewBox="0 0 24 24" style="width:16px; height:16px; color:#E15353;"><circle cx="12" cy="12" r="9"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
+        </div>
+        <div style="flex:1; min-width:0;">
+          <div style="font-size:13.5px; color:#EDEFF2; line-height:1.4;">Rejected Elena's cycle 5 claim</div>
+          <div style="font-size:11px; color:#93A2B8; margin-top:1px;">2:30 PM</div>
+        </div>
+        <div style="text-align:right; flex-shrink:0;">
+          <div style="font-family:'Space Grotesk',sans-serif; font-size:14px; font-weight:700; color:#E15353;">&#8369;1,000</div>
+          <div style="font-size:9.5px; color:#E15353; font-weight:600;">Rejected</div>
+        </div>
+      </div>
+      </div>
+      <div style="height:90px;"></div>
+    </div>
+  </div>
+
+  <!-- bottom tab bar -->
+  <div style="position:absolute; left:0; right:0; bottom:0; height:78px; background:rgba(13,27,42,0.86); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); border-top:1px solid rgba(255,255,255,0.08); display:flex; align-items:center; justify-content:space-around; padding-bottom:10px; z-index:2;">
+    <button style="background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px 10px;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#93A2B8;"><path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9a1 1 0 0 0 1 1h3v-6h4v6h3a1 1 0 0 0 1-1v-9"/></svg>
+      <span style="font-size:10px; font-weight:600; color:#93A2B8;">Home</span>
+    </button>
+    <button style="background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px 10px;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#93A2B8;"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg>
+      <span style="font-size:10px; font-weight:600; color:#93A2B8;">Rounds</span>
+    </button>
+    <button style="background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px 10px;">
+      <div style="width:36px; height:24px; border-radius:10px; background:rgba(245,166,35,0.14); display:flex; align-items:center; justify-content:center;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#F5A623;"><line x1="8" y1="7" x2="20" y2="7"/><line x1="8" y1="12" x2="20" y2="12"/><line x1="8" y1="17" x2="20" y2="17"/><circle cx="4" cy="7" r="1" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="4" cy="17" r="1" fill="currentColor" stroke="none"/></svg>
+      </div>
+      <span style="font-size:10px; font-weight:700; color:#F5A623;">Activity</span>
+    </button>
+    <button style="background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px 12px;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#93A2B8;"><polyline points="3 16 9 10 13 14 21 5"/><polyline points="15 5 21 5 21 11"/></svg>
+      <span style="font-size:10px; font-weight:600; color:#93A2B8;">Insights</span>
+    </button>
+    <button style="background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px 12px;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#93A2B8;"><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>
+      <span style="font-size:10px; font-weight:600; color:#93A2B8;">Menu</span>
+    </button>
+  </div>
+</div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {
+  componentDidMount() {
+    var chips = Array.prototype.slice.call(document.querySelectorAll('.pf-filter-chip'));
+    var rows = Array.prototype.slice.call(document.querySelectorAll('.pf-activity-row'));
+    var groups = Array.prototype.slice.call(document.querySelectorAll('.pf-day-group'));
+    var emptyState = document.getElementById('pf-empty-filter');
+
+    function applyFilter(cat) {
+      var visibleCount = 0;
+      rows.forEach(function (row) {
+        var show = cat === 'all' || row.getAttribute('data-cat') === cat;
+        row.style.display = show ? 'flex' : 'none';
+        if (show) visibleCount++;
+      });
+      groups.forEach(function (group) {
+        var hasVisible = group.querySelector('.pf-activity-row[style*="flex"]') !== null;
+        group.style.display = hasVisible ? '' : 'none';
+      });
+      emptyState.style.display = visibleCount === 0 ? 'flex' : 'none';
+    }
+
+    chips.forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        chips.forEach(function (c) {
+          c.classList.remove('active');
+          c.style.background = 'rgba(255,255,255,0.06)';
+          c.style.border = '1px solid rgba(255,255,255,0.12)';
+          c.style.color = '#93A2B8';
+        });
+        chip.classList.add('active');
+        chip.style.background = '#F5A623';
+        chip.style.border = 'none';
+        chip.style.color = '#14213D';
+        applyFilter(chip.getAttribute('data-cat'));
+      });
+    });
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,89 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .pf-modal { opacity: 0; animation: pfModalIn .32s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfModalIn { from { opacity: 0; transform: translate(-50%,-50%) translateY(10px) scale(0.98); } to { opacity: 1; transform: translate(-50%,-50%) translateY(0) scale(1); } }
+    .pf-x:hover { background: rgba(255,255,255,0.08) !important; }
+    .pf-arrow:hover { background: rgba(255,255,255,0.1) !important; }
+    .pf-arrow:active { transform: scale(0.9); }
+    @keyframes pfRowSwap { 0% { opacity: 0.4; } 100% { opacity: 1; } }
+    .pf-row-swapped { animation: pfRowSwap .3s ease both; }
+  </style>
+</helmet>
+
+<div style="position:relative; width:1440px; height:900px; overflow:hidden; background:#0D1B2A; border-radius:16px; border:1px solid rgba(255,255,255,0.08); font-family:'Inter',sans-serif; color:#EDEFF2;">
+
+  <div style="opacity:0.35; filter:blur(1.5px); display:flex; height:100%;">
+    <div style="width:240px; height:100%; background:rgba(255,255,255,0.02); border-right:1px solid rgba(255,255,255,0.08);"></div>
+    <div style="flex:1; padding:32px 40px;"><div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:24px;">Menu</div></div>
+  </div>
+  <div style="position:absolute; inset:0; background:rgba(5,10,18,0.6);"></div>
+
+  <div class="pf-modal" style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:460px; background:linear-gradient(180deg, rgba(20,42,66,0.98), rgba(13,27,42,0.99)); border:1px solid rgba(255,255,255,0.12); border-radius:22px; box-shadow:0 30px 80px -20px rgba(0,0,0,0.7); padding:28px 30px;">
+
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:6px;">
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:17px;">Reorder payout order</div>
+      <button class="pf-x" style="width:32px; height:32px; border-radius:9px; background:none; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:16px; height:16px; color:#93A2B8;"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div style="font-size:12px; color:#93A2B8; margin-bottom:18px;">Only affects rounds that haven't started yet</div>
+
+    <div id="pf-order-list"></div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {
+  componentDidMount() {
+    var members = [
+      { initial: 'A', name: 'Ana', ring: '#4CAF83' },
+      { initial: 'B', name: 'Ben', ring: '#4CAF83' },
+      { initial: 'C', name: 'Cathy', ring: '#9B7FE0' },
+      { initial: 'D', name: 'Dan', ring: '#E15353' },
+      { initial: 'E', name: 'Elena', ring: 'rgba(255,255,255,0.18)' }
+    ];
+    var list = document.getElementById('pf-order-list');
+    function render(swappedIdx) {
+      list.innerHTML = '';
+      members.forEach(function (m, i) {
+        var row = document.createElement('div');
+        row.className = (swappedIdx && (i === swappedIdx[0] || i === swappedIdx[1])) ? 'pf-row-swapped' : '';
+        row.style.cssText = 'display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:13px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); margin-bottom:8px;';
+        row.innerHTML =
+          '<span style="width:18px; font-size:12px; color:#93A2B8; font-weight:600;">#' + (i + 1) + '</span>' +
+          '<div style="width:32px; height:32px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:\'Space Grotesk\',sans-serif; font-weight:600; font-size:13px; box-shadow:0 0 0 2px ' + m.ring + '; flex-shrink:0;">' + m.initial + '</div>' +
+          '<span style="flex:1; font-size:13.5px; font-weight:500;">' + m.name + '</span>' +
+          '<button data-dir="up" data-i="' + i + '" class="pf-arrow" ' + (i === 0 ? 'disabled style="opacity:0.3;"' : '') + ' style="width:30px; height:30px; border-radius:8px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.14); color:#EDEFF2; cursor:pointer; display:flex; align-items:center; justify-content:center;"><svg class="icon" viewBox="0 0 24 24" style="width:13px; height:13px;"><path d="M18 15l-6-6-6 6"/></svg></button>' +
+          '<button data-dir="down" data-i="' + i + '" class="pf-arrow" ' + (i === members.length - 1 ? 'disabled style="opacity:0.3;"' : '') + ' style="width:30px; height:30px; border-radius:8px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.14); color:#EDEFF2; cursor:pointer; display:flex; align-items:center; justify-content:center; margin-left:6px;"><svg class="icon" viewBox="0 0 24 24" style="width:13px; height:13px;"><path d="M6 9l6 6 6-6"/></svg></button>';
+        list.appendChild(row);
+      });
+      Array.prototype.slice.call(list.querySelectorAll('.pf-arrow')).forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var i = parseInt(btn.getAttribute('data-i'), 10);
+          var dir = btn.getAttribute('data-dir');
+          var j = dir === 'up' ? i - 1 : i + 1;
+          if (j < 0 || j >= members.length) return;
+          var tmp = members[i]; members[i] = members[j]; members[j] = tmp;
+          render([i, j]);
+        });
+      });
+    }
+    render();
+  }
+}
+</script>
+</body>
+</html>

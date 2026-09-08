@@ -1,0 +1,75 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .pf-fade { opacity: 0; animation: pfFadeUp .4s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfFadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    .pf-chip:active { opacity: 0.7; }
+    input[type="range"] { -webkit-appearance: none; appearance: none; height: 4px; border-radius: 3px; background: rgba(255,255,255,0.15); outline: none; }
+    input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #F5A623; cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.4); }
+    input[type="range"]::-moz-range-thumb { width: 20px; height: 20px; border-radius: 50%; background: #F5A623; border: none; cursor: pointer; }
+  </style>
+</helmet>
+
+<div style="position:relative; width:390px; height:700px; overflow:hidden; background:#050A12; border-radius:38px; border:1px solid rgba(255,255,255,0.08); font-family:'Inter',sans-serif; color:#EDEFF2; display:flex; flex-direction:column;">
+
+  <!-- top bar -->
+  <div class="pf-fade" style="display:flex; align-items:center; justify-content:space-between; padding:22px 20px 16px; flex-shrink:0;">
+    <button class="pf-chip" style="background:none; border:none; color:#93A2B8; font-family:'Inter',sans-serif; font-size:14px; font-weight:600; cursor:pointer; padding:4px;">Cancel</button>
+    <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:14.5px;">Crop Photo</div>
+    <button id="pf-crop-save" class="pf-chip" style="background:none; border:none; color:#F5A623; font-family:'Inter',sans-serif; font-size:14px; font-weight:700; cursor:pointer; padding:4px;">Save</button>
+  </div>
+
+  <!-- crop stage -->
+  <div class="pf-fade" style="animation-delay:.04s; position:relative; width:390px; height:390px; overflow:hidden; background:#000; flex-shrink:0;">
+    <div id="pf-crop-photo" style="position:absolute; inset:0; background:linear-gradient(145deg,#3a5f7d,#8a5a3c 55%,#c98a4a); display:flex; align-items:center; justify-content:center; transform:scale(1); transition:transform .05s linear;">
+      <svg viewBox="0 0 24 24" style="width:180px; height:180px; color:rgba(255,255,255,0.35); fill:currentColor; stroke:none;">
+        <circle cx="12" cy="8.5" r="4.2"/>
+        <path d="M4 21c0-4.5 3.5-7.5 8-7.5s8 3 8 7.5"/>
+      </svg>
+    </div>
+    <!-- circular crop mask -->
+    <div style="position:absolute; top:50%; left:50%; width:270px; height:270px; transform:translate(-50%,-50%); border-radius:50%; box-shadow:0 0 0 2000px rgba(0,0,0,0.62); border:2px solid rgba(255,255,255,0.85); pointer-events:none;"></div>
+  </div>
+
+  <!-- controls -->
+  <div class="pf-fade" style="animation-delay:.08s; padding:26px 28px 0; flex:1;">
+    <div style="display:flex; align-items:center; gap:14px; margin-bottom:10px;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:15px; height:15px; color:#93A2B8; flex-shrink:0;"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+      <input id="pf-zoom-slider" type="range" min="100" max="200" value="100" style="flex:1;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:17px; height:17px; color:#93A2B8; flex-shrink:0;"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+    </div>
+    <div style="text-align:center; font-size:12px; color:#93A2B8;">Drag to reposition &middot; Pinch to zoom</div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {
+  componentDidMount() {
+    var slider = document.getElementById('pf-zoom-slider');
+    var photo = document.getElementById('pf-crop-photo');
+    if (slider && photo) slider.addEventListener('input', function () {
+      var scale = slider.value / 100;
+      photo.style.transform = 'scale(' + scale + ')';
+    });
+    var save = document.getElementById('pf-crop-save');
+    if (save) save.addEventListener('click', function () {
+      save.textContent = 'Saved';
+      save.style.opacity = '0.6';
+    });
+  }
+}
+</script>
+</body>
+</html>

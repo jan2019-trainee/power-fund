@@ -1,0 +1,175 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    a { color: #F5A623; }
+    .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .pf-fade { opacity: 0; animation: pfFadeUp .5s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfFadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pfDrift1 { 0%, 100% { transform: translate(-8%, -6%) scale(1); } 50% { transform: translate(4%, 3%) scale(1.08); } }
+    @keyframes pfDrift2 { 0%, 100% { transform: translate(6%, 4%) scale(1); } 50% { transform: translate(-4%, -6%) scale(1.1); } }
+    .pf-cta:active { transform: scale(0.97); }
+    .pf-chip:active { transform: scale(0.96); }
+  </style>
+</helmet>
+
+<div style="position:relative; width:390px; height:900px; overflow:hidden; background:#0D1B2A; border-radius:38px; border:1px solid rgba(255,255,255,0.08); font-family:'Inter',sans-serif; color:#EDEFF2;">
+
+  <div style="position:absolute; top:-90px; left:-110px; width:300px; height:300px; border-radius:50%; background:radial-gradient(circle, rgba(245,166,35,0.30), transparent 70%); filter:blur(30px); animation:pfDrift1 16s ease-in-out infinite;"></div>
+  <div style="position:absolute; top:120px; right:-120px; width:280px; height:280px; border-radius:50%; background:radial-gradient(circle, rgba(76,217,192,0.22), transparent 70%); filter:blur(34px); animation:pfDrift2 19s ease-in-out infinite;"></div>
+
+  <div style="position:relative; z-index:1; padding:28px 20px 0; height:100%; overflow:hidden;">
+
+    <div class="pf-fade" style="display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:22px; animation-delay:.02s;">
+      <div style="display:flex; flex-direction:column; gap:2px;">
+        <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:20px; letter-spacing:-.2px;">Power Fund</div>
+        <div style="font-size:12px; color:#93A2B8;">Group of 5 &middot; Paluwagan</div>
+      </div>
+      <button class="pf-chip" style="display:flex; align-items:center; gap:6px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.14); border-radius:20px; padding:9px 14px; color:#EDEFF2; font-family:'Inter',sans-serif; font-size:12.5px; font-weight:600; cursor:pointer;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:14px; height:14px;"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+        Treasurer
+      </button>
+    </div>
+
+    <!-- completion banner — replaces the "needs your attention" panel; there is nothing left to review -->
+    <div class="pf-fade pf-chip" style="animation-delay:.06s; display:flex; align-items:center; gap:12px; padding:14px 16px; border-radius:16px; background:rgba(76,175,131,0.1); border:1px solid rgba(76,175,131,0.35); margin-bottom:22px;">
+      <div style="width:40px; height:40px; border-radius:12px; background:rgba(76,175,131,0.16); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#4CAF83;"><polyline points="4 12 10 18 20 6"/></svg>
+      </div>
+      <div style="flex:1; min-width:0;">
+        <div style="font-size:14px; font-weight:600; color:#EDEFF2;">Fund complete</div>
+        <div style="font-size:12px; color:#93A2B8; margin-top:1px;">All 5 rounds collected and paid out</div>
+      </div>
+    </div>
+
+    <!-- hero: same glass-card shell as the in-progress Home, now showing the closed-out total -->
+    <div class="pf-fade" style="animation-delay:.12s; position:relative; padding:22px; border-radius:24px; background:linear-gradient(160deg, rgba(20,42,66,0.72), rgba(27,58,87,0.5)); backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px); border:1px solid rgba(255,255,255,0.14); box-shadow:0 1px 0 rgba(255,255,255,0.08) inset, 0 24px 44px -26px rgba(0,0,0,0.65); margin-bottom:22px;">
+
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+        <span style="display:inline-flex; align-items:center; gap:6px; background:rgba(245,166,35,0.16); color:#F5A623; border-radius:20px; padding:4px 10px; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em;">
+          <span style="width:6px; height:6px; border-radius:50%; background:#F5A623; display:inline-block;"></span>
+          5 of 5 rounds &middot; Complete
+        </span>
+      </div>
+
+      <div style="display:flex; align-items:baseline; gap:8px; margin-bottom:16px;">
+        <span style="font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:38px; letter-spacing:-1px; color:#EDEFF2;">&#8369;150,000</span>
+        <span style="font-size:15px; color:#93A2B8; font-weight:500;">raised &amp; paid out</span>
+      </div>
+
+      <div style="display:flex; align-items:center; gap:18px; margin-bottom:14px;">
+        <div style="position:relative; width:96px; height:96px; flex-shrink:0;">
+          <svg viewBox="0 0 96 96" style="width:96px; height:96px;">
+            <rect x="32" y="0" width="32" height="9" rx="4" fill="#F5A623"/>
+            <rect x="18" y="9" width="60" height="87" rx="16" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.1)" stroke-width="3"/>
+            <clipPath id="pfHeroClip"><rect x="22" y="13" width="52" height="79" rx="12"/></clipPath>
+            <g clip-path="url(#pfHeroClip)">
+              <rect x="22" y="13" width="52" height="79" fill="#F5A623"/>
+            </g>
+          </svg>
+          <div style="position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+            <span style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:19px; color:#14213D;">100%</span>
+            <span style="font-size:9px; color:#14213D; text-transform:uppercase; letter-spacing:.04em; opacity:0.75;">funded</span>
+          </div>
+        </div>
+        <div style="flex:1; min-width:0;">
+          <div style="font-size:11px; color:#93A2B8; text-transform:uppercase; letter-spacing:.04em; margin-bottom:6px;">Every round, on record</div>
+          <div style="font-size:12.5px; color:#EDEFF2; line-height:1.6;">30 contributions confirmed &middot; 5 payouts released. Nothing pending.</div>
+        </div>
+      </div>
+
+      <div style="display:flex; align-items:center; gap:6px; font-size:12.5px; color:#93A2B8; padding-top:14px; border-top:1px solid rgba(255,255,255,0.08);">
+        <svg class="icon" viewBox="0 0 24 24" style="width:13px; height:13px; flex-shrink:0;"><circle cx="9" cy="8" r="3.2"/><path d="M2.8 20.2c.5-3.6 3-5.6 6.2-5.6s5.7 2 6.2 5.6"/><circle cx="17.3" cy="8.6" r="2.4"/><path d="M15.9 14.3c2.3.5 4 2.3 4.3 5.4"/></svg>
+        <span><b style="color:#EDEFF2;">5 of 5</b> members paid out &middot; last on <b style="color:#EDEFF2;">Sep 3</b></span>
+      </div>
+    </div>
+
+    <!-- roster: every member now shows their payout as received, not their pay-in order -->
+    <div class="pf-fade" style="animation-delay:.18s; margin-bottom:22px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+        <span style="font-family:'Space Grotesk',sans-serif; font-size:15px; font-weight:600;">Members</span>
+        <span style="display:flex; align-items:center; gap:2px; font-size:12px; color:#93A2B8; font-weight:600;">See all<svg class="icon" viewBox="0 0 24 24" style="width:13px; height:13px;"><polyline points="9 6 15 12 9 18"/></svg></span>
+      </div>
+      <div style="display:flex; gap:16px; overflow-x:auto; padding:16px 8px 8px; margin:-16px -8px -8px; scrollbar-width:none;">
+        <!-- Ana .. Elena, all payouts released -->
+        <div style="display:flex; flex-direction:column; align-items:center; gap:6px; flex-shrink:0; width:56px;">
+          <div style="width:52px; height:52px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:16px; box-shadow:0 0 0 2.5px #F5A623;">A</div>
+          <span style="font-size:10.5px; color:#93A2B8; text-align:center;">Ana<br><span style="color:#F5A623; font-weight:600;">Paid out</span></span>
+        </div>
+        <div style="display:flex; flex-direction:column; align-items:center; gap:6px; flex-shrink:0; width:56px;">
+          <div style="width:52px; height:52px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:16px; box-shadow:0 0 0 2.5px #F5A623;">B</div>
+          <span style="font-size:10.5px; color:#93A2B8; text-align:center;">Ben<br><span style="color:#F5A623; font-weight:600;">Paid out</span></span>
+        </div>
+        <div style="display:flex; flex-direction:column; align-items:center; gap:6px; flex-shrink:0; width:56px;">
+          <div style="width:52px; height:52px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:16px; box-shadow:0 0 0 2.5px #F5A623;">C</div>
+          <span style="font-size:10.5px; color:#93A2B8; text-align:center;">Cathy<br><span style="color:#F5A623; font-weight:600;">Paid out</span></span>
+        </div>
+        <div style="display:flex; flex-direction:column; align-items:center; gap:6px; flex-shrink:0; width:56px;">
+          <div style="width:52px; height:52px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:16px; box-shadow:0 0 0 2.5px #F5A623;">D</div>
+          <span style="font-size:10.5px; color:#93A2B8; text-align:center;">Dan<br><span style="color:#F5A623; font-weight:600;">Paid out</span></span>
+        </div>
+        <div style="display:flex; flex-direction:column; align-items:center; gap:6px; flex-shrink:0; width:56px;">
+          <div style="width:52px; height:52px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:16px; box-shadow:0 0 0 2.5px #F5A623;">E</div>
+          <span style="font-size:10.5px; color:#93A2B8; text-align:center;">Elena<br><span style="color:#F5A623; font-weight:600;">Paid out</span></span>
+        </div>
+      </div>
+    </div>
+
+    <button class="pf-fade pf-chip" style="animation-delay:.24s; width:100%; display:flex; align-items:center; justify-content:space-between; padding:14px 16px; border-radius:14px; background:rgba(20,42,66,0.4); border:1px solid rgba(255,255,255,0.08); cursor:pointer; text-align:left;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <span style="font-family:'Space Grotesk',sans-serif; font-size:13.5px; font-weight:600; color:#EDEFF2;">All 5 rounds</span>
+        <span style="font-size:11px; font-weight:600; color:#F5A623; background:rgba(245,166,35,0.14); padding:3px 9px; border-radius:20px;">Complete</span>
+      </div>
+      <svg class="icon" viewBox="0 0 24 24" style="width:15px; height:15px; color:#93A2B8; flex-shrink:0;"><polyline points="9 6 15 12 9 18"/></svg>
+    </button>
+
+    <div style="height:220px;"></div>
+  </div>
+
+  <!-- floating CTA — no cycle left to pay, so this becomes the closing action instead -->
+  <div style="position:absolute; left:0; right:0; bottom:0; height:230px; background:linear-gradient(to top, #0D1B2A 55%, transparent); pointer-events:none;"></div>
+  <div style="position:absolute; left:20px; right:20px; bottom:94px;">
+    <button class="pf-cta" style="width:100%; height:56px; border:none; border-radius:28px; background:linear-gradient(135deg, #F5A623, #FFC966); color:#14213D; font-family:'Inter',sans-serif; font-weight:700; font-size:15px; display:flex; align-items:center; justify-content:center; gap:8px; cursor:pointer; box-shadow:0 14px 26px -10px rgba(245,166,35,0.55), 0 0 0 1px rgba(255,255,255,0.1) inset;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:18px; height:18px; stroke-width:2.2;"><path d="M12 3v13"/><polyline points="7 11 12 16 17 11"/><path d="M4 20h16"/></svg>
+      Export final report
+    </button>
+  </div>
+
+  <div style="position:absolute; left:0; right:0; bottom:0; height:78px; background:rgba(13,27,42,0.86); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); border-top:1px solid rgba(255,255,255,0.08); display:flex; align-items:center; justify-content:space-around; padding-bottom:10px; z-index:2;">
+    <button style="background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px 12px;">
+      <div style="width:36px; height:24px; border-radius:10px; background:rgba(245,166,35,0.14); display:flex; align-items:center; justify-content:center;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#F5A623;"><path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9a1 1 0 0 0 1 1h3v-6h4v6h3a1 1 0 0 0 1-1v-9"/></svg>
+      </div>
+      <span style="font-size:10px; font-weight:700; color:#F5A623;">Home</span>
+    </button>
+    <button style="background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px 10px;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#93A2B8;"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg>
+      <span style="font-size:10px; font-weight:600; color:#93A2B8;">Rounds</span>
+    </button>
+    <button style="background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px 10px;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#93A2B8;"><line x1="8" y1="7" x2="20" y2="7"/><line x1="8" y1="12" x2="20" y2="12"/><line x1="8" y1="17" x2="20" y2="17"/><circle cx="4" cy="7" r="1" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="4" cy="17" r="1" fill="currentColor" stroke="none"/></svg>
+      <span style="font-size:10px; font-weight:600; color:#93A2B8;">Activity</span>
+    </button>
+    <button style="background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px 12px;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#93A2B8;"><polyline points="3 16 9 10 13 14 21 5"/><polyline points="15 5 21 5 21 11"/></svg>
+      <span style="font-size:10px; font-weight:600; color:#93A2B8;">Insights</span>
+    </button>
+    <button style="background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px 12px;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#93A2B8;"><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>
+      <span style="font-size:10px; font-weight:600; color:#93A2B8;">Menu</span>
+    </button>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

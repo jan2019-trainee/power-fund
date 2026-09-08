@@ -1,0 +1,64 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .pf-fade { opacity: 0; animation: pfFadeUp .5s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfFadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pfDrift { 0%, 100% { transform: translate(-6%, -4%) scale(1); } 50% { transform: translate(5%, 3%) scale(1.08); } }
+    .pf-cta:hover { filter: brightness(1.08); }
+    .pf-cta:active { transform: scale(0.98); }
+    input { font-family:'Inter',sans-serif; }
+  </style>
+</helmet>
+
+<div style="position:relative; width:1440px; height:900px; overflow:hidden; background:#0D1B2A; border-radius:16px; border:1px solid rgba(255,255,255,0.08); font-family:'Inter',sans-serif; color:#EDEFF2; display:flex; align-items:center; justify-content:center;">
+
+  <div style="position:absolute; top:-140px; left:-120px; width:460px; height:460px; border-radius:50%; background:radial-gradient(circle, rgba(245,166,35,0.18), transparent 70%); filter:blur(40px); animation:pfDrift 20s ease-in-out infinite;"></div>
+  <div style="position:absolute; bottom:-160px; right:-140px; width:460px; height:460px; border-radius:50%; background:radial-gradient(circle, rgba(76,217,192,0.14), transparent 70%); filter:blur(40px); animation:pfDrift 24s ease-in-out infinite reverse;"></div>
+
+  <div class="pf-fade" style="position:relative; width:480px;">
+    <div style="width:72px; height:72px; border-radius:20px; background:linear-gradient(135deg,#F5A623,#4CD9C0); margin-bottom:24px; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:28px; color:#14213D;">P</div>
+
+    <div style="font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:28px; margin-bottom:10px;">Let's set up your fund</div>
+    <div style="font-size:14.5px; line-height:1.6; color:#93A2B8; margin-bottom:26px;">Give your paluwagan group a name. Members will see this at the top of every screen.</div>
+
+    <label style="font-size:11px; color:#93A2B8; text-transform:uppercase; letter-spacing:.05em; display:block; margin-bottom:8px;">Fund name</label>
+    <input id="pf-fund-name" type="text" placeholder="e.g. Barangay Savings Circle" style="width:100%; height:52px; border-radius:14px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.14); color:#EDEFF2; font-size:15px; padding:0 16px; margin-bottom:28px;">
+
+    <div style="display:flex; justify-content:center; gap:8px; margin-bottom:22px;">
+      <span style="width:22px; height:6px; border-radius:3px; background:#F5A623;"></span>
+      <span style="width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,0.18);"></span>
+      <span style="width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,0.18);"></span>
+      <span style="width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,0.18);"></span>
+    </div>
+    <button id="pf-name-next" disabled class="pf-cta" style="width:100%; height:52px; border:none; border-radius:16px; background:linear-gradient(135deg,#F5A623,#e0951d); color:#14213D; font-family:'Inter',sans-serif; font-weight:700; font-size:14.5px; cursor:pointer; opacity:0.4;">Next</button>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {
+  componentDidMount() {
+    var input = document.getElementById('pf-fund-name');
+    var next = document.getElementById('pf-name-next');
+    function check() {
+      var ok = input.value.trim().length > 0;
+      next.disabled = !ok;
+      next.style.opacity = ok ? '1' : '0.4';
+    }
+    if (input) input.addEventListener('input', check);
+  }
+}
+</script>
+</body>
+</html>

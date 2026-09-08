@@ -1,0 +1,124 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    a { color: #F5A623; }
+    .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .pf-modal { opacity: 0; animation: pfModalIn .32s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfModalIn { from { opacity: 0; transform: translate(-50%,-50%) translateY(10px) scale(0.98); } to { opacity: 1; transform: translate(-50%,-50%) translateY(0) scale(1); } }
+    .pf-x:hover { background: rgba(255,255,255,0.08) !important; }
+    .pf-cta:active { transform: scale(0.98); }
+    .pf-chip:hover { background: rgba(255,255,255,0.1) !important; }
+    input, textarea { font-family:'Inter',sans-serif; }
+    @keyframes pfFade { 0%,80% { opacity: 1; } 100% { opacity: 0; } }
+    .pf-copied { animation: pfFade 2s ease forwards; }
+  </style>
+</helmet>
+
+<div style="position:relative; width:1440px; height:900px; overflow:hidden; background:#0D1B2A; border-radius:16px; border:1px solid rgba(255,255,255,0.08); font-family:'Inter',sans-serif; color:#EDEFF2;">
+
+  <div style="opacity:0.35; filter:blur(1.5px); display:flex; height:100%;">
+    <div style="width:240px; height:100%; background:rgba(255,255,255,0.02); border-right:1px solid rgba(255,255,255,0.08);"></div>
+    <div style="flex:1; padding:32px 40px;">
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:24px;">Good evening, Cathy</div>
+    </div>
+  </div>
+  <div style="position:absolute; inset:0; background:rgba(5,10,18,0.6);"></div>
+
+  <div class="pf-modal" style="position:absolute; top:50%; left:50%; width:560px; background:linear-gradient(180deg, rgba(20,42,66,0.98), rgba(13,27,42,0.99)); border:1px solid rgba(255,255,255,0.12); border-radius:22px; box-shadow:0 30px 80px -20px rgba(0,0,0,0.7); padding:30px 32px;">
+
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:18px;">
+      <div>
+        <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:19px;">Release payout</div>
+        <div style="font-size:12.5px; color:#93A2B8; margin-top:2px;">Round 5 &middot; fully funded</div>
+      </div>
+      <button class="pf-x" style="width:32px; height:32px; border-radius:9px; background:none; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:16px; height:16px; color:#93A2B8;"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <div style="display:flex; align-items:center; gap:12px; padding:14px; border-radius:14px; background:rgba(245,166,35,0.08); border:1px solid rgba(245,166,35,0.3); margin-bottom:20px;">
+      <div style="width:38px; height:38px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14px; box-shadow:0 0 0 2px #4CAF83; flex-shrink:0;">E</div>
+      <div>
+        <div style="font-size:13.5px; font-weight:600;">Elena</div>
+        <div style="font-size:11.5px; color:#93A2B8;">Payout order #5</div>
+      </div>
+    </div>
+
+    <!-- MISSING PAYOUT QR — empty state -->
+    <label style="font-size:11px; color:#93A2B8; text-transform:uppercase; letter-spacing:.05em; display:block; margin-bottom:6px;">Send payment to</label>
+    <div style="display:flex; align-items:flex-start; gap:12px; padding:14px; border-radius:14px; background:rgba(245,166,35,0.06); border:1.5px dashed rgba(245,166,35,0.35); margin-bottom:8px;">
+      <div style="width:36px; height:36px; border-radius:10px; background:rgba(245,166,35,0.14); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:17px; height:17px; color:#F5A623;"><path d="M10.3 4.6 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.6a2 2 0 0 0-3.4 0Z"/><path d="M12 9.5v4"/><circle cx="12" cy="17" r=".9" fill="currentColor" stroke="none"/></svg>
+      </div>
+      <div style="flex:1; min-width:0;">
+        <div style="font-size:13px; font-weight:600; color:#EDEFF2;">Elena hasn't added a payout QR yet</div>
+        <div style="font-size:11.5px; color:#93A2B8; margin-top:2px; line-height:1.5;">Ask her to add one in Menu &rarr; My Payout QR Code, or arrange payment another way &mdash; releasing doesn't require it.</div>
+      </div>
+    </div>
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:18px;">
+      <button id="pf-copy-reminder" class="pf-chip" style="flex:1; display:flex; align-items:center; justify-content:center; gap:8px; height:40px; border-radius:11px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.14); color:#EDEFF2; font-family:'Inter',sans-serif; font-size:12.5px; font-weight:600; cursor:pointer;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:14px; height:14px;"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        Copy reminder message
+      </button>
+      <span id="pf-copied-msg" style="font-size:11.5px; color:#4CAF83; font-weight:600; opacity:0; flex-shrink:0;">Copied!</span>
+    </div>
+
+    <label style="font-size:11px; color:#93A2B8; text-transform:uppercase; letter-spacing:.05em; display:block; margin-bottom:6px;">Amount</label>
+    <input type="text" value="&#8369;30,000" style="width:100%; height:48px; border-radius:12px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.14); color:#EDEFF2; font-size:15px; font-weight:600; padding:0 14px; margin-bottom:16px;">
+
+    <label style="font-size:11px; color:#93A2B8; text-transform:uppercase; letter-spacing:.05em; display:block; margin-bottom:6px;">Note (optional)</label>
+    <textarea rows="2" placeholder="e.g. sent via GCash" style="width:100%; border-radius:12px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.14); color:#EDEFF2; font-size:13px; padding:12px 14px; margin-bottom:16px; resize:none;"></textarea>
+
+    <label style="font-size:11px; color:#93A2B8; text-transform:uppercase; letter-spacing:.05em; display:block; margin-bottom:6px;">Receipt photo <span style="color:#F5A623;">&middot; required</span></label>
+    <button id="pf-receipt-btn" style="width:100%; display:flex; align-items:center; gap:10px; padding:12px 14px; border-radius:12px; background:rgba(255,255,255,0.04); border:1px dashed rgba(255,255,255,0.2); color:#93A2B8; font-size:12.5px; font-weight:500; cursor:pointer; margin-bottom:6px;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:15px; height:15px;"><path d="M12 5v14M5 12h14"/></svg>
+      Attach a receipt photo
+    </button>
+    <div id="pf-receipt-hint" style="font-size:11px; color:#93A2B8; margin-bottom:22px;">A screenshot of the transfer confirmation, kept on this round's record.</div>
+
+    <button id="pf-release-btn" disabled class="pf-cta" style="width:100%; height:52px; border:none; border-radius:16px; background:linear-gradient(135deg,#F5A623,#e0951d); color:#14213D; font-family:'Inter',sans-serif; font-weight:700; font-size:14.5px; cursor:pointer; opacity:0.45;">Release &#8369;30,000 to Elena</button>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {
+  componentDidMount() {
+    var copyBtn = document.getElementById('pf-copy-reminder');
+    var copiedMsg = document.getElementById('pf-copied-msg');
+    if (copyBtn) copyBtn.addEventListener('click', function () {
+      copiedMsg.style.opacity = '1';
+      copiedMsg.classList.remove('pf-copied');
+      void copiedMsg.offsetWidth;
+      copiedMsg.classList.add('pf-copied');
+      setTimeout(function () { copiedMsg.style.opacity = '0'; }, 2000);
+    });
+
+    var receiptBtn = document.getElementById('pf-receipt-btn');
+    var receiptHint = document.getElementById('pf-receipt-hint');
+    var releaseBtn = document.getElementById('pf-release-btn');
+    if (receiptBtn) receiptBtn.addEventListener('click', function () {
+      receiptBtn.style.background = 'rgba(76,175,131,0.08)';
+      receiptBtn.style.border = '1.5px solid rgba(76,175,131,0.35)';
+      receiptBtn.style.color = '#4CAF83';
+      receiptBtn.innerHTML = '<svg class="icon" viewBox="0 0 24 24" style="width:15px;height:15px;"><polyline points="4 12 10 18 20 6"/></svg> receipt-confirmation.jpg attached';
+      receiptHint.textContent = 'Looks good — ready to release.';
+      receiptHint.style.color = '#4CAF83';
+      releaseBtn.disabled = false;
+      releaseBtn.style.opacity = '1';
+    });
+  }
+}
+</script>
+</body>
+</html>

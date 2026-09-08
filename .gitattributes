@@ -5,3 +5,7 @@ js/vendor/** binary linguist-vendored
 *.woff2 binary
 *.png binary
 *.jpg binary
+
+# Design source — approved Claude Design artboards. Reference material, not
+# application code: keep it out of language stats and out of routine diffs.
+design/** linguist-documentation -diff

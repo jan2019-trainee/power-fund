@@ -1,0 +1,1066 @@
+{
+  "artboards": [
+    {
+      "file": "MainMember.dc.html",
+      "x": -470,
+      "y": 0,
+      "w": 390,
+      "h": 780,
+      "title": "Home — Member (pending)"
+    },
+    {
+      "file": "Main.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 390,
+      "h": 900,
+      "title": "Home — Treasurer"
+    },
+    {
+      "file": "MainTreasurerFunded.dc.html",
+      "x": -940,
+      "y": 0,
+      "w": 390,
+      "h": 1030,
+      "title": "Home — Treasurer (round funded)"
+    },
+    {
+      "file": "Rounds.dc.html",
+      "x": 470,
+      "y": 0,
+      "w": 390,
+      "h": 980
+    },
+    {
+      "file": "Members.dc.html",
+      "x": 470,
+      "y": 1080,
+      "w": 390,
+      "h": 1040
+    },
+    {
+      "file": "UndoReleaseConfirm.dc.html",
+      "x": 940,
+      "y": 1080,
+      "w": 390,
+      "h": 600,
+      "title": "Undo Release (sheet)"
+    },
+    {
+      "file": "Activity.dc.html",
+      "x": 940,
+      "y": 0,
+      "w": 390,
+      "h": 980
+    },
+    {
+      "file": "Analytics.dc.html",
+      "x": 1410,
+      "y": 0,
+      "w": 390,
+      "h": 980
+    },
+    {
+      "file": "Contribute.dc.html",
+      "x": 1880,
+      "y": 0,
+      "w": 390,
+      "h": 900,
+      "title": "Pay this cycle (sheet)"
+    },
+    {
+      "file": "ReviewPayment.dc.html",
+      "x": 2350,
+      "y": 0,
+      "w": 390,
+      "h": 900,
+      "title": "Review Payment (sheet)"
+    },
+    {
+      "file": "QRZoom.dc.html",
+      "x": 1880,
+      "y": 1000,
+      "w": 390,
+      "h": 844,
+      "title": "QR — enlarged"
+    },
+    {
+      "file": "ProofZoom.dc.html",
+      "x": 2350,
+      "y": 1000,
+      "w": 390,
+      "h": 844,
+      "title": "Proof — enlarged"
+    },
+    {
+      "file": "PayoutRelease.dc.html",
+      "x": 2820,
+      "y": 0,
+      "w": 390,
+      "h": 900,
+      "title": "Release Payout (sheet)"
+    },
+    {
+      "file": "PaymentQRManage.dc.html",
+      "x": 2820,
+      "y": 1050,
+      "w": 390,
+      "h": 900,
+      "title": "Payment QR Code (sheet)"
+    },
+    {
+      "file": "Menu.dc.html",
+      "x": 3290,
+      "y": 0,
+      "w": 390,
+      "h": 1180,
+      "title": "Menu — Treasurer"
+    },
+    {
+      "file": "MenuMember.dc.html",
+      "x": 3290,
+      "y": 1280,
+      "w": 390,
+      "h": 680,
+      "title": "Menu — Member"
+    },
+    {
+      "file": "EditProfile.dc.html",
+      "x": 3760,
+      "y": 1280,
+      "w": 390,
+      "h": 640,
+      "title": "Edit Profile (sheet)"
+    },
+    {
+      "file": "ProfilePhotoSheet.dc.html",
+      "x": 4230,
+      "y": 1280,
+      "w": 390,
+      "h": 640,
+      "title": "Change Photo (sheet)"
+    },
+    {
+      "file": "CropPhoto.dc.html",
+      "x": 4700,
+      "y": 1280,
+      "w": 390,
+      "h": 700,
+      "title": "Crop Photo (sheet)"
+    },
+    {
+      "file": "PinUnlock.dc.html",
+      "x": 3760,
+      "y": 0,
+      "w": 390,
+      "h": 760,
+      "title": "Enter PIN (sheet)"
+    },
+    {
+      "file": "ChangePin.dc.html",
+      "x": 5170,
+      "y": 1280,
+      "w": 390,
+      "h": 760,
+      "title": "Change PIN (sheet)"
+    },
+    {
+      "file": "ResetConfirm.dc.html",
+      "x": 4230,
+      "y": 0,
+      "w": 390,
+      "h": 780,
+      "title": "Reset All Data (sheet)"
+    },
+    {
+      "file": "EditMemberNames.dc.html",
+      "x": 4700,
+      "y": 0,
+      "w": 390,
+      "h": 820,
+      "title": "Edit Member Names (sheet)"
+    },
+    {
+      "file": "ReorderPayout.dc.html",
+      "x": 5170,
+      "y": 0,
+      "w": 390,
+      "h": 760,
+      "title": "Reorder Payout Order (sheet)"
+    },
+    {
+      "file": "RestoreBackupConfirm.dc.html",
+      "x": 5640,
+      "y": 0,
+      "w": 390,
+      "h": 760,
+      "title": "Restore Backup (sheet)"
+    },
+    {
+      "file": "ShareFundStatus.dc.html",
+      "x": 6110,
+      "y": 0,
+      "w": 390,
+      "h": 800,
+      "title": "Share Fund Status (sheet)"
+    },
+    {
+      "file": "MainMemberRejected.dc.html",
+      "x": -940,
+      "y": 2200,
+      "w": 390,
+      "h": 900,
+      "title": "Home — Member (proof rejected)"
+    },
+    {
+      "file": "ActivityEmpty.dc.html",
+      "x": -470,
+      "y": 2200,
+      "w": 390,
+      "h": 900,
+      "title": "Activity — empty state"
+    },
+    {
+      "file": "ToastStates.dc.html",
+      "x": 0,
+      "y": 2200,
+      "w": 390,
+      "h": 640,
+      "title": "Toast states (reference)"
+    },
+    {
+      "file": "ContributeSubmitStates.dc.html",
+      "x": 470,
+      "y": 2200,
+      "w": 390,
+      "h": 680,
+      "title": "Submit payment — loading & error (reference)"
+    },
+    {
+      "file": "NoConnection.dc.html",
+      "x": 940,
+      "y": 2200,
+      "w": 390,
+      "h": 700,
+      "title": "No connection — error state"
+    },
+    {
+      "file": "MyPayoutQRManage.dc.html",
+      "x": 1410,
+      "y": 2200,
+      "w": 390,
+      "h": 900,
+      "title": "My Payout QR Code (sheet)"
+    },
+    {
+      "file": "HomeDayOne.dc.html",
+      "x": 1880,
+      "y": 2200,
+      "w": 390,
+      "h": 860,
+      "title": "Home — Treasurer (day one, empty)"
+    },
+    {
+      "file": "ForgotPinReset.dc.html",
+      "x": 2350,
+      "y": 2200,
+      "w": 390,
+      "h": 820,
+      "title": "Forgot PIN — Emergency Reset (sheet)"
+    },
+    {
+      "file": "PayoutReleaseNoQR.dc.html",
+      "x": 2820,
+      "y": 2200,
+      "w": 390,
+      "h": 1140,
+      "title": "Release Payout — no payout QR on file (sheet)"
+    },
+    {
+      "file": "OnboardingWelcome.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "page": "page-2"
+    },
+    {
+      "file": "OnboardingHowItWorks.dc.html",
+      "x": 470,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "page": "page-2"
+    },
+    {
+      "file": "OnboardingPayoutOrder.dc.html",
+      "x": 940,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "page": "page-2"
+    },
+    {
+      "file": "OnboardingHowToPay.dc.html",
+      "x": 1410,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "page": "page-2"
+    },
+    {
+      "file": "OnboardingWhoAreYou.dc.html",
+      "x": 1880,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "page": "page-2"
+    },
+    {
+      "file": "DesktopHomeTreasurer.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Home — Treasurer (desktop)"
+    },
+    {
+      "file": "DesktopHomeMember.dc.html",
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Home — Member (desktop)"
+    },
+    {
+      "file": "DesktopRounds.dc.html",
+      "x": 3040,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Rounds (desktop)"
+    },
+    {
+      "file": "DesktopMembers.dc.html",
+      "x": 4560,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Members (desktop)"
+    },
+    {
+      "file": "DesktopActivity.dc.html",
+      "x": 6080,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Activity (desktop)"
+    },
+    {
+      "file": "DesktopInsights.dc.html",
+      "x": 7600,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Insights (desktop)"
+    },
+    {
+      "file": "DesktopContribute.dc.html",
+      "x": 0,
+      "y": 1020,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Pay this cycle (modal)"
+    },
+    {
+      "file": "DesktopReviewPayment.dc.html",
+      "x": 1520,
+      "y": 1020,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Review Payment (modal)"
+    },
+    {
+      "file": "DesktopPayoutRelease.dc.html",
+      "x": 3040,
+      "y": 1020,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Release Payout (modal)"
+    },
+    {
+      "file": "DesktopMenuTreasurer.dc.html",
+      "x": 4560,
+      "y": 1020,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Menu — Treasurer (desktop)"
+    },
+    {
+      "file": "DesktopMenuMember.dc.html",
+      "x": 6080,
+      "y": 1020,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Menu — Member (desktop)"
+    },
+    {
+      "file": "DesktopPaymentQRManage.dc.html",
+      "x": 7600,
+      "y": 1020,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Payment QR Code (modal)"
+    },
+    {
+      "file": "DesktopEditProfile.dc.html",
+      "x": 0,
+      "y": 2040,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Edit Profile (modal)"
+    },
+    {
+      "file": "DesktopChangePhoto.dc.html",
+      "x": 1520,
+      "y": 2040,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Change Photo (modal)"
+    },
+    {
+      "file": "DesktopCropPhoto.dc.html",
+      "x": 9120,
+      "y": 2040,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Crop Photo (modal)"
+    },
+    {
+      "file": "DesktopPinUnlock.dc.html",
+      "x": 3040,
+      "y": 2040,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Enter PIN (modal)"
+    },
+    {
+      "file": "DesktopChangePin.dc.html",
+      "x": 10640,
+      "y": 2040,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Change PIN (modal)"
+    },
+    {
+      "file": "DesktopFundSetupName.dc.html",
+      "x": 0,
+      "y": 4080,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Fund Setup — Name (desktop)"
+    },
+    {
+      "file": "DesktopFundSetupMembers.dc.html",
+      "x": 1520,
+      "y": 4080,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Fund Setup — Members (desktop)"
+    },
+    {
+      "file": "DesktopFundSetupOrder.dc.html",
+      "x": 3040,
+      "y": 4080,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Fund Setup — Payout Order (desktop)"
+    },
+    {
+      "file": "DesktopFundSetupReview.dc.html",
+      "x": 4560,
+      "y": 4080,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Fund Setup — Review & Create (desktop)"
+    },
+    {
+      "file": "DesktopResetConfirm.dc.html",
+      "x": 4560,
+      "y": 2040,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Reset All Data (modal)"
+    },
+    {
+      "file": "DesktopEditMemberNames.dc.html",
+      "x": 6080,
+      "y": 2040,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Edit Member Names (modal)"
+    },
+    {
+      "file": "DesktopReorderPayout.dc.html",
+      "x": 7600,
+      "y": 2040,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Reorder Payout Order (modal)"
+    },
+    {
+      "file": "DesktopRestoreBackup.dc.html",
+      "x": 0,
+      "y": 3060,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Restore Backup (modal)"
+    },
+    {
+      "file": "DesktopShareFundStatus.dc.html",
+      "x": 1520,
+      "y": 3060,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Share Fund Status (modal)"
+    },
+    {
+      "file": "DesktopOnboardingWelcome.dc.html",
+      "x": 3040,
+      "y": 3060,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Onboarding — Welcome (desktop)"
+    },
+    {
+      "file": "DesktopOnboardingHowItWorks.dc.html",
+      "x": 4560,
+      "y": 3060,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Onboarding — How It Works (desktop)"
+    },
+    {
+      "file": "DesktopOnboardingPayoutOrder.dc.html",
+      "x": 6080,
+      "y": 3060,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Onboarding — Payout Order (desktop)"
+    },
+    {
+      "file": "DesktopOnboardingHowToPay.dc.html",
+      "x": 7600,
+      "y": 3060,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Onboarding — How To Pay (desktop)"
+    },
+    {
+      "file": "DesktopOnboardingWhoAreYou.dc.html",
+      "x": 9120,
+      "y": 3060,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Onboarding — Who Are You (desktop)"
+    },
+    {
+      "file": "DesktopHomeMemberRejected.dc.html",
+      "x": 0,
+      "y": 5100,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Home — Member (proof rejected, desktop)"
+    },
+    {
+      "file": "DesktopActivityEmpty.dc.html",
+      "x": 1520,
+      "y": 5100,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Activity — empty state (desktop)"
+    },
+    {
+      "file": "DesktopToastStates.dc.html",
+      "x": 3040,
+      "y": 5100,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Toast states (reference, desktop)"
+    },
+    {
+      "file": "DesktopContributeSubmitStates.dc.html",
+      "x": 4560,
+      "y": 5100,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Submit payment — loading & error (reference, desktop)"
+    },
+    {
+      "file": "DesktopNoConnection.dc.html",
+      "x": 6080,
+      "y": 5100,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "No connection — error state (desktop)"
+    },
+    {
+      "file": "DesktopMyPayoutQRManage.dc.html",
+      "x": 7600,
+      "y": 5100,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "My Payout QR Code (modal, desktop)"
+    },
+    {
+      "file": "DesktopHomeDayOne.dc.html",
+      "x": 9120,
+      "y": 5100,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Home — Treasurer (day one, empty, desktop)"
+    },
+    {
+      "file": "DesktopForgotPinReset.dc.html",
+      "x": 10640,
+      "y": 5100,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Forgot PIN — Emergency Reset (modal, desktop)"
+    },
+    {
+      "file": "DesktopPayoutReleaseNoQR.dc.html",
+      "x": 12160,
+      "y": 5100,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Release Payout — no payout QR on file (modal, desktop)"
+    },
+    {
+      "file": "FundSetupName.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "page": "page-4",
+      "title": "Fund Setup — Name"
+    },
+    {
+      "file": "FundSetupMembers.dc.html",
+      "x": 470,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "page": "page-4",
+      "title": "Fund Setup — Members"
+    },
+    {
+      "file": "FundSetupOrder.dc.html",
+      "x": 940,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "page": "page-4",
+      "title": "Fund Setup — Payout Order"
+    },
+    {
+      "file": "FundSetupReview.dc.html",
+      "x": 1410,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "page": "page-4",
+      "title": "Fund Setup — Review & Create"
+    },
+    {
+      "file": "HomeFundComplete.dc.html",
+      "x": -940,
+      "y": 3400,
+      "w": 390,
+      "h": 900,
+      "title": "Home — Treasurer (fund complete)"
+    },
+    {
+      "file": "MainMemberFundComplete.dc.html",
+      "x": -470,
+      "y": 3400,
+      "w": 390,
+      "h": 780,
+      "title": "Home — Member (fund complete)"
+    },
+    {
+      "file": "HomeAllCaughtUp.dc.html",
+      "x": 0,
+      "y": 3400,
+      "w": 390,
+      "h": 900,
+      "title": "Home — Treasurer (all caught up)"
+    },
+    {
+      "file": "RestoreBackupInvalidFile.dc.html",
+      "x": 470,
+      "y": 3400,
+      "w": 390,
+      "h": 640,
+      "title": "Restore Backup (invalid file)"
+    },
+    {
+      "file": "DesktopHomeFundComplete.dc.html",
+      "x": 0,
+      "y": 6100,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Home — Treasurer (fund complete, desktop)"
+    },
+    {
+      "file": "DesktopHomeMemberFundComplete.dc.html",
+      "x": 1520,
+      "y": 6100,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Home — Member (fund complete, desktop)"
+    },
+    {
+      "file": "DesktopHomeAllCaughtUp.dc.html",
+      "x": 3040,
+      "y": 6100,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Home — Treasurer (all caught up, desktop)"
+    },
+    {
+      "file": "DesktopRestoreBackupInvalidFile.dc.html",
+      "x": 4560,
+      "y": 6100,
+      "w": 1440,
+      "h": 900,
+      "page": "page-3",
+      "title": "Restore Backup (invalid file, desktop)"
+    }
+  ],
+  "annotations": [
+    {
+      "id": "treasurer-funded-notes",
+      "x": -940,
+      "y": -150,
+      "w": 390,
+      "text": "HOME — TREASURER (ROUND FUNDED) — where \"Release Payout\" actually lives: moved here from the Rounds screen per feedback, since Home is where the treasurer already looks first.\n\nSTACKING ORDER, answered directly: when a round is funded AND there are pending reviews at the same time, Release Payout goes on top, \"Needs your attention\" right below it — shown here stacked, both real. Reasoning: a funded round means a real person is waiting on money that's ready to send; a pending review can sit a bit longer without real cost. Ring, roster and round link all update to the funded/100% state; tapping \"Release Payout\" opens the same sheet as PayoutRelease.dc.html.\n\nSTART NEXT ROUND — new, added overnight: a real app feature (starting Round 3's collection while Round 2's payout is still pending) that had no mockup at all. Live in this mockup, try it: \"Start Round 3 while this is pending\" swaps for an inline warning + Cancel/\"Yes, start Round 3\" pair, same confirmation-gate pattern as Reject in Review Payment — then shows a disabled \"Round 3 started\" state. Copy is explicit that starting the next round never releases the pending one, matching the real app's actual behavior."
+    },
+    {
+      "id": "member-vs-treasurer-notes",
+      "x": -470,
+      "y": -130,
+      "w": 390,
+      "text": "THREE HOME VIEWS, same layout, different lead card — this was a gap in the earlier drafts: only the treasurer view was designed, and members can't review/approve payments so they can't see the treasurer's queue. Left to right: Treasurer (round funded) · Member (pending) · Treasurer (normal).\n\nMEMBER: the \"Needs your attention\" panel is replaced by a personal status card — this device's remembered member (Cathy) with a purple 🟣 \"Submitted — awaiting treasurer verification\" state, matching the app's existing my-status-card / my-status-pending styling. She's also ringed in the roster below (labeled \"You\"). Since she has nothing to pay right now, the floating CTA is simply absent — just the tab bar.\n\nTREASURER (normal): shows the review queue instead, and the floating \"Pay this cycle\" CTA (a treasurer can still owe their own cycle). \"Needs your attention\" leads the screen, right under the header, ahead of the balance card.\n\nOther my-status states from the real app (paid/up-to-date, due soon, overdue) aren't drawn separately here but follow the same card with green/amber/red in place of purple."
+    },
+    {
+      "id": "motion-notes",
+      "x": 0,
+      "y": 940,
+      "w": 390,
+      "text": "MOTION NOTES (Home) — how this screen should feel\n\n1. Balance count-up — the ₱ amount animates from 0 to the target over ~900ms, eased out. Live in this mockup.\n\n2. Progress ring fill — stroke-dashoffset animates to the round's % over ~1.1s on load. Live in this mockup.\n\n3. Sparkline draw-in — the trend line reveals via a dash-offset wipe, staggered just after the ring. Live in this mockup.\n\n4. Card stagger-in — hero → roster → attention → round link fade up ~10px, roughly 60–90ms apart. Live in this mockup.\n\n5. Status ring pulse — a pending member's avatar ring pulses softly on loop until reviewed. Live in this mockup.\n\n6. Press-scale — the CTA and tappable chips scale to 0.97 on press, ~100ms. Live in this mockup (try clicking the button).\n\n7. Checkmark draw-in — when a treasurer confirms a payment, the check icon should draw its stroke in (~180ms) instead of popping in. Needs real app state to demo, not shown here.\n\nAll motion respects prefers-reduced-motion — it falls back to the final state instantly, no loops."
+    },
+    {
+      "id": "rounds-notes",
+      "x": 470,
+      "y": -110,
+      "w": 390,
+      "text": "ROUNDS — split out of Home so the dashboard stays glanceable. Home now only shows a one-line \"Round 2 · Collecting · ₱18,000/₱30,000\" link; this screen holds the full round-by-round detail. Round 2 expanded with 2 sample cycles showing per-member status pills, matching the existing app's cycle-chip pattern; Rounds 3–5 collapsed as \"Not started\".\n\nEach cycle leads with its due date (Sep 1) — what a member actually cares about — with the cycle number (Cycle 7) demoted to a small reference tag, not the headline. Member pills stay flat colored text (an icon inside each one was tried and dropped — too busy at this size).\n\nThe Release Payout trigger was tried here first, then moved to Home once funded — see \"Home — Treasurer (round funded).\" Rounds itself stays a pure browse/history screen.\n\nRound 1 is now a real accordion too (new overnight, try it): tapping it reveals the release record (recipient, amount, release date) and an \"Undo Release\" button — a real app action (unmarkPayoutReleased) that had no mockup before. That button's destination is UndoReleaseConfirm.dc.html, to the right of Members below."
+    },
+    {
+      "id": "activity-analytics-notes",
+      "x": 940,
+      "y": -90,
+      "w": 860,
+      "text": "ACTIVITY (left) redesigns the existing Activity Log — grouped by date, an icon + color per event type, amount-forward like a bank transaction list. Content mirrors your real logActivity() message formats.\n\nINSIGHTS (right) is a new lightweight analytics view for the treasurer/members — on-time rate, per-member standing, and a per-round collection timeline. All figures are illustrative, sized to stay consistent with the dashboard's Round 2 / ₱18,000 numbers.\n\nNAVIGATION — the app is currently one long scrolling page with no navigation at all. All screens share a fixed bottom tab bar: Home / Rounds / Activity / Insights / Menu. Menu is now mocked — see Menu.dc.html. On Home, the \"Pay this cycle\" CTA floats just above the tab bar rather than replacing it."
+    },
+    {
+      "id": "my-payout-qr-notes",
+      "x": 1410,
+      "y": 3130,
+      "w": 390,
+      "text": "MY PAYOUT QR CODE — new: every member now has their own receiving QR, separate from the treasurer's contribution QR. Added as a row in Menu — Member (right after the existing view-only \"Payment QR code\" row), and to Release Payout, which now shows the recipient's own QR to the treasurer under \"Send payment to.\" Same upload/webcam pattern as the treasurer's Payment QR Code screen. Desktop equivalent lives on the Desktop page."
+    },
+    {
+      "id": "forgot-pin-notes",
+      "x": 2350,
+      "y": 2120,
+      "w": 390,
+      "text": "FORGOT PIN — closes a real dead-link: \"Forgot PIN?\" on Enter PIN went nowhere. This can't reuse the existing Reset All Data screen, because that screen requires the current PIN to confirm — exactly what's missing here — and it explicitly keeps the treasurer PIN unchanged (see its own copy), so it wouldn't even fix the lockout.\n\nInstead this is a distinct, PIN-independent \"last resort\": type RESET only (no PIN field, since by definition it's unknown), then immediately set a new PIN (reusing the dot+keypad pattern from Change PIN — choose, confirm, mismatch bounces back a step), ending on a success card. This is honest about the tradeoff stated in its own copy: with no server or account to verify identity, anyone with the device can trigger this — that's a real limitation of a local-only app, not something this screen can fix, so it says so plainly rather than pretending otherwise. Desktop equivalent lives on the Desktop page."
+    },
+    {
+      "id": "payout-release-no-qr-notes",
+      "x": 2820,
+      "y": 2120,
+      "w": 390,
+      "text": "RELEASE PAYOUT — NO PAYOUT QR ON FILE — closes a gap: the normal Release Payout sheet always assumed the recipient already has a payout QR saved (see Ben's version). This variant shows what happens when they don't (here, Elena for Round 5) — a real scenario now that members self-manage their own payout QR: an amber dashed empty-state card explaining she hasn't added one yet, with a live \"Copy reminder message\" the treasurer can paste into a group chat (same copy-to-clipboard pattern as Share Fund Status).\n\nDeliberately NOT a blocker: Release still works exactly the same way otherwise — same required receipt, same editable amount and note — since the treasurer may simply arrange payment another way (cash, bank transfer already known personally) without ever needing the in-app QR. Desktop equivalent lives on the Desktop page."
+    },
+    {
+      "id": "gaps-batch-notes",
+      "x": -940,
+      "y": 2120,
+      "w": 3300,
+      "text": "GAPS PASS — states the mockup was missing until now, in order left to right:\n\nHOME — MEMBER (PROOF REJECTED) — what Cathy sees after the treasurer rejects her proof (see Review Payment's reject action): a red \"Rejected\" status card with the treasurer's note, her roster ring turns red, and the floating CTA becomes \"Resubmit payment\" instead of disappearing. Desktop equivalent is on the Desktop page.\n\nACTIVITY — EMPTY STATE — what the transaction list looks like with nothing in it yet (a brand-new fund, or a filter with no matches).\n\nTOAST / CONFIRMATION STATES — reference sheet for the app's success/error snackbar pattern (bottom-anchored, auto-dismiss ~3s). Wired live on Menu's \"Export CSV summary\" and \"Backup data\" rows, which previously had no feedback at all when tapped — try them.\n\nSUBMIT PAYMENT — LOADING & ERROR (reference) — a live demo of what happens after tapping \"I've sent this\": an uploading spinner, then (first attempt) an upload-failed error with Retry, then (on retry) success. Demonstrates a pattern that applies to any upload/submit action in the app, not just this one screen.\n\nNO CONNECTION — a generic full-screen network-failure state for when fund data can't load, with Try again.\n\nMY PAYOUT QR CODE — see the payout-QR notes near Menu — Member for what this closes.\n\nHOME — TREASURER (DAY ONE) — the fund immediately after creation: Round 1, ₱0 collected, every member \"Not paid,\" no activity yet, fund-growth sparkline replaced with a placeholder. Desktop equivalent is on the Desktop page."
+    },
+    {
+      "id": "scope-note-cash-payments",
+      "x": 1880,
+      "y": -300,
+      "w": 860,
+      "text": "SCOPE NOTE — READ BEFORE IMPLEMENTING: the current live app supports recording a contribution as cash (no proof required). That capability is intentionally NOT carried into this redesign and is not in scope for this mockup. Every payment in this redesign — mobile and desktop — flows through QR + proof-of-payment submission only (Contribute → member attaches a screenshot → treasurer reviews it in Review Payment). There is no \"mark as paid / cash\" action anywhere in this design, on Members, Menu, or elsewhere, and none should be added without a separate design pass. This is a deliberate decision, not an oversight — flagging it here so implementation doesn't get confused by the current app still having that code path."
+    },
+    {
+      "id": "contribute-notes",
+      "x": 1880,
+      "y": -140,
+      "w": 390,
+      "text": "CONTRIBUTE — redesigned as a bottom sheet instead of the current app's centered modal, matching how GCash/Cash App-style payment flows work on mobile. Triggered by Home's \"Pay this cycle\" CTA.\n\nShows: the payment QR (tappable — opens a real full-screen zoom lightbox, try it, matching the existing app's zoom-in QR/proof feature), the amount, a live \"pay ahead\" stepper (also real: 1 to 3 cycles, updates the amount, hint text, and button label), and an attached proof-of-payment thumbnail. \"I've sent this\" stays disabled in the real app until a screenshot is attached — shown here already attached to demonstrate the ready-to-submit state."
+    },
+    {
+      "id": "review-notes",
+      "x": 2350,
+      "y": -160,
+      "w": 390,
+      "text": "REVIEW PAYMENT — the treasurer's side of what we just saw Cathy submit: a bottom sheet, reached from Home's \"Needs your attention\" panel. Shows the claimant, cycle, amount, and the payment screenshot (tappable — same real zoom lightbox pattern as the Contribute sheet's QR).\n\nTwo real interactions, try them: \"Reject claim\" swaps the Confirm/Reject buttons for an inline warning + Cancel/\"Yes, reject\" pair — no destructive action fires on the first tap, matching the app's existing confirmation-gate pattern. \"Yes, reject\" then shows a disabled \"Rejected\" state. \"Confirm Payment\" is left as the primary, always-available action (green, distinct from the amber \"pay\" color used on the member side, so the two roles never look interchangeable)."
+    },
+    {
+      "id": "zoom-states-notes",
+      "x": 1880,
+      "y": 850,
+      "w": 860,
+      "text": "These two are the \"tap to enlarge\" states from the Contribute and Review sheets above, pulled out as their own static artboards so they're viewable without having to trigger the click-to-open interaction (which is hidden by default and easy to miss while scanning the canvas). The live version still works in Contribute.dc.html and ReviewPayment.dc.html — this is the same visual, just always-visible."
+    },
+    {
+      "id": "payout-release-notes",
+      "x": 2820,
+      "y": -170,
+      "w": 390,
+      "text": "RELEASE PAYOUT — reached by tapping \"Release Payout\" on Home — Treasurer (round funded). Shown here as if Round 2 had just hit its ₱30,000 goal (it's actually still at ₱18,000 on the normal Home). Recipient is Ben, matching payout order #2 from the onboarding \"Payout Order\" screen.\n\nGAP CLOSED: this sheet used to have no QR at all for where the money actually goes. Now shows \"Send payment to\" — Ben's own payout QR (tappable, real zoom lightbox, same pattern as Contribute's QR) — right below the recipient card, so the treasurer can actually scan-and-send before touching the amount field. Receipt photo changed from optional to REQUIRED and is now live: the Release button is disabled until a receipt is attached, since that photo is the actual proof the payout was sent (previously nothing enforced this). Amount still defaults to the ₱30,000 goal but stays editable (historical record only, doesn't affect round funding); note stays optional. Same amber \"money movement\" color as the member's Pay CTA, kept distinct from Review's green."
+    },
+    {
+      "id": "payment-qr-manage-notes",
+      "x": 2820,
+      "y": 970,
+      "w": 390,
+      "text": "PAYMENT QR CODE (treasurer) — the destination for Menu — Treasurer's \"Payment QR code\" row, which had no screen behind it until now. Shows the QR currently displayed to members on the Contribute sheet, plus Take Photo / Choose from Library to replace it (same pattern as Change Photo). Save is live: disables itself and shows \"Saved\" on tap. Treasurer-only — the member-facing Menu keeps its existing view-only QR reference, unchanged.\n\nACCOUNT DETAILS — the single \"account label\" field was split into three structured fields, same on both this screen and My Payout QR Code (Menu — Member): Bank/E-wallet (a select — GCash, Maya, BPI, BDO, Metrobank, Other), Account number, and Account name. Clearer than one free-text label, and matches the fields a real GCash/bank QR actually carries."
+    },
+    {
+      "id": "change-pin-notes",
+      "x": 5170,
+      "y": 1200,
+      "w": 390,
+      "text": "CHANGE PIN — the destination for Menu's \"Change PIN\" row, which had no screen behind it until now (only PIN *unlock* existed before). Live 3-step wizard on one screen, matching how Apple/most apps do passcode changes: enter current PIN → choose a new PIN → confirm it, using the same dot+keypad component as Enter PIN, with a step-progress bar and the label swapping between steps. Try it: current PIN is 2468 — enter it wrong to see the shake+error state; a confirm mismatch bounces you back to \"Choose a new PIN\" rather than making you restart from the current PIN. Ends on a confirmation card, no further navigation modeled."
+    },
+    {
+      "id": "menu-pin-notes",
+      "x": 3290,
+      "y": -170,
+      "w": 1330,
+      "text": "MENU — TREASURER (top) — reached via the Menu tab while unlocked. Houses everything the current app's treasurer-mode functions cover: payment QR, export/backup/restore, edit names, reorder payout order, share status, change PIN, lock treasurer mode, and reset (kept visually separated as its own danger zone, matching the real app's existing pattern of never making destructive actions one accidental tap away).\n\nMENU — MEMBER (below Menu — Treasurer) — the same tab, but for a locked-out member: no payment tools, exports, or fund settings, since they're not something a member can act on. Instead: who they are (with Change), a prominent \"Unlock treasurer mode\" entry point, and a couple of genuinely member-relevant items — view the payment QR, share fund status, and a link back to the \"how this fund works\" explainer from onboarding.\n\nENTER PIN (middle) — the unlock gate itself, reached by tapping the \"Treasurer\" pill in the header, or \"Unlock treasurer mode\" in the member Menu. Redesigned as a 4-digit dot + numeric-keypad entry (Cash App/GCash-style) instead of the current app's plain text input — auto-submits on the 4th digit, no separate submit button needed. Shown mid-entry (3 of 4 filled); a wrong PIN would shake the dots and clear them, matching the app's existing pin-error behavior.\n\nRESET ALL DATA (right) — reached by tapping \"Reset all fund data\" in the treasurer Menu's danger zone. Matches the real app's actual gate exactly: type RESET (case-insensitive) AND enter the PIN before \"Reset everything\" enables — try it, the button is genuinely disabled/enabled live based on both fields. No destructive action is ever one tap away."
+    },
+    {
+      "id": "crop-photo-notes",
+      "x": 4700,
+      "y": 1200,
+      "w": 1330,
+      "text": "CROP PHOTO — new step inserted between picking a photo (Take Photo / Upload / Webcam) and it actually being saved, on both Change Photo (member avatar) and Payment QR Code (treasurer QR) — Facebook/Instagram-style: Cancel top-left, Save top-right, a circular crop mask over the chosen photo, and a live zoom slider (try it, it actually scales the photo). Desktop version is the same pattern as a centered modal instead of a full-screen step, with \"Scroll to zoom\" instead of \"Pinch to zoom\" in the caption. Since this is a mockup with no real photo library, the crop stage shows a placeholder photo (a gradient with a silhouette) standing in for whatever the member actually picked — the crop mask and zoom control are the real interaction being demonstrated."
+    },
+    {
+      "id": "profile-photo-notes",
+      "x": 3257,
+      "y": 1084,
+      "w": 1330,
+      "text": "MENU — MEMBER (left) updated: \"Unlock treasurer mode\" removed — it was redundant with the \"Treasurer\" pill already in the header on every screen. \"Payment QR code\" is now explicitly labeled view-only (\"the treasurer manages this\"), since only the treasurer can upload/replace it.\n\nEDIT PROFILE (middle) — tapping \"Edit\" on the You-are card opens this: avatar (tap to change photo) plus a Display name field, now self-service for the member's own name (a new capability — the current app only lets the treasurer rename members). Live validation, try it: an empty name or one already taken (Ana/Ben/Dan/Elena) disables Save with a red hint; a valid unique name re-enables it.\n\nCHANGE PHOTO (right) — reached by tapping the avatar inside Edit Profile: Take Photo / Choose from Library, plus a separately-styled red Remove Photo action so it isn't confused with the upload options. Scoped to the member's own avatar for now — same pattern would extend to the treasurer's own card if wanted later."
+    },
+    {
+      "id": "members-notes",
+      "x": 470,
+      "y": 960,
+      "w": 390,
+      "text": "MEMBERS — the destination for Home's \"See all\" link and, previously undefined, the individual avatar taps in the roster (neither was actually wired to anything before this). Full list sorted by payout order: current-round status and payout-order tags (\"Paid out\" for Ana, \"This round\" for Ben) reusing the same language as the onboarding Payout Order screen. Back chevron since this is a drill-down from Home, not a primary tab — no tab highlighted below.\n\nEach row's chevron is now a real inline accordion (try it, live in this mockup) rather than a separate page — a full Member Detail screen was tried and felt like overkill for what's just a few lines of cycle history. Tapping a row expands a compact panel below it (Round 1 summary, Round 2 cycle-by-cycle, Rounds 3–5 as one \"not started\" line); the chevron rotates to show state. Cathy's is expanded by default to demonstrate it, matching her pending cycle-7 state from Home/Review Payment."
+    },
+    {
+      "id": "names-reorder-notes",
+      "x": 4700,
+      "y": -150,
+      "w": 860,
+      "text": "EDIT MEMBER NAMES — reached from Menu's Group section. Live validation, try it: an empty field or a duplicate name (e.g. type \"Ana\" over \"Ben\") disables Save with a red hint; fix it and Save re-enables. Matches the real app's actual validation rule exactly (all filled in, all unique).\n\nREORDER PAYOUT ORDER — also from Menu's Group section. Kept as up/down arrows rather than drag-and-drop, matching the current app's real interaction (simpler and more reliable on mobile than drag, which is easy to fumble one-handed). Fully live, try it: tapping an arrow actually swaps that member with their neighbor, updates the position numbers, and disables the arrow at each end of the list. No separate save step — changes apply immediately, same as the real app."
+    },
+    {
+      "id": "undo-release-notes",
+      "x": 940,
+      "y": 960,
+      "w": 390,
+      "text": "UNDO RELEASE — reached from Rounds' Round 1 accordion (tap the row, then \"Undo Release\"). Copy states plainly what changes (round returns to Payout Pending, release record cleared) so the treasurer knows exactly what they're reversing before confirming. New overnight — this real app action (unmarkPayoutReleased) had no mockup before this pass."
+    },
+    {
+      "id": "restore-share-notes",
+      "x": 5640,
+      "y": -150,
+      "w": 860,
+      "text": "RESTORE FROM BACKUP (left) — reached from Menu's Data section. Matches the real app's actual gate: type REPLACE to confirm (no PIN required here, unlike Reset — that's the real app's own rule, not a design choice). Shows a summary of the selected backup file (export date, contribution count, released-payout count) before the irreversible replace, same as the real confirm dialog's content.\n\nSHARE FUND STATUS (right) — reached from Menu's Group section on both Menu — Treasurer and Menu — Member. A read-only preview of the real app's generated share text (status per member, current round) plus a genuinely working \"Copy to Clipboard\" — try it, a green \"Copied to clipboard\" confirmation appears and fades after ~2 seconds. Both of these had Menu rows already but no destination screen until this pass."
+    },
+    {
+      "id": "fund-setup-notes",
+      "x": 0,
+      "y": -140,
+      "w": 1780,
+      "page": "page-4",
+      "text": "FUND SETUP — TREASURER DAY-ZERO — LOWEST PRIORITY, kept as reference only: the current app's database already ships with members pre-populated, so a from-scratch \"create your fund\" wizard isn't a real near-term need — this flow was speculative, designed to close a theoretical gap in Onboarding (which explains how the fund works but never showed it being created), not a request tied to actual data model plans. Keep it here in case a true blank-slate setup is ever needed, but don't prioritize implementing it. Flow as designed: name the fund → add the 5 members (live validation) → set initial payout order (live, reorderable) → review a summary and \"Create Fund\". Contribution amount, cycles-per-round, and round count are shown as fixed structure, not editable — those are app constants either way. Same desktop equivalent lives on the Desktop page."
+    },
+    {
+      "id": "onboarding-notes",
+      "x": 0,
+      "y": -110,
+      "w": 500,
+      "page": "page-2",
+      "text": "ONBOARDING — a first-time \"how this works\" flow, currently missing from the app entirely. 5 screens shown here in sequence, each fading in with a Next → CTA; \"Skip\" jumps straight to the dashboard from any step. Ends on the app's existing \"who are you?\" member picker — tapping a row (or Skip for now) drops into the dashboard."
+    },
+    {
+      "id": "desktop-change-pin-fund-setup-notes",
+      "x": 10640,
+      "y": 1960,
+      "w": 5900,
+      "page": "page-3",
+      "text": "CHANGE PIN (left) — desktop version of the same 3-step wizard as mobile, as a centered modal instead of a full-screen step.\n\nFUND SETUP — TREASURER DAY-ZERO (row below, 4 screens) — LOWEST PRIORITY, kept as reference only: the real app's database already ships with members pre-populated, so a from-scratch fund-creation wizard isn't an actual near-term need. This was a speculative flow closing a theoretical gap in Onboarding, not tied to real data-model plans — don't prioritize implementing it. As designed: name the fund → add the 5 members (live validation) → set initial payout order (live, reorderable) → review a summary (fixed structure — ₱1,000/cycle, 6 cycles/round, ₱30,000/round, 5 rounds, ₱150,000 total) and \"Create Fund\"."
+    },
+    {
+      "id": "desktop-notes",
+      "x": 0,
+      "y": -130,
+      "w": 1440,
+      "page": "page-3",
+      "text": "DESKTOP WEB APP — sidebar-dashboard layout replaces the mobile bottom tab bar: persistent left nav (Home/Rounds/Members/Activity/Insights/Menu) plus a treasurer-mode/member-mode status card, since a fixed sidebar is the standard desktop pattern and frees the wide content area for multi-column layouts mobile's 390px frame couldn't fit. Now covers the full mobile set: the 5 core tabs, every sheet-style flow, both Menu variants, and onboarding.\n\nHOME (Treasurer, left) vs HOME (Member, right) — hero + roster + recent activity on the left, a right rail for \"Needs your attention\" / personal status, a 5-round progress strip, and quick actions, all visible at once. Member swaps the review-queue panel for a personal status card and \"Record contribution\" for \"Pay this cycle.\"\n\nROUNDS and MEMBERS — master list on the left, detail panel on the right (email-client style), replacing mobile's inline-accordion approach since desktop has room to show both at once.\n\nACTIVITY — a full filterable table. INSIGHTS — stat tiles, a per-round bar chart, a status donut, and an on-time-rate leaderboard.\n\nSHEET FLOWS (second row: Contribute, Review Payment, Payout Release, Menu — Treasurer, Menu — Member, Payment QR) — on desktop these become centered modals over a dimmed/blurred dashboard, rather than mobile's bottom sheets; a click-away X replaces the drag-handle-to-dismiss affordance. MENU itself is no longer a sheet at all here — treasurer settings become a full 2-column settings page (more room for the danger zone to stay visibly separated), and the member Menu becomes a lighter one-column settings page with the same profile-card-plus-general-items structure as mobile.\n\nTHIRD ROW (Edit Profile, Change Photo, PIN, Reset, Edit Names, Reorder) and FOURTH ROW (Restore Backup, Share Status, 5 Onboarding screens) — same centered-modal treatment; Reorder Payout keeps its live up/down re-sorting, Reset and Restore keep their exact real-app gates (type-to-confirm, PIN only on Reset), Share Fund Status keeps its live copy-to-clipboard. Onboarding drops the sidebar entirely (pre-login) for a centered welcome-card sequence with the same 5-dot pagination and Skip-anywhere pattern as mobile, ending on the same member picker."
+    },
+    {
+      "id": "undo-confirmed-payment-notes",
+      "x": 470,
+      "y": -260,
+      "w": 780,
+      "text": "GAP #3 — NO UNDO FOR A SINGLE CONFIRMED PAYMENT: previously, once a treasurer confirmed a member's cycle payment there was no way to reverse a mistaken tap (wrong member, wrong cycle) short of the much heavier \"Undo Release\" (which reverses an entire round's payout, not one contribution). Fixed by making each confirmed member pill in a cycle row (Rounds → expand a cycle) clickable: tapping it opens an inline warning panel naming the member, amount, and confirmation date, with Cancel/\"Undo confirmation\" actions — deliberately mirroring the existing inline \"Undo Release\" pattern already used elsewhere in this same screen rather than introducing a new confirmation-dialog style. Confirming grays out and disables that member's pill, returning the cycle to unpaid for them only; other members' confirmations in the same cycle are untouched."
+    },
+    {
+      "id": "desktop-undo-confirmed-payment-notes",
+      "x": 3040,
+      "y": -260,
+      "w": 1440,
+      "page": "page-3",
+      "text": "GAP #3 (desktop) — same fix as mobile Rounds: each confirmed avatar pill under \"Contributors this round\" is now a button; clicking it opens an inline undo panel (member, amount, date) with Cancel/\"Undo confirmation.\" Confirming grays out that member's pill and returns their cycle to unpaid, without touching the round-level \"Undo Release.\""
+    },
+    {
+      "id": "restore-backup-feedback-notes",
+      "x": 5640,
+      "y": -260,
+      "w": 780,
+      "text": "GAP #4 — RESTORE BACKUP HAD NO COMPLETION FEEDBACK: previously, tapping \"Replace Everything\" after typing REPLACE did nothing visible — the treasurer had no way to tell whether the restore ran, was still working, or silently failed. Fixed with a 3-state inline sequence in the same sheet (confirm → restoring → done), reusing this session's live upload state-machine pattern (see Contribute Submit States) rather than a separate screen: a brief \"Restoring your data…\" spinner state, then a success view confirming exactly what changed (contribution and payout counts, the backup's date) with a \"Done\" button. This is a high-risk, irreversible action (it replaces all contributions and payout status), so silence after confirming was the riskiest possible gap to leave open — the treasurer needs positive proof the restore actually completed before trusting the numbers on screen again."
+    },
+    {
+      "id": "gap5-no-member-changes-notes",
+      "x": 0,
+      "y": -260,
+      "w": 780,
+      "text": "GAP #5 — MID-FUND MEMBER ADD/REMOVE: DECIDED OUT OF SCOPE. Members commit to finishing the sinking fund for its full run (5 rounds / 30 cycles) once it starts — the product does not support adding or removing members mid-fund. Members.dc.html / DesktopMembers.dc.html intentionally stay read-only rosters (no add/remove controls), and EditMemberNames / ReorderPayout remain the only member-record actions exposed post-setup. Fund Setup's member step (FundSetupMembers.dc.html) is the only place membership is ever defined, and only before Cycle 1 begins."
+    },
+    {
+      "id": "fund-complete-notes",
+      "x": -940,
+      "y": 3140,
+      "w": 1360,
+      "text": "GAP (P1) — NO \"FUND COMPLETE\" TERMINAL STATE: the mockup previously only depicted Day One (empty) and mid-fund states — nothing showed what Home looks like once all 5 rounds are collected and paid out, even though every fund reaches this point. Added dedicated treasurer and member Home variants: the hero card shows the closed-out ₱150,000 total at a full battery instead of an in-progress round, the roster shows every member as \"Paid out\" instead of pay-in order, the \"needs attention\" panel becomes a green \"Fund complete\" confirmation, and the floating CTA changes from a payment action to \"Export final report\" (treasurer) or disappears entirely (member, who has nothing left to do). This is a natural extension of the existing Home shell, not a new pattern."
+    },
+    {
+      "id": "restore-invalid-file-notes",
+      "x": 470,
+      "y": 3140,
+      "w": 390,
+      "text": "GAP (P2) — RESTORE BACKUP HAD NO ERROR PATH: the Restore flow (gap #4, fixed earlier) assumed the picked file was always a valid backup; a corrupt or wrong-format file had no defined failure state. This screen closes that: a clear \"this isn't a Power Fund backup\" message, confirmation that nothing was changed (current data is untouched), a hint on what filename/location to look for, and a direct \"Choose another file\" retry — reusing the same sheet/modal shell as the confirm and success states rather than a new pattern."
+    },
+    {
+      "id": "all-caught-up-notes",
+      "x": 0,
+      "y": 3140,
+      "w": 390,
+      "text": "GAP (P2) — REVIEW QUEUE WAS ALWAYS SHOWN AS PENDING: Home's \"Needs your attention\" panel was hardcoded to always show 2 waiting proofs. In practice, a caught-up queue is the most common day-to-day state — distinct from Day One's one-time empty state, since this is mid-fund with an active, partly-funded round. Fixed by swapping the panel for a green \"All caught up\" confirmation when nothing is pending, keeping the rest of the in-progress Home (round progress, roster, growth chart) unchanged."
+    },
+    {
+      "id": "activity-filters-live-notes",
+      "x": 940,
+      "y": -260,
+      "w": 390,
+      "text": "ACTIVITY FILTERS ARE NOW LIVE: the All/Payments/Payouts/Admin chips were previously decorative. Tapping one now hides non-matching rows, collapses a date group entirely if nothing in it matches, and shows a \"Nothing here yet\" empty state if the filter yields zero results — the same empty-state pattern used elsewhere (Activity Empty, No Connection) rather than a new one."
+    },
+    {
+      "id": "desktop-activity-filters-live-notes",
+      "x": 6080,
+      "y": -260,
+      "w": 1440,
+      "page": "page-3",
+      "text": "ACTIVITY FILTERS ARE NOW LIVE (desktop): the All/Contributions/Payouts buttons toggle which table rows show. The \"All members\" and \"Round 2\" controls are now real dropdown menus — the first of this pattern in the design — opening a small list on click, closing on an outside click or a selection, and combining with the type filter (so \"Ben\" + \"Contributions\" narrows to just his contribution rows). The round filter defaults to \"Round 2\" (the fund's current round) rather than \"All rounds\", matching what a treasurer would actually want to see first; switching to \"All rounds\" reveals the older Round 1 payout row. Selecting a combination with no matches shows the same \"Nothing here yet\" empty state as the type filter."
+    }
+  ],
+  "launch": {
+    "view": "canvas",
+    "page": "page-1"
+  },
+  "pages": [
+    {
+      "id": "page-1",
+      "name": "Dashboard"
+    },
+    {
+      "id": "page-2",
+      "name": "Onboarding"
+    },
+    {
+      "id": "page-3",
+      "name": "Desktop"
+    },
+    {
+      "id": "page-4",
+      "name": "Fund Setup"
+    }
+  ]
+}

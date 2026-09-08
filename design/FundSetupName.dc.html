@@ -1,0 +1,70 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    a { color: #F5A623; }
+    .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .pf-fade { opacity: 0; animation: pfFadeUp .5s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfFadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pfDrift1 { 0%, 100% { transform: translate(-8%, -6%) scale(1); } 50% { transform: translate(6%, 4%) scale(1.1); } }
+    .pf-cta:active { transform: scale(0.97); }
+    input { font-family:'Inter',sans-serif; }
+  </style>
+</helmet>
+
+<div style="position:relative; width:390px; height:844px; overflow:hidden; background:#0D1B2A; border-radius:38px; border:1px solid rgba(255,255,255,0.08); font-family:'Inter',sans-serif; color:#EDEFF2;">
+
+  <div class="pf-glow1" style="position:absolute; top:60px; left:50%; margin-left:-170px; width:340px; height:340px; border-radius:50%; background:radial-gradient(circle, rgba(245,166,35,0.24), transparent 70%); filter:blur(36px); animation:pfDrift1 17s ease-in-out infinite;"></div>
+
+  <div style="position:relative; z-index:1; height:100%; padding:20px 32px 32px; display:flex; flex-direction:column;">
+
+    <div style="height:32px;"></div>
+
+    <div class="pf-fade" style="flex:1; display:flex; flex-direction:column; justify-content:center; animation-delay:.05s;">
+
+      <div style="width:88px; height:88px; border-radius:24px; background:linear-gradient(135deg,#F5A623,#4CD9C0); margin-bottom:26px; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:34px; color:#14213D;">P</div>
+
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:24px; letter-spacing:-.3px; margin-bottom:8px;">Let's set up your fund</div>
+      <div style="font-size:14px; line-height:1.6; color:#93A2B8; margin-bottom:26px;">Give your paluwagan group a name. Members will see this at the top of every screen.</div>
+
+      <label style="font-size:11px; color:#93A2B8; text-transform:uppercase; letter-spacing:.05em; display:block; margin-bottom:8px;">Fund name</label>
+      <input id="pf-fund-name" type="text" placeholder="e.g. Barangay Savings Circle" style="width:100%; height:52px; border-radius:14px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.14); color:#EDEFF2; font-size:15px; padding:0 16px;">
+    </div>
+
+    <div class="pf-fade" style="animation-delay:.1s;">
+      <div style="display:flex; gap:8px; justify-content:center; margin-bottom:20px;">
+        <span style="width:22px; height:6px; border-radius:3px; background:#F5A623;"></span>
+        <span style="width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,0.18);"></span>
+        <span style="width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,0.18);"></span>
+        <span style="width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,0.18);"></span>
+      </div>
+      <button id="pf-name-next" disabled style="width:100%; height:56px; border:none; border-radius:28px; background:linear-gradient(135deg, #F5A623, #FFC966); color:#14213D; font-family:'Inter',sans-serif; font-weight:700; font-size:15px; cursor:pointer; box-shadow:0 14px 26px -10px rgba(245,166,35,0.55); opacity:0.4;">Next</button>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {
+  componentDidMount() {
+    var input = document.getElementById('pf-fund-name');
+    var next = document.getElementById('pf-name-next');
+    function check() {
+      var ok = input.value.trim().length > 0;
+      next.disabled = !ok;
+      next.style.opacity = ok ? '1' : '0.4';
+    }
+    if (input) input.addEventListener('input', check);
+  }
+}
+</script>
+</body>
+</html>

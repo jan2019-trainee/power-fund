@@ -1355,15 +1355,51 @@
   }
 
   // ===================================================================
+  // Icons — one stroke-based set, drawn in currentColor so a single
+  // definition works on any background at any accent. Emoji were only ever a
+  // placeholder: they render differently on every platform and can't inherit
+  // colour or stroke weight.
+  // ===================================================================
+  const ICON_PATHS = {
+    home: '<path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9a1 1 0 0 0 1 1h3v-6h4v6h3a1 1 0 0 0 1-1v-9"/>',
+    rounds:
+      '<path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/>',
+    members:
+      '<circle cx="9" cy="8" r="3.2"/><path d="M2.8 20.2c.5-3.6 3-5.6 6.2-5.6s5.7 2 6.2 5.6"/><circle cx="17.3" cy="8.6" r="2.4"/><path d="M15.9 14.3c2.3.5 4 2.3 4.3 5.4"/>',
+    activity:
+      '<line x1="8" y1="7" x2="20" y2="7"/><line x1="8" y1="12" x2="20" y2="12"/><line x1="8" y1="17" x2="20" y2="17"/><circle cx="4" cy="7" r="1" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="4" cy="17" r="1" fill="currentColor" stroke="none"/>',
+    insights: '<polyline points="3 16 9 10 13 14 21 5"/><polyline points="15 5 21 5 21 11"/>',
+    menu: '<circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/>',
+    lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    unlocked: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.4-2"/>',
+    qr: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="15" y="15" width="5" height="5"/>',
+    users:
+      '<circle cx="9" cy="8" r="3.2"/><path d="M2.8 20.2c.5-3.6 3-5.6 6.2-5.6s5.7 2 6.2 5.6"/><circle cx="17.3" cy="8.6" r="2.4"/><path d="M15.9 14.3c2.3.5 4 2.3 4.3 5.4"/>',
+    key: '<circle cx="8" cy="12" r="3.2"/><path d="M11.2 12H21"/><path d="M17 12v3"/><path d="M20 12v2"/>',
+    download: '<path d="M12 3v13"/><polyline points="7 11 12 16 17 11"/><path d="M4 20h16"/>',
+    upload: '<path d="M12 21V8"/><polyline points="7 13 12 8 17 13"/><path d="M4 4h16"/>',
+    sheet: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h3"/>',
+    trash:
+      '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/><path d="M9 7V4h6v3"/>',
+  };
+  /** Inline SVG for one icon, sized in px and inheriting the caller's colour. */
+  function icon(name, size) {
+    const d = ICON_PATHS[name];
+    if (!d) return "";
+    const px = size || 18;
+    return `<svg class="icon" viewBox="0 0 24 24" width="${px}" height="${px}" aria-hidden="true" focusable="false">${d}</svg>`;
+  }
+
+  // ===================================================================
   // Tab shell (Home / Rounds / Members / Activity / Insights / Menu)
   // ===================================================================
   const TAB_VIEWS = [
-    { id: "home", label: "Home", icon: "🏠" },
-    { id: "rounds", label: "Rounds", icon: "🔁" },
-    { id: "members", label: "Members", icon: "👥" },
-    { id: "activity", label: "Activity", icon: "📋" },
-    { id: "insights", label: "Insights", icon: "📈" },
-    { id: "menu", label: "Menu", icon: "⚙️" },
+    { id: "home", label: "Home", icon: "home" },
+    { id: "rounds", label: "Rounds", icon: "rounds" },
+    { id: "members", label: "Members", icon: "members" },
+    { id: "activity", label: "Activity", icon: "activity" },
+    { id: "insights", label: "Insights", icon: "insights" },
+    { id: "menu", label: "Menu", icon: "menu" },
   ];
   function setView(view) {
     if (currentView === view) return;
@@ -1377,7 +1413,7 @@
     const meta = TAB_VIEWS.find((t) => t.id === view);
     const label = meta ? meta.label : view;
     return `<div class="view-placeholder">
-      <p>${meta ? meta.icon : ""} <b>${escapeHtml(label)}</b></p>
+      <p>${meta ? icon(meta.icon, 18) : ""} <b>${escapeHtml(label)}</b></p>
       <p class="view-placeholder-note">This tab is coming soon — its content still lives on Home for now.</p>
     </div>`;
   }
@@ -1542,7 +1578,7 @@
         }" aria-current="${t.id === active ? "page" : "false"}" onclick="PowerFund.setView('${
           t.id
         }')">
-          <span class="tab-icon" aria-hidden="true">${t.icon}</span>
+          <span class="tab-icon">${icon(t.icon, 20)}</span>
           <span class="tab-label">${t.label}</span>
         </button>`
       ).join("")}
@@ -1980,7 +2016,9 @@
         )}</p>
       </div>
       <button class="unlock-btn ${unlocked ? "unlocked" : ""}" onclick="PowerFund.toggleUnlock()">
-        ${unlocked ? "🔓 Treasurer mode on" : "🔒 Unlock treasurer mode"}
+        ${icon(unlocked ? "unlocked" : "lock", 15)}<span>${
+          unlocked ? "Treasurer mode on" : "Unlock treasurer mode"
+        }</span>
       </button>
     </div>`;
 
@@ -2249,19 +2287,19 @@
 
     if (unlocked) {
       html += `<div class="menu-list">
-        <button class="menu-row" onclick="PowerFund.openQrModal()"><span>Payment QR code</span><span class="menu-row-chevron">›</span></button>
-        <button class="menu-row" onclick="PowerFund.openEditNamesModal()"><span>Edit member names</span><span class="menu-row-chevron">›</span></button>
-        <button class="menu-row" onclick="PowerFund.openChangePin()"><span>Change PIN</span><span class="menu-row-chevron">›</span></button>
+        <button class="menu-row" onclick="PowerFund.openQrModal()"><span class="menu-row-main">${icon("qr", 17)}<span>Payment QR code</span></span><span class="menu-row-chevron">›</span></button>
+        <button class="menu-row" onclick="PowerFund.openEditNamesModal()"><span class="menu-row-main">${icon("users", 17)}<span>Edit member names</span></span><span class="menu-row-chevron">›</span></button>
+        <button class="menu-row" onclick="PowerFund.openChangePin()"><span class="menu-row-main">${icon("key", 17)}<span>Change PIN</span></span><span class="menu-row-chevron">›</span></button>
       </div>
       <p class="section-label">Data</p>
       <div class="menu-list">
-        <button class="menu-row" onclick="PowerFund.exportCsv()"><span>Export CSV summary</span><span class="menu-row-chevron">›</span></button>
-        <button class="menu-row" onclick="PowerFund.downloadBackup()"><span>Download backup</span><span class="menu-row-chevron">›</span></button>
-        <button class="menu-row" onclick="PowerFund.pickRestoreFile()"><span>Restore from backup</span><span class="menu-row-chevron">›</span></button>
+        <button class="menu-row" onclick="PowerFund.exportCsv()"><span class="menu-row-main">${icon("sheet", 17)}<span>Export CSV summary</span></span><span class="menu-row-chevron">›</span></button>
+        <button class="menu-row" onclick="PowerFund.downloadBackup()"><span class="menu-row-main">${icon("download", 17)}<span>Download backup</span></span><span class="menu-row-chevron">›</span></button>
+        <button class="menu-row" onclick="PowerFund.pickRestoreFile()"><span class="menu-row-main">${icon("upload", 17)}<span>Restore from backup</span></span><span class="menu-row-chevron">›</span></button>
       </div>
       <div class="danger-zone">
         <span class="danger-zone-label">⚠ Danger zone</span>
-        <button class="reset-btn danger" onclick="PowerFund.resetData()">Reset all data</button>
+        <button class="reset-btn danger" onclick="PowerFund.resetData()">${icon("trash", 15)}<span>Reset all data</span></button>
       </div>`;
     }
 

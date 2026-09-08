@@ -1969,3 +1969,90 @@ body::after {
 }
 .hero-gauge-meta { font-size: 13px; color: var(--text-muted); line-height: 1.6; }
 .hero-gauge-meta b { color: var(--text-primary); }
+
+/* Motion — entrance for the view's own content, plus the slow ambient drift
+   behind it. Both are decorative, so both drop out entirely under
+   prefers-reduced-motion; nothing here is load-bearing for comprehension. */
+@keyframes pfFadeUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pfDrift1 {
+  0%, 100% { transform: translate(-8%, -6%) scale(1); }
+  50% { transform: translate(4%, 3%) scale(1.08); }
+}
+@keyframes pfDrift2 {
+  0%, 100% { transform: translate(6%, 4%) scale(1); }
+  50% { transform: translate(-4%, -6%) scale(1.1); }
+}
+@keyframes pfBattFill {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+
+body::before { animation: pfDrift1 16s ease-in-out infinite; }
+body::after { animation: pfDrift2 19s ease-in-out infinite; }
+
+/* Staggered so a view assembles rather than snapping in all at once. */
+.view-head,
+.my-status-card,
+.my-status-setup,
+.attention-panel,
+.fund-total,
+.battery-hero,
+.stat-grid,
+.section-label,
+.member-grid,
+.round-bars,
+.leaderboard,
+.menu-list,
+.menu-locked-note,
+.activity-chips,
+.activity-list,
+.payout-history,
+.footer-note {
+  animation: pfFadeUp 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.fund-total { animation-delay: 0.04s; }
+.battery-hero { animation-delay: 0.08s; }
+.stat-grid, .member-grid, .activity-list, .menu-list { animation-delay: 0.06s; }
+.round-bars, .leaderboard, .payout-history { animation-delay: 0.1s; }
+.footer-note { animation-delay: 0.12s; }
+
+/* The cell charging up, anchored at its base so it grows the way it fills. */
+.batt-fill {
+  transform-box: fill-box;
+  transform-origin: bottom;
+  animation: pfBattFill 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both;
+}
+
+.tab-item, .menu-row, .contribute-btn, .my-status-cta {
+  transition: background 0.15s ease, color 0.15s ease, filter 0.15s ease,
+    transform 0.1s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before,
+  body::after { animation: none; }
+  .view-head,
+  .my-status-card,
+  .my-status-setup,
+  .attention-panel,
+  .fund-total,
+  .battery-hero,
+  .stat-grid,
+  .section-label,
+  .member-grid,
+  .round-bars,
+  .leaderboard,
+  .menu-list,
+  .menu-locked-note,
+  .activity-chips,
+  .activity-list,
+  .payout-history,
+  .footer-note,
+  .batt-fill {
+    animation: none;
+  }
+  .tab-item, .menu-row, .contribute-btn, .my-status-cta { transition: none; }
+}

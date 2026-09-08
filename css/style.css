@@ -1622,8 +1622,24 @@ body { padding-top: calc(28px + var(--pf-bar-h, 0px)); }
   padding: 6px 2px;
   cursor: pointer;
 }
-.tab-item .tab-icon { font-size: 18px; line-height: 1; }
+.tab-item .tab-icon { display: flex; line-height: 1; }
 .tab-item.active { color: var(--accent); font-weight: 600; }
+
+/* One rule drives the whole icon set: stroked, never filled, inheriting the
+   colour of whatever it sits in. */
+.icon {
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+.unlock-btn { display: inline-flex; align-items: center; gap: 7px; }
+.menu-row-main { display: flex; align-items: center; gap: 11px; }
+.menu-row-main .icon { color: var(--text-muted); }
+.reset-btn.danger { display: inline-flex; align-items: center; gap: 7px; }
 /* Brand block belongs to the sidebar shell only — no room for it in the bar. */
 .tab-brand { display: none; }
 

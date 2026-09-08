@@ -192,7 +192,7 @@
       successTimer = setTimeout(() => {
         appSuccess = null;
         render();
-      }, 6000);
+      }, 4500);
     }
   }
   function dismissSuccess() {
@@ -2175,17 +2175,14 @@
     </div>`;
 
     if (appError) {
-      html += `<div class="save-error-banner">⚠️ ${escapeHtml(appError)}</div>`;
+      html += `<div class="save-error-banner">${icon("alert", 15)}<span>${escapeHtml(
+        appError
+      )}</span></div>`;
     }
     if (appWarning) {
-      html += `<div class="save-warning-banner">⚠️ ${escapeHtml(
+      html += `<div class="save-warning-banner">${icon("alert", 15)}<span>${escapeHtml(
         appWarning
-      )} <button type="button" class="warn-dismiss" onclick="PowerFund.dismissWarning()" aria-label="Dismiss">✕</button></div>`;
-    }
-    if (appSuccess) {
-      html += `<div class="save-success-banner" role="status">${escapeHtml(
-        appSuccess
-      )} <button type="button" class="warn-dismiss" onclick="PowerFund.dismissSuccess()" aria-label="Dismiss">✕</button></div>`;
+      )}</span> <button type="button" class="warn-dismiss" onclick="PowerFund.dismissWarning()" aria-label="Dismiss">✕</button></div>`;
     }
 
     // ---- Tab views ----
@@ -2225,6 +2222,20 @@
     html += `<div class="view view-${currentView}">${viewHtml}</div>`;
 
     html += renderTabBar(currentView);
+
+    // Transient confirmation. Rendered last so it sits above the nav, and
+    // announced politely rather than assertively — it confirms something the
+    // user just did, it doesn't interrupt them.
+    if (appSuccess) {
+      // Both are pinned to the bottom, so the toast has to sit above the
+      // action button rather than on top of it.
+      const cta = viewHtml.indexOf("floating-cta") !== -1 ? " above-cta" : "";
+      html += `<div class="toast${cta}" role="status" aria-live="polite">
+        <span class="toast-icon">${icon("check", 15)}</span>
+        <span class="toast-text">${escapeHtml(appSuccess)}</span>
+        <button type="button" class="toast-x" onclick="PowerFund.dismissSuccess()" aria-label="Dismiss">✕</button>
+      </div>`;
+    }
 
     // ---- Modals ----
     if (modalTarget) {

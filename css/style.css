@@ -63,14 +63,14 @@ body {
   background: var(--bg-primary);
   color: var(--text-primary);
   font-family: 'Inter', sans-serif;
-  padding: 28px 16px 60px;
+  padding: 28px 16px 96px;
   min-height: 100vh;
 }
 
 .wrap { max-width: 760px; margin: 0 auto; }
 
 @media (max-width: 480px) {
-  body { padding: 20px 10px 48px; }
+  body { padding: 20px 10px 88px; }
   .battery-hero, .modal, .footer-note { padding-left: 16px; padding-right: 16px; }
   .round-body { padding-left: 10px; padding-right: 10px; }
   .title { font-size: 22px; }
@@ -1589,4 +1589,48 @@ body { padding-top: calc(28px + var(--pf-bar-h, 0px)); }
 /* File-save fallback modal (iOS standalone, where <a download> is inert) reuses
    the app's own .modal-overlay / .modal / .share-text-area styling — no new
    modal styles needed. */
+
+/* ---------------------------------------------------------------------------
+ * Tab shell — bottom nav bar (Home/Rounds/Members/Activity/Insights/Menu).
+ * Desktop sidebar variant is a separate, later piece; this bar is the only
+ * navigation chrome for now, at every viewport width.
+ * ------------------------------------------------------------------------- */
+.tab-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border);
+  padding: 6px 4px calc(6px + env(safe-area-inset-bottom, 0px));
+}
+.tab-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: 'Inter', sans-serif;
+  font-size: 10.5px;
+  padding: 6px 2px;
+  cursor: pointer;
+}
+.tab-item .tab-icon { font-size: 18px; line-height: 1; }
+.tab-item.active { color: var(--accent); font-weight: 600; }
+
+.view-placeholder {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 60px 12px;
+  font-size: 14px;
+}
+.view-placeholder p:first-child { font-size: 16px; color: var(--text-primary); margin-bottom: 8px; }
+.view-placeholder-note { font-size: 12.5px; }
 

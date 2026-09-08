@@ -2114,3 +2114,41 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
 .payout-done-tag,
 .ph-receipt,
 .proof-upload-label { display: inline-flex; align-items: center; gap: 5px; }
+
+/* Caught-up state — the counterpart to "needs your attention". An absent
+   panel is ambiguous (all clear, or failed to load?), so the clear case says
+   so in its own right. */
+.attention-panel.caught-up {
+  border-color: rgba(76, 175, 131, 0.45);
+  border-left-color: var(--success);
+  background: rgba(76, 175, 131, 0.06);
+}
+.attention-panel.caught-up .attention-title { color: var(--success); }
+.attention-caught-up-note {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+.attention-title,
+.attention-group-label { display: inline-flex; align-items: center; gap: 7px; }
+
+/* Fund complete — the end state of the whole fund, not just another funded
+   round, so the hero takes the accent rather than staying neutral. */
+.battery-hero.fund-complete {
+  border-color: rgba(245, 166, 35, 0.45);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08) inset,
+    0 24px 44px -26px rgba(0, 0, 0, 0.65),
+    0 0 0 1px rgba(245, 166, 35, 0.18);
+}
+.battery-hero.fund-complete .hero-round-num {
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Once the cell fills past its midpoint the readout sits on bright gradient,
+   so it flips to the dark ink the fill was designed against. */
+.hero-batt-label.on-fill .hero-batt-pct { color: #14213D; }
+.hero-batt-label.on-fill .hero-batt-cap { color: rgba(20, 33, 61, 0.75); }

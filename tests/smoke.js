@@ -400,6 +400,109 @@ async function breakpointCrossing(browser, errors) {
   await page.close();
 }
 
+
+/** Home composes itself differently per shell — a column on mobile, a
+ *  dashboard on desktop — and the release card outranks the review queue. */
+async function homeComposition(browser, errors) {
+  // Desktop dashboard.
+  const wide = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+  wide.on("pageerror", (e) => errors.push(`home/desktop: ${e}`));
+  await serve(wide, M.TABLE_DATA);
+  await wide.goto(BASE, { waitUntil: "domcontentloaded" });
+  await wide.waitForTimeout(1500);
+  await unlockTreasurer(wide);
+  await wide.waitForTimeout(400);
+
+  check("home/desktop: greeting", (await wide.locator(".home-greet").count()) === 1);
+  check(
+    "home/desktop: main + rail",
+    (await wide.locator(".home-grid > .home-main").count()) === 1 &&
+      (await wide.locator(".home-grid > .home-rail").count()) === 1
+  );
+  check(
+    "home/desktop: rail panels",
+    (await wide.locator(".home-rail .home-rounds-strip").count()) === 1 &&
+      (await wide.locator(".home-rail .home-quick").count()) === 1
+  );
+  check(
+    "home/desktop: recent activity in main",
+    (await wide.locator(".home-main .home-recent-row").count()) > 0
+  );
+  check(
+    "home/desktop: attention is in the rail, hero in main",
+    (await wide.locator(".home-rail .attention-panel").count()) === 1 &&
+      (await wide.locator(".home-main .battery-hero").count()) === 1
+  );
+  // Nothing must scroll sideways at this width.
+  const overflow = await wide.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+  );
+  check("home/desktop: no horizontal overflow", overflow <= 1, `overflow=${overflow}px`);
+  await wide.close();
+
+  // Mobile stays a single column with none of that furniture.
+  const narrow = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  narrow.on("pageerror", (e) => errors.push(`home/mobile: ${e}`));
+  await serve(narrow, M.TABLE_DATA);
+  await narrow.goto(BASE, { waitUntil: "domcontentloaded" });
+  await narrow.waitForTimeout(1500);
+  check(
+    "home/mobile: no dashboard chrome",
+    (await narrow.locator(".home-grid").count()) === 0 &&
+      (await narrow.locator(".home-greet").count()) === 0
+  );
+  check("home/mobile: floating CTA kept", (await narrow.locator(".floating-cta").count()) === 1);
+  await narrow.close();
+
+  // A funded round outranks the review queue: the design settles the stacking
+  // order explicitly, so assert release comes BEFORE attention in the DOM.
+  const everyCyclePaidR1 = [];
+  let id = 7000;
+  M.CYCLES.filter((c) => c.cycle_number <= 6).forEach((cy) =>
+    M.MEMBERS.forEach((m) =>
+      everyCyclePaidR1.push({
+        id: uuid(id++),
+        cycle_id: cy.id,
+        member_id: m.id,
+        status: 2,
+        amount: 1000,
+        proof_url: null,
+        paid_at: new Date(cy.due_date).toISOString(),
+      })
+    )
+  );
+  const funded = {
+    ...M.TABLE_DATA,
+    contributions: [...everyCyclePaidR1, ...M.CONTRIBUTIONS.filter((c) => c.status === 1)],
+    payouts: M.PAYOUTS.map((p) => (p.round_number === 1 ? { ...p, released: false } : p)),
+  };
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`home/release: ${e}`));
+  await serve(page, funded);
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1500);
+  await unlockTreasurer(page);
+  await page.waitForTimeout(400);
+
+  const order = await page.evaluate(() => {
+    const rel = document.querySelector(".release-card");
+    const att = document.querySelector(".attention-panel");
+    if (!rel || !att) return { rel: !!rel, att: !!att, before: null };
+    // Node.compareDocumentPosition: 4 == att follows rel.
+    return { rel: true, att: true, before: !!(rel.compareDocumentPosition(att) & 4) };
+  });
+  check(
+    "home/release card sits above the review queue",
+    order.rel && order.att && order.before === true,
+    JSON.stringify(order)
+  );
+  check(
+    "home/release card is not inside the attention panel",
+    (await page.locator(".attention-panel .release-card").count()) === 0
+  );
+  await page.close();
+}
+
 (async () => {
   const browser = await chromium.launch({
     executablePath: process.env.PF_CHROMIUM || undefined,
@@ -419,6 +522,8 @@ async function breakpointCrossing(browser, errors) {
   await rejectionAndMasterPin(browser, errors);
   console.log("\nBreakpoint");
   await breakpointCrossing(browser, errors);
+  console.log("\nHome composition");
+  await homeComposition(browser, errors);
 
   await browser.close();
 

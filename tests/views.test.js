@@ -141,5 +141,33 @@ for (const f of files) {
   );
 }
 
+console.log("\nNo view uses a ctx name it forgot to destructure");
+/*
+ * The mirror of the check above, and its blind spot: that one looks for app.js
+ * FUNCTIONS, so a plain value like `isWide` slipped through — used in the
+ * assembly, never destructured, and undefined at run time. Any ctx name a view
+ * mentions has to be one it actually pulled off ctx.
+ */
+for (const f of files) {
+  const src = stripComments(fs.readFileSync(path.join(VIEWS_DIR, f), "utf8"));
+  const onCtx = ctxUsedByView(src);
+  const own = locals(src);
+  const forgotten = [...provided].filter(
+    (n) =>
+      !onCtx.has(n) &&
+      !own.has(n) &&
+      // Mentioned as a bare identifier: not after a dot, and not as an object
+      // key or a string. Word boundaries either side.
+      // Excluding a leading hyphen keeps CSS class names like "detail-rounds"
+      // from reading as a use of `rounds`.
+      new RegExp("(?<![.\\w$\"'-])" + n + "(?![\\w$-])").test(src)
+  );
+  check(
+    `${f}: no undeclared ctx names`,
+    forgotten.length === 0,
+    forgotten.length ? `used but not destructured: ${forgotten.join(", ")}` : "clean"
+  );
+}
+
 console.log(failed ? `\n${failed} check(s) FAILED\n` : "\nall checks passed\n");
 process.exit(failed ? 1 : 0);

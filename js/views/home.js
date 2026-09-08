@@ -18,7 +18,7 @@ window.PFViews.home = function (ctx) {
     attentionQueueExpanded, overdueListOpen, startRoundConfirming,
     escapeHtml, inlineArg, icon, batteryCell, memberAvatar, memberStanding,
     sparkline, C,
-    formatDateTime, overdueRows
+    formatDateTime, overdueRows, activityTimeLabel, isWide
   } = ctx;
   // Cycles due so far — the denominator behind each member's standing ring.
   const cyclesDueSoFar = C.completedCyclesCount(state.cycles);
@@ -26,6 +26,39 @@ window.PFViews.home = function (ctx) {
   let hasFloatingCta = false;
   let html = "";
 
+  /*
+   * Home is the one view whose two shells differ in COMPOSITION, not just in
+   * width: mobile is a single column read top to bottom, desktop is a dashboard
+   * with a main column and a right rail (see canvas.json's desktop-notes).
+   *
+   * Rather than write the markup twice, each block is built once and captured
+   * into S as it goes; the two shells then assemble the same pieces in their
+   * own order at the bottom of this file. `section()` returns whatever has been
+   * appended since the last call, so the blocks below stay exactly as they read
+   * in source order.
+   */
+  const S = {};
+  let taken = 0;
+  const section = () => {
+    const out = html.slice(taken);
+    taken = html.length;
+    return out;
+  };
+
+
+  // ---- Day one: the fund exists but nothing has happened yet ----------
+  // Without this the screen reads as "0%" everywhere with no explanation,
+  // which looks like a fault rather than a fund that simply hasn't started.
+  const collectedSoFar = C.totalCollected(state.contributions);
+  const nothingYet =
+    collectedSoFar === 0 && C.pendingCount(state.contributions) === 0 && curRound === 1;
+  if (nothingYet && !allDone) {
+    html += `<div class="dayone-card">
+      <p class="dayone-title">${icon("party", 16)}<span>Your fund just started</span></p>
+      <p class="dayone-note">Round 1 is open — nothing collected yet. Payments show up here as they come in.</p>
+    </div>`;
+  }
+  S.dayOne = section();
 
   // ---- Rejected payment: the one thing that needs acting on -----------
   // Sits above the status card because it is the only state where the member
@@ -60,6 +93,8 @@ window.PFViews.home = function (ctx) {
     </div>`;
   }
 
+  S.rejected = section();
+
   // ---- My status: personalized, only shown once a member has set "who
   // am I on this device" — never forced, never gates anything. ----------
   html += (function () {
@@ -84,6 +119,8 @@ window.PFViews.home = function (ctx) {
     }
     return `<button type="button" class="my-status-setup" onclick="PowerFund.openWhoAmIPicker()">👋 Which member are you? Tap to see your personal status.</button>`;
   })();
+
+  S.myStatus = section();
 
   // The old standalone due-countdown banner was removed — the same date is
   // always visible a little further down, either on the My-status card
@@ -221,16 +258,8 @@ window.PFViews.home = function (ctx) {
         </div>`;
       }
 
-      // 2) payout(s) ready to release
-      releaseRounds.forEach((r) => {
-        const recip = members.find((m) => m.member_order === r);
-        html += `<div class="attention-group">
-          <p class="attention-group-label"><span class="round-dot pending"></span>Round ${r}${
-          recip ? " — " + escapeHtml(recip.name) : ""
-        } is funded — release the ${C.peso(C.GOAL_PER_ROUND)} payout</p>
-          <button class="contribute-btn payout-btn" onclick="PowerFund.openPayoutModal(${r})">Mark payout released</button>
-        </div>`;
-      });
+      // Payouts ready to release are NOT part of this panel — they are built
+      // separately below and rendered above it. See the release-card note.
 
       // 3) start the next round
       if (canStartNext) {
@@ -281,9 +310,40 @@ window.PFViews.home = function (ctx) {
     }
   }
 
+  S.attention = section();
+
+  /*
+   * Payout ready to release — its own card, ABOVE "Needs your attention".
+   *
+   * The design settles the stacking order explicitly: a funded round means a
+   * real person is waiting on money that is ready to send, while a pending
+   * review can sit a little longer without costing anyone anything. So this
+   * outranks the review queue rather than sitting as one more group inside it.
+   */
+  if (unlocked && !allDone) {
+    for (let r = 1; r <= C.TOTAL_ROUNDS; r++) {
+      if (C.roundStatus(state.contributions, rounds, r) !== "payout_pending") continue;
+      const recip = members.find((m) => m.member_order === r);
+      html += `<div class="release-card">
+        <p class="release-card-title">${icon("party", 16)}<span>Round ${r}${
+        recip ? ` — ${escapeHtml(recip.name)}` : ""
+      } is funded</span></p>
+        <p class="release-card-note">${C.peso(
+          C.GOAL_PER_ROUND
+        )} collected and ready to send${
+        recip ? ` to ${escapeHtml(recip.name)}` : ""
+      }.</p>
+        <button class="contribute-btn payout-btn" onclick="PowerFund.openPayoutModal(${r})">Release payout</button>
+      </div>`;
+    }
+  }
+  S.release = section();
+
   // Fund balance renders here — after "Needs your attention" for a
   // treasurer, and simply here (there's nothing before it) for a member.
   html += fundTotalHtml;
+
+  S.fundTotal = section();
 
   // ---- Current round hero: round → money → to-go → who paid → CTA ----
   html += `<div class="battery-hero ${allDone ? "fund-complete" : ""}">
@@ -318,7 +378,13 @@ window.PFViews.home = function (ctx) {
           <span class="hero-batt-cap">funded</span>
         </div>
       </div>
-      ${sparkline(state.contributions, C)}
+      ${
+        sparkline(state.contributions, C) ||
+        `<div class="hero-spark hero-spark-empty">
+           <div class="hero-spark-label">Fund growth</div>
+           <p class="hero-spark-note">Shows up once contributions come in.</p>
+         </div>`
+      }
     </div>
     <div class="hero-gauge-meta">${
       allDone
@@ -392,6 +458,8 @@ window.PFViews.home = function (ctx) {
     )}<span>Copy status update</span></button>
   </div>`;
 
+  S.hero = section();
+
   // Skip this generic "pick your name" action when the My-status card above
   // already offers the same one for the same cycle — two buttons doing one
   // thing. Still shown when unlocked (a treasurer acts on ANY member) or when
@@ -405,6 +473,8 @@ window.PFViews.home = function (ctx) {
       unlocked ? "＋ Record / review a payment" : "＋ Record a contribution"
     }</button></div>`;
   }
+
+  S.cta = section();
 
   // ---- Roster strip: the whole group at a glance, without leaving Home.
   // The Members tab is the full detail; this is the "who still owes" glance
@@ -443,6 +513,8 @@ window.PFViews.home = function (ctx) {
     </div>
   </div>`;
 
+  S.roster = section();
+
   // ---- Compact link out to the Rounds screen, mirroring the design: Home
   // summarises the round, Rounds is where you work through it.
   html += `<button type="button" class="rounds-link" onclick="PowerFund.setView('rounds')">
@@ -455,6 +527,8 @@ window.PFViews.home = function (ctx) {
     </span>
     ${icon("chevron", 15)}
   </button>`;
+
+  S.roundsLink = section();
 
   // Previous round(s) whose payout hasn't been released — shown AFTER the
   // current round and styled as history, so last round's ₱30,000 is never
@@ -474,7 +548,141 @@ window.PFViews.home = function (ctx) {
     </div>`;
   });
 
-  if (hasFloatingCta) html += `<div class="cta-spacer" aria-hidden="true"></div>`;
+  S.prevRounds = section();
 
-  return html;
+  if (hasFloatingCta) html += `<div class="cta-spacer" aria-hidden="true"></div>`;
+  S.spacer = section();
+
+  /* =====================================================================
+   * Mobile: one column, read top to bottom. This is the order every mobile
+   * artboard shows, and the order the app already shipped.
+   * ===================================================================== */
+  if (!isWide) {
+    return (
+      S.dayOne + S.rejected + S.myStatus + S.release + S.attention + S.fundTotal +
+      S.hero + S.cta + S.roster + S.roundsLink + S.prevRounds + S.spacer
+    );
+  }
+
+  /* =====================================================================
+   * Desktop: a dashboard, not the same column made wider.
+   *
+   * "hero + roster + recent activity on the left, a right rail for 'Needs
+   * your attention' / personal status, a 5-round progress strip, and quick
+   * actions, all visible at once" — canvas.json, desktop-notes.
+   *
+   * Everything below reuses the sections built above; only the three panels
+   * that exist solely on this shell are built here.
+   * ===================================================================== */
+
+  // Greeting — the design leads with the person, then the fund's position.
+  const hour = new Date().getHours();
+  const partOfDay = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  const greeting = `<div class="home-greet">
+    <div>
+      <h2 class="home-greet-title">${partOfDay}${
+    myMember ? `, ${escapeHtml(myMember.name)}` : ""
+  }</h2>
+      <p class="home-greet-sub">Group of ${members.length} · ${
+    allDone ? "Fund complete" : `Round ${curRound} of ${C.TOTAL_ROUNDS}`
+  }</p>
+    </div>
+    ${
+      payCycle
+        ? `<button type="button" class="home-greet-cta" onclick="PowerFund.openContributePicker(${payCycle})">${icon(
+            "plus",
+            15
+          )}<span>${unlocked ? "Record contribution" : "Pay this cycle"}</span></button>`
+        : ""
+    }
+  </div>`;
+
+  // Recent activity — the three latest entries, with "View all" into the tab.
+  // Mobile has no equivalent: there the Activity tab is one tap away and the
+  // column is too narrow to spend on a preview.
+  const recent = (state.activityLog || []).slice(0, 3);
+  const recentPanel = `<div class="home-panel">
+    <div class="home-panel-head">
+      <span class="home-panel-title">Recent activity</span>
+      <button type="button" class="home-panel-all" onclick="PowerFund.setView('activity')">View all ${icon(
+        "chevron",
+        13
+      )}</button>
+    </div>
+    ${
+      recent.length
+        ? `<div class="home-recent">${recent
+            .map(
+              (e) => `<div class="home-recent-row">
+                 <span class="home-recent-text">${escapeHtml(e.message)}</span>
+                 <span class="home-recent-time">${escapeHtml(
+                   activityTimeLabel(e.created_at)
+                 )}</span>
+               </div>`
+            )
+            .join("")}</div>`
+        : `<p class="home-panel-empty">Nothing yet — actions show up here as the group uses the tracker.</p>`
+    }
+  </div>`;
+
+  // Five-round progress strip: where the whole fund stands, at a glance.
+  const overview = `<div class="home-panel">
+    <div class="home-panel-head">
+      <span class="home-panel-title">Rounds overview</span>
+      <button type="button" class="home-panel-all" onclick="PowerFund.setView('rounds')">Open ${icon(
+        "chevron",
+        13
+      )}</button>
+    </div>
+    <div class="home-rounds-strip">
+      ${Array.from({ length: C.TOTAL_ROUNDS }, (_, i) => {
+        const r = i + 1;
+        const st = C.roundStatus(state.contributions, rounds, r);
+        const amt = C.roundCollected(state.contributions, r);
+        const p = Math.min(100, (amt / C.GOAL_PER_ROUND) * 100);
+        const recip = members.find((m) => m.member_order === r);
+        return `<div class="home-round-cell ${st}" title="Round ${r}${
+          recip ? " — " + escapeHtml(recip.name) : ""
+        }: ${C.peso(amt)} of ${C.peso(C.GOAL_PER_ROUND)}">
+          <div class="home-round-bar"><div class="home-round-fill" style="height:${p}%"></div></div>
+          <span class="home-round-label">R${r}</span>
+        </div>`;
+      }).join("")}
+    </div>
+  </div>`;
+
+  // Quick actions — the two the design puts here. Export is treasurer-only
+  // because that is how the Menu gates it; share is open to everyone.
+  const quick = `<div class="home-panel">
+    <div class="home-panel-head"><span class="home-panel-title">Quick actions</span></div>
+    <div class="home-quick">
+      ${
+        unlocked
+          ? `<button type="button" class="home-quick-btn" onclick="PowerFund.exportCsv()">${icon(
+              "sheet",
+              15
+            )}<span>Export CSV summary</span></button>`
+          : ""
+      }
+      <button type="button" class="home-quick-btn" onclick="PowerFund.openShareModal()">${icon(
+        "share",
+        15
+      )}<span>Share fund status</span></button>
+    </div>
+  </div>`;
+
+  return (
+    S.dayOne +
+    greeting +
+    `<div class="home-grid">
+      <div class="home-main">
+        ${S.fundTotal}${S.hero}${S.roster}${S.roundsLink}${recentPanel}${S.prevRounds}
+      </div>
+      <aside class="home-rail">
+        ${S.rejected}${S.myStatus}${S.release}${S.attention}${overview}${quick}
+      </aside>
+    </div>` +
+    S.cta +
+    S.spacer
+  );
 };

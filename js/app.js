@@ -1456,6 +1456,10 @@
   // colour or stroke weight.
   // ===================================================================
   const ICON_PATHS = {
+    // Stroked, 24x24, no fill — see the .icon rule in style.css.
+    plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
+    share:
+      '<path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M12 15V4"/><path d="M8 8l4-4 4 4"/>',
     home: '<path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9a1 1 0 0 0 1 1h3v-6h4v6h3a1 1 0 0 0 1-1v-9"/>',
     rounds:
       '<path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/>',
@@ -2484,7 +2488,7 @@
       // the fixtures don't have. tests/views.test.js guards against that.
       escapeHtml, inlineArg, icon, memberAvatar, memberStanding, batteryCell,
       getPayout, payoutRecipientName, payoutDateText, sparkline,
-      formatDateTime, overdueRows, C,
+      formatDateTime, overdueRows, activityTimeLabel, C,
     };
 
     const view = window.PFViews && window.PFViews[currentView];

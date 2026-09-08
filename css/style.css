@@ -2229,24 +2229,13 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
  * wrapper, so there is still one render path — CSS decides the shape.
  * ======================================================================== */
 @media (min-width: 900px) {
-  /* HOME — main column carries the money; the rail carries what needs doing,
-     so a treasurer sees both without scrolling past one to reach the other. */
-  .view-home {
-    display: grid;
-    grid-template-columns: minmax(0, 1.65fr) minmax(260px, 1fr);
-    gap: 22px;
-    align-items: start;
-  }
-  .view-home > .fund-total,
-  .view-home > .battery-hero,
-  .view-home > .prev-round,
-  .view-home > .roster-strip-wrap,
-  .view-home > .rounds-link,
-  .view-home > .cta-spacer { grid-column: 1; }
-  .view-home > .my-status-card,
-  .view-home > .my-status-setup,
-  .view-home > .attention-panel { grid-column: 2; margin-bottom: 0; }
-  .view-home > .attention-panel { margin-top: 0; }
+  /* HOME — the two-column split used to be done here, by making .view-home a
+     grid and assigning each child a column. That could reflow the mobile
+     sections but could not add the panels the desktop design actually calls
+     for (greeting, recent activity, rounds overview, quick actions), so home.js
+     now composes the two shells itself and emits .home-grid. Those rules live
+     with the rest of the dashboard styles further down; keeping a grid here as
+     well would fight it for placement. */
 
   /* MEMBERS — the roster reads as a board at this width, not a long list. */
   .view-members .member-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -2885,4 +2874,188 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
   .pin-dot { transition: none; }
   .pin-key:active, .rejected-cta:active { transform: none; }
+}
+
+/* ===================================================================
+ * Home — day one, release card, and the desktop dashboard
+ * =================================================================== */
+
+/* A fund that exists but hasn't started. Without this the screen is 0%
+   everywhere with nothing saying why, which reads as a fault. */
+.dayone-card {
+  background: var(--accent-soft);
+  border: 1px solid rgba(245, 166, 35, 0.28);
+  border-radius: 12px;
+  padding: 13px 16px;
+  margin-bottom: 14px;
+}
+.dayone-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 5px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 14.5px;
+  color: var(--text-primary);
+}
+.dayone-title .icon { color: var(--accent); }
+.dayone-note { margin: 0; font-size: 12.8px; color: var(--text-muted); line-height: 1.5; }
+
+/* Money that is ready to send outranks a payment waiting to be checked, so
+   this sits above "Needs your attention" rather than inside it. */
+.release-card {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.release-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 5px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 14.5px;
+  color: var(--text-primary);
+}
+.release-card-title .icon { color: var(--accent); flex-shrink: 0; }
+.release-card-note { margin: 0 0 11px; font-size: 12.8px; color: var(--text-muted); line-height: 1.5; }
+
+/* Sparkline stand-in before there are two points to draw a line between. */
+.hero-spark-empty { display: flex; flex-direction: column; justify-content: center; }
+.hero-spark-note { margin: 4px 0 0; font-size: 11.5px; color: var(--text-muted); line-height: 1.4; }
+
+@media (min-width: 900px) {
+  /* The dashboard: main column plus a rail, everything visible at once. */
+  .home-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 340px;
+    gap: 18px;
+    align-items: start;
+  }
+  .home-main, .home-rail { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  /* The sections were built for a single column and carry their own bottom
+     margin; the flex gap replaces it here. */
+  .home-main > *, .home-rail > * { margin-bottom: 0; }
+
+  .home-greet {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 18px;
+  }
+  .home-greet-title {
+    margin: 0;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+  }
+  .home-greet-sub { margin: 3px 0 0; font-size: 13px; color: var(--text-muted); }
+  .home-greet-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 11px 18px;
+    border: none;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #16202B;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .home-greet-cta:hover { filter: brightness(1.06); }
+
+  .home-panel {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 14px 16px;
+  }
+  .home-panel-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .home-panel-title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 13.5px;
+    color: var(--text-primary);
+  }
+  .home-panel-all {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--text-muted);
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .home-panel-all:hover { color: var(--accent); }
+  .home-panel-empty { margin: 0; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
+
+  .home-recent { display: flex; flex-direction: column; gap: 9px; }
+  .home-recent-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 12.8px;
+  }
+  .home-recent-text { color: var(--text-primary); line-height: 1.45; min-width: 0; }
+  .home-recent-time { color: var(--text-muted); font-size: 11.5px; white-space: nowrap; flex-shrink: 0; }
+
+  /* Five columns, each a little vertical gauge — the fund's whole arc. */
+  .home-rounds-strip { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .home-round-cell { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .home-round-bar {
+    width: 100%;
+    height: 54px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: flex-end;
+    overflow: hidden;
+  }
+  .home-round-fill { width: 100%; background: var(--accent); border-radius: 0 0 5px 5px; }
+  .home-round-cell.completed .home-round-fill { background: var(--success); }
+  .home-round-cell.payout_pending .home-round-fill { background: var(--pending-review); }
+  .home-round-label { font-size: 11px; color: var(--text-muted); font-family: 'Space Grotesk', sans-serif; }
+
+  .home-quick { display: flex; flex-direction: column; gap: 8px; }
+  .home-quick-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-card-alt);
+    color: var(--text-primary);
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    cursor: pointer;
+    text-align: left;
+  }
+  .home-quick-btn:hover { background: rgba(255, 255, 255, 0.06); }
+  .home-quick-btn .icon { color: var(--text-muted); flex-shrink: 0; }
+
+  /* The pinned mobile CTA has no place in a layout with a real header button. */
+  .view-home .floating-cta, .view-home .cta-spacer { display: none; }
 }

@@ -156,6 +156,21 @@ console.log("\nlatestRejection");
   eq("resubmitted clears the rejection", C.latestRejection(resubmitted, MEMBER), null);
 }
 
+console.log("\nA rejected cycle can still be paid");
+{
+  // maxAdvanceCount used to break on anything that was not status 0, so a
+  // resubmission offered zero cycles and the contribute sheet could not submit.
+  const rejected = [row({ id: "r1", status: C.STATUS_REJECTED, proof_url: "p.jpg" })];
+  eq("rejected cycle is payable", C.maxAdvanceCount(rejected, MEMBER, 1, 3), 3);
+  eq("control: unpaid is payable", C.maxAdvanceCount([], MEMBER, 1, 3), 3);
+  // A confirmed cycle still stops the run.
+  const paid = [row({ id: "p1", status: C.STATUS_PAID })];
+  eq("confirmed stops the run", C.maxAdvanceCount(paid, MEMBER, 1, 3), 0);
+  // So does one awaiting review.
+  const pending = [row({ id: "q1", status: C.STATUS_PENDING, proof_url: "p.jpg" })];
+  eq("pending stops the run", C.maxAdvanceCount(pending, MEMBER, 1, 3), 0);
+}
+
 console.log("\nFund constants are unchanged");
 {
   eq("contribution", C.CONTRIBUTION_AMOUNT, 1000);

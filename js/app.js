@@ -2267,10 +2267,39 @@
     }
   }
 
+  /**
+   * Render, with a floor under it.
+   *
+   * renderView() builds the whole page into a string and assigns it in one go
+   * at the very end, so anything that throws part-way leaves the PREVIOUS DOM
+   * on screen — still carrying live onclick handlers that call render() and
+   * throw again. The result is a frozen UI: a dialog that ignores both its
+   * confirm and its cancel button, with nothing in the interface to say why.
+   *
+   * Catching here turns that silent freeze into something a person can act on
+   * and report, and keeps a way out of whatever state broke.
+   */
   function render() {
     const app = document.getElementById("app");
     if (!app) return;
+    try {
+      renderView(app);
+    } catch (e) {
+      console.error("Render failed:", e);
+      app.innerHTML =
+        `<div class="wrap"><div class="loading">` +
+        `<p><b>Something went wrong drawing this screen.</b></p>` +
+        `<p class="view-placeholder-note">The app stopped before it could finish. ` +
+        `Reloading usually clears it — your data is safe, nothing was saved from this screen.</p>` +
+        `<p class="view-placeholder-note"><code>${escapeHtml(
+          (e && e.message) || String(e)
+        )}</code></p>` +
+        `<button class="reset-btn" style="margin-top:16px" onclick="location.reload()">Reload</button>` +
+        `</div></div>`;
+    }
+  }
 
+  function renderView(app) {
     if (!state) {
       app.innerHTML = appError
         ? `<div class="loading">
@@ -3004,14 +3033,20 @@
             ${members
               .map((m) => {
                 const s = C.statusOf(state.contributions, m.id, cyc);
-                const cls = s === 2 ? "paid" : s === 1 ? "pending" : "unpaid";
+                const cls =
+                  s === 2 ? "paid" : s === 1 ? "pending" : s === 3 ? "rejected" : "unpaid";
                 let status =
                   s === 2
                     ? "✓ Paid"
                     : s === 1
                     ? "… Sent — awaiting review"
+                    : s === 3
+                    ? "✕ Rejected — send it again"
                     : "Not paid yet";
-                const clickable = unlocked || s === 0;
+                // A rejected cycle is still owed, so a member has to be able to
+                // pick it and resubmit — isOwed() keeps that in step with the
+                // cycle grid, which routes both states to the same handler.
+                const clickable = unlocked || C.isOwed(s);
                 if (unlocked && s === 1) status += " · tap to review";
                 else if (unlocked && s === 2) status += " · tap to undo";
                 return `<button type="button" class="picker-row ${cls}" ${

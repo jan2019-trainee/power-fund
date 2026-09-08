@@ -571,7 +571,10 @@ window.Calc = (function () {
     const end = Math.min(maxCycle || TOTAL_CYCLES, TOTAL_CYCLES);
     let count = 0;
     for (let c = cycleNumber; c <= end; c++) {
-      if (statusOf(contributions, memberId, c) === STATUS_UNPAID) count++;
+      // Owed, not merely never-submitted: a rejected cycle is still unpaid, so
+      // it can start an advance run and be paid alongside the ones after it.
+      // Without this a resubmission would offer to pay zero cycles.
+      if (isOwed(statusOf(contributions, memberId, c))) count++;
       else break;
     }
     return count;

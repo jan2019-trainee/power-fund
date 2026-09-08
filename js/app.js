@@ -81,7 +81,6 @@
   let payoutReceiptFile = null; // optional receipt image the treasurer attaches
   let payoutReceiptPreview = null; // object URL for its preview
 
-  let activityLogOpen = false;
   let activityLogLimit = 30; // grows when the treasurer taps "Show older"
   let activityFilter = "all"; // "all" | "payment" | "payout" | "admin"
   let shareModalOpen = false;
@@ -1350,10 +1349,6 @@
     openRound = openRound === roundNum ? null : roundNum;
     render();
   }
-  function toggleActivityLog() {
-    activityLogOpen = !activityLogOpen;
-    render();
-  }
   function setActivityFilter(type) {
     activityFilter = type;
     render();
@@ -1381,15 +1376,64 @@
   function renderPlaceholderView(view) {
     const meta = TAB_VIEWS.find((t) => t.id === view);
     const label = meta ? meta.label : view;
-    return `<div class="header">
-      <div class="header-titles">
-        <p class="title">⚡ Power Fund</p>
-      </div>
-    </div>
-    <div class="view-placeholder">
+    return `<div class="view-placeholder">
       <p>${meta ? meta.icon : ""} <b>${escapeHtml(label)}</b></p>
       <p class="view-placeholder-note">This tab is coming soon — its content still lives on Home for now.</p>
     </div>`;
+  }
+  /** Activity tab. The log used to be a collapsed accordion competing for
+   * room on the old single-page layout; on its own tab it is the whole screen,
+   * so it renders expanded with the filter chips always in reach. */
+  function renderActivityView() {
+    const log = state.activityLog || [];
+    const filterLabels = {
+      all: "All",
+      payment: "Payments",
+      payout: "Payouts",
+      admin: "Admin",
+    };
+    const visible =
+      activityFilter === "all"
+        ? log
+        : log.filter((e) => activityCategory(e.message) === activityFilter);
+    return `<div class="view-head">
+      <h2 class="view-title">Activity</h2>
+      <p class="view-sub">Every contribution, payout &amp; admin action · ${
+        log.length
+      } ${log.length === 1 ? "entry" : "entries"} loaded</p>
+    </div>
+    <div class="activity-chips">${Object.entries(filterLabels)
+      .map(
+        ([type, label]) => `
+      <button type="button" class="activity-chip ${
+        activityFilter === type ? "active" : ""
+      }" onclick="PowerFund.setActivityFilter('${type}')">${label}</button>`
+      )
+      .join("")}</div>
+    ${
+      log.length === 0
+        ? '<p class="activity-empty">No activity yet — actions will show up here as your group uses the tracker.</p>'
+        : visible.length === 0
+        ? `<p class="activity-empty">No ${filterLabels[
+            activityFilter
+          ].toLowerCase()} entries in the loaded history — try "Show older entries" or switch filters.</p>`
+        : `<div class="activity-list activity-list-tab">${visible
+            .map(
+              (e) => `
+        <div class="activity-item">
+          <span class="activity-time">${escapeHtml(
+            activityTimeLabel(e.created_at)
+          )}</span>
+          <span class="activity-text">${escapeHtml(e.message)}</span>
+        </div>`
+            )
+            .join("")}</div>`
+    }
+    ${
+      log.length >= activityLogLimit
+        ? `<button type="button" class="attention-more activity-more" onclick="PowerFund.loadMoreActivity()">Show older entries</button>`
+        : ""
+    }`;
   }
   function renderTabBar(active) {
     return `<nav class="tab-bar" aria-label="Main">
@@ -1824,15 +1868,9 @@
 
     let html = "";
 
-    // ---- Tab views ----
-    // Piece 2 of the tab-shell rebuild: content hasn't moved into per-view
-    // render functions yet (that's pieces 3-7) — "home" still carries
-    // everything below, unchanged. Other tabs get a placeholder for now so
-    // switching is visibly verifiable ahead of the real content move.
-    if (currentView !== "home") {
-      html += renderPlaceholderView(currentView);
-    } else {
-
+    // The app header and the banners below it render on every tab: both
+    // reflect app-wide state (treasurer mode, action feedback), not the state
+    // of whichever view happens to be open.
     html += `<div class="header">
       <div class="header-titles">
         <p class="title">⚡ Power Fund</p>
@@ -1847,6 +1885,29 @@
         ${unlocked ? "🔓 Treasurer mode on" : "🔒 Unlock treasurer mode"}
       </button>
     </div>`;
+
+    if (appError) {
+      html += `<div class="save-error-banner">⚠️ ${escapeHtml(appError)}</div>`;
+    }
+    if (appWarning) {
+      html += `<div class="save-warning-banner">⚠️ ${escapeHtml(
+        appWarning
+      )} <button type="button" class="warn-dismiss" onclick="PowerFund.dismissWarning()" aria-label="Dismiss">✕</button></div>`;
+    }
+    if (appSuccess) {
+      html += `<div class="save-success-banner" role="status">${escapeHtml(
+        appSuccess
+      )} <button type="button" class="warn-dismiss" onclick="PowerFund.dismissSuccess()" aria-label="Dismiss">✕</button></div>`;
+    }
+
+    // ---- Tab views ----
+    // Content is moving out of the old single-page Home view one piece at a
+    // time; tabs whose content hasn't moved across yet show a placeholder.
+    if (currentView === "activity") {
+      html += renderActivityView();
+    } else if (currentView !== "home") {
+      html += renderPlaceholderView(currentView);
+    } else {
 
     // ---- My status: personalized, only shown once a member has set "who
     // am I on this device" — never forced, never gates anything. ----------
@@ -1877,20 +1938,6 @@
     // always visible a little further down, either on the My-status card
     // (once a member is identified) or on the round card's own
     // "<date> · N/5 paid this cycle" line and the matching accordion row.
-
-    if (appError) {
-      html += `<div class="save-error-banner">⚠️ ${escapeHtml(appError)}</div>`;
-    }
-    if (appWarning) {
-      html += `<div class="save-warning-banner">⚠️ ${escapeHtml(
-        appWarning
-      )} <button type="button" class="warn-dismiss" onclick="PowerFund.dismissWarning()" aria-label="Dismiss">✕</button></div>`;
-    }
-    if (appSuccess) {
-      html += `<div class="save-success-banner" role="status">${escapeHtml(
-        appSuccess
-      )} <button type="button" class="warn-dismiss" onclick="PowerFund.dismissSuccess()" aria-label="Dismiss">✕</button></div>`;
-    }
 
     // ---- Overall fund balance (whole fund, confirmed money only) ------
     // Built here but appended AFTER the treasurer's "Needs your attention"
@@ -2410,71 +2457,6 @@
         </div>`;
       });
       html += `</div>`;
-    })();
-
-    // activity log
-    html += (function () {
-      const log = state.activityLog || [];
-      const filterLabels = {
-        all: "All",
-        payment: "Payments",
-        payout: "Payouts",
-        admin: "Admin",
-      };
-      const visible =
-        activityFilter === "all"
-          ? log
-          : log.filter((e) => activityCategory(e.message) === activityFilter);
-      return `<div class="round activity-section">
-        <div class="round-header" role="button" tabindex="0" aria-expanded="${
-          activityLogOpen ? "true" : "false"
-        }" onclick="PowerFund.toggleActivityLog()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();PowerFund.toggleActivityLog()}">
-          <div class="round-title"><span class="round-chevron ${
-            activityLogOpen ? "open" : ""
-          }">▸</span> Activity log</div>
-          <div class="round-status">${log.length} ${
-        log.length === 1 ? "entry" : "entries"
-      }</div>
-        </div>
-        <div class="round-body ${activityLogOpen ? "open" : ""}">
-          ${
-            activityLogOpen
-              ? `<div class="activity-chips">${Object.entries(filterLabels)
-                  .map(
-                    ([type, label]) => `
-                <button type="button" class="activity-chip ${
-                  activityFilter === type ? "active" : ""
-                }" onclick="PowerFund.setActivityFilter('${type}')">${label}</button>`
-                  )
-                  .join("")}</div>`
-              : ""
-          }
-          ${
-            log.length === 0
-              ? '<p class="activity-empty">No activity yet — actions will show up here as your group uses the tracker.</p>'
-              : visible.length === 0
-              ? `<p class="activity-empty">No ${filterLabels[
-                  activityFilter
-                ].toLowerCase()} entries in the loaded history — try "Show older entries" or switch filters.</p>`
-              : `<div class="activity-list">${visible
-                  .map(
-                    (e) => `
-                <div class="activity-item">
-                  <span class="activity-time">${escapeHtml(
-                    activityTimeLabel(e.created_at)
-                  )}</span>
-                  <span class="activity-text">${escapeHtml(e.message)}</span>
-                </div>`
-                  )
-                  .join("")}</div>`
-          }
-          ${
-            log.length >= activityLogLimit
-              ? `<button type="button" class="attention-more activity-more" onclick="PowerFund.loadMoreActivity()">Show older entries</button>`
-              : ""
-          }
-        </div>
-      </div>`;
     })();
 
     html += `<div class="footer-note">
@@ -3053,7 +3035,6 @@
     dismissSuccess,
     toggleUnlock,
     toggleRound,
-    toggleActivityLog,
     setActivityFilter,
     loadMoreActivity,
     setView,

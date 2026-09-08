@@ -2346,6 +2346,16 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   scrollbar-width: none;
 }
 .roster-strip::-webkit-scrollbar { display: none; }
+/* Chromium and WebKit drop a flex scroll container's padding-right at the end
+   of the scrollable area, so once the strip overflows (narrow phones, longer
+   rosters) the last avatar sat flush against the edge and its status ring —
+   drawn as a box-shadow, outside the border box — was clipped. A trailing flex
+   item is honoured where the padding is not. */
+.roster-strip::after {
+  content: "";
+  flex: 0 0 8px;
+  align-self: stretch;
+}
 .roster-chip {
   display: flex;
   flex-direction: column;

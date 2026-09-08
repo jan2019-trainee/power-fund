@@ -45,6 +45,7 @@
   let cycleIdByNumber = {}; // cycle_number -> cycle uuid  (for writes)
 
   // ---- UI state (not persisted) -------------------------------------
+  let selectedMemberId = null; // Members tab: which member's detail is open
   let currentView = "home"; // "home" | "rounds" | "members" | "activity" | "insights" | "menu"
   // Some views genuinely differ on a wide screen (rounds becomes a master list
   // plus a detail pane), which CSS alone can't express. Tracked here and passed
@@ -1388,6 +1389,7 @@
       '<path d="M10.3 4.6 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.6a2 2 0 0 0-3.4 0Z"/><path d="M12 9.5v4"/><circle cx="12" cy="17" r=".9" fill="currentColor" stroke="none"/>',
     check: '<polyline points="4 12 10 18 20 6"/>',
     chevron: '<polyline points="9 6 15 12 9 18"/>',
+    chevronLeft: '<polyline points="15 6 9 12 15 18"/>',
     bell: '<path d="M6 8a6 6 0 0 1 12 0c0 4 1.5 5.5 2 6H4c.5-.5 2-2 2-6Z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
     party: '<path d="M4 20l4.5-11L19 19.5 4 20Z"/><path d="M14 4.5v2M18.5 8h2M16.8 6.2l1.4-1.4"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
@@ -1538,7 +1540,19 @@
   ];
   function setView(view) {
     if (currentView === view) return;
+    // Leaving Members drops the drill-down, so coming back lands on the
+    // roster rather than whoever was open several taps ago.
+    if (currentView === "members") selectedMemberId = null;
     currentView = view;
+    render();
+  }
+  function openMemberDetail(memberId) {
+    selectedMemberId = memberId;
+    currentView = "members";
+    render();
+  }
+  function closeMemberDetail() {
+    selectedMemberId = null;
     render();
   }
   /** Fallback when a view can't be found on window.PFViews. Every tab has a
@@ -2189,7 +2203,7 @@
       myMember, myStatus, ROUND_PILL,
       // UI state, snapshotted so a view can't mutate it mid-render
       state, unlocked, busy, openRound, myMemberId, attentionQueueExpanded,
-      overdueListOpen, startRoundConfirming, isWide,
+      overdueListOpen, startRoundConfirming, isWide, selectedMemberId,
       // helpers the views render with
       escapeHtml, inlineArg, icon, memberAvatar, memberStanding, batteryCell,
       getPayout, payoutRecipientName, payoutDateText, sparkline, C,
@@ -2763,6 +2777,8 @@
     setActivityFilter,
     loadMoreActivity,
     setView,
+    openMemberDetail,
+    closeMemberDetail,
     openLightbox,
     closeLightbox,
     openQrModal,

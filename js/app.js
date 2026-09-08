@@ -45,6 +45,7 @@
   let cycleIdByNumber = {}; // cycle_number -> cycle uuid  (for writes)
 
   // ---- UI state (not persisted) -------------------------------------
+  let currentView = "home"; // "home" | "rounds" | "members" | "activity" | "insights" | "menu"
   let unlocked = false; // treasurer mode
   let busy = false; // a write is in flight — block double clicks
   let appError = null; // string shown in the red banner
@@ -1357,6 +1358,54 @@
     activityFilter = type;
     render();
   }
+
+  // ===================================================================
+  // Tab shell (Home / Rounds / Members / Activity / Insights / Menu)
+  // ===================================================================
+  const TAB_VIEWS = [
+    { id: "home", label: "Home", icon: "🏠" },
+    { id: "rounds", label: "Rounds", icon: "🔁" },
+    { id: "members", label: "Members", icon: "👥" },
+    { id: "activity", label: "Activity", icon: "📋" },
+    { id: "insights", label: "Insights", icon: "📈" },
+    { id: "menu", label: "Menu", icon: "⚙️" },
+  ];
+  function setView(view) {
+    if (currentView === view) return;
+    currentView = view;
+    render();
+  }
+  /** Piece 2 stub: real content for these tabs moves in over pieces 3-7.
+   * Kept intentionally plain so it's obvious this is a placeholder, not a
+   * finished screen. */
+  function renderPlaceholderView(view) {
+    const meta = TAB_VIEWS.find((t) => t.id === view);
+    const label = meta ? meta.label : view;
+    return `<div class="header">
+      <div class="header-titles">
+        <p class="title">⚡ Power Fund</p>
+      </div>
+    </div>
+    <div class="view-placeholder">
+      <p>${meta ? meta.icon : ""} <b>${escapeHtml(label)}</b></p>
+      <p class="view-placeholder-note">This tab is coming soon — its content still lives on Home for now.</p>
+    </div>`;
+  }
+  function renderTabBar(active) {
+    return `<nav class="tab-bar" aria-label="Main">
+      ${TAB_VIEWS.map(
+        (t) => `
+        <button type="button" class="tab-item ${
+          t.id === active ? "active" : ""
+        }" aria-current="${t.id === active ? "page" : "false"}" onclick="PowerFund.setView('${
+          t.id
+        }')">
+          <span class="tab-icon" aria-hidden="true">${t.icon}</span>
+          <span class="tab-label">${t.label}</span>
+        </button>`
+      ).join("")}
+    </nav>`;
+  }
   /** Infers a coarse category from an activity-log message so the log can be
    * filtered without a dedicated DB column — every logActivity() call site
    * produces one of a small, stable set of message shapes. */
@@ -1774,6 +1823,15 @@
     };
 
     let html = "";
+
+    // ---- Tab views ----
+    // Piece 2 of the tab-shell rebuild: content hasn't moved into per-view
+    // render functions yet (that's pieces 3-7) — "home" still carries
+    // everything below, unchanged. Other tabs get a placeholder for now so
+    // switching is visibly verifiable ahead of the real content move.
+    if (currentView !== "home") {
+      html += renderPlaceholderView(currentView);
+    } else {
 
     html += `<div class="header">
       <div class="header-titles">
@@ -2453,6 +2511,10 @@
       </div>`;
     }
 
+    } // end currentView === "home"
+
+    html += renderTabBar(currentView);
+
     // ---- Modals ----
     if (modalTarget) {
       const member = state.members.find((m) => m.id === modalTarget.memberId);
@@ -2994,6 +3056,7 @@
     toggleActivityLog,
     setActivityFilter,
     loadMoreActivity,
+    setView,
     openLightbox,
     closeLightbox,
     openQrModal,

@@ -1525,8 +1525,16 @@
 
     return html;
   }
+  /** One nav, two shells: the same markup is a bottom tab bar on narrow
+   * screens and a left sidebar on wide ones — CSS decides which, so there is
+   * no second render path to keep in sync. The brand block only shows in the
+   * sidebar, where there is room for it. */
   function renderTabBar(active) {
     return `<nav class="tab-bar" aria-label="Main">
+      <div class="tab-brand">
+        <span class="tab-brand-mark">⚡</span>
+        <span class="tab-brand-name">Power Fund</span>
+      </div>
       ${TAB_VIEWS.map(
         (t) => `
         <button type="button" class="tab-item ${

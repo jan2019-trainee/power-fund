@@ -1,325 +1,76 @@
-# Power Fund — Design-to-Code Rules
+# Power Fund — UI/UX Mockup Rebuild
 
-## Current Development Phase
+## Status: Core tab architecture complete; features in progress
 
-Power Fund is currently undergoing a major redesign based on completed UI/UX flows and mockups created in Claude Design.
+The app is transitioning from a single long-scrolling page to a tabbed interface matching the mockup (Home / Rounds / Members / Activity / Insights / Menu). The navigation works on both mobile (bottom tab bar) and desktop (left sidebar) via CSS-only switching — one set of view functions, two layouts.
 
-The mockups represent the **target product experience**.
+### Completed
 
-They do NOT necessarily represent functionality that already exists in the codebase.
+- **Tab-shell scaffold** — `currentView` state, `setView()` function, tab bar navigation, view routing
+- **View extraction** — Separate render functions:
+  - `js/views/home.js` — rostered fund status, hero card, roster strip, sparkline, Rounds link
+  - `js/views/rounds.js` — accordion cycles/rounds, payout history, two-column layout on desktop
+  - `js/views/members.js` — member roster cards, drill-down detail screen with full payment history
+  - `js/views/menu.js` — treasurer settings (QR upload, edit names, backup/restore, PIN, reset)
+  - `renderActivityView()` (app.js:1578) — activity log with filter chips
+  - `renderInsightsView()` (app.js:1632) — stats, per-round bar chart, on-time leaderboard
+- **Member payout details** — Database schema (5 nullable columns), treasurer-only QR/account-number editing
+- **Toast notifications** — Transient success messages with auto-dismiss, positioned above floating CTAs
+- **Responsive layout** — Mobile/desktop CSS, `.view` wrapper, view-specific styling
 
-Some screens and interactions in the design may represent:
+### Verified Working
 
-* existing functionality
-* redesigned existing functionality
-* partially implemented functionality
-* completely new features
-* future functionality
-* UI concepts requiring backend/database support
+- Tab switching and state preservation
+- Member drill-down from roster → detail → back
+- All treasurer actions (QR upload, settings changes) from Menu tab
+- Render performance (no lingering state when switching views)
+- Activity log filters across tab switches
+- Console-clean (no errors beyond expected realtime-socket warning)
 
-Your responsibility is to determine which category each designed feature belongs to before implementing it.
+### Known Limitations & Design Decisions
 
----
+- **Treasurer-only payout QR**: Members cannot edit their own QR (app has no per-member auth). Treasurer manages all.
+- **No PIN recovery**: Users who forget the PIN must ask the treasurer to reset it (shown as clear warning before PIN setup).
+- **Offline-first caching**: Service worker v2 precaches all view files; old cache evicted on first load.
+- **RLS policies open**: Entire database is readable/writable to anyone with the URL (documented in README).
 
-# 1. Three Sources of Truth
+### Testing
 
-When working on the redesign, use the following hierarchy:
+Run smoke tests locally:
+```bash
+python3 -m http.server 8791 &
+node tests/smoke.js
+```
 
-### 1. Existing Codebase
+The test suite mocks all Supabase REST calls and verifies tab rendering, modal state, and keystroke handling — never hits the live project.
 
-This is the source of truth for:
+### Database Migrations
 
-* what currently exists
-* current implementation
-* existing business logic
-* existing database behavior
-* authentication
-* permissions
-* Supabase configuration
-* existing calculations
+Run in Supabase SQL editor (Dashboard → SQL Editor → paste file → Run):
+- `supabase/migrations/005_member_payout_details.sql` — Adds payout QR, bank, account fields
 
-### 2. Approved Design
+### Next Steps (Optional)
 
-Claude Design mockups and UX flows are the source of truth for:
+1. **Polish Activity tab** — Currently a flat list; consider a 6-column HTML table for wider screens (low priority)
+2. **Build Onboarding flow** — 5 screens, insertable anywhere; fund already mid-flight so unseen for now (low priority)
+3. **Desktop testing** — Resize browser to 960px+ and verify sidebar layout, two-column rounds accordion, etc.
 
-* intended visual design
-* intended navigation
-* intended user experience
-* intended information hierarchy
-* intended interaction patterns
-* target UI structure
-* target mobile experience
-* target desktop experience
+### Branch Info
 
-### 3. Business Rules
+- **Integration branch**: `feature/mockup-port` (45 commits ahead of main)
+- **Piece branches** (as needed): Off `feature/mockup-port`, merged back with plain merges
 
-Business requirements determine:
+### Key Files
 
-* what the system is allowed to do
-* financial rules
-* payment rules
-* member rules
-* treasurer rules
-* approval rules
-* data integrity requirements
+- `js/app.js:1650-2350` — Main render orchestrator, shared state, view router, tab bar
+- `js/views/*.js` — View render functions (pure functions of context, no side effects)
+- `css/style.css` — All layout, animations, theming; view-scoped classes
+- `supabase/migrations/005_*.sql` — Payout schema
+- `sw.js` — Cache v2, view file precaching
 
-When these sources conflict, do not silently choose one.
+### To Contribute
 
-Identify the conflict and explain it.
-
----
-
-# 2. Design Does Not Mean Implemented
-
-Never assume that a feature shown in the design already exists.
-
-For every significant designed feature, determine:
-
-| Status          | Meaning                                                                   |
-| --------------- | ------------------------------------------------------------------------- |
-| Existing        | Functionality already exists and can be connected to the redesigned UI    |
-| Partial         | Some functionality exists but additional implementation is required       |
-| UI Only         | The data/logic exists but the new presentation does not                   |
-| New Feature     | The functionality does not currently exist                                |
-| Design Conflict | The mockup conflicts with current business rules or technical constraints |
-
-Use the actual repository to determine the status.
-
-Do not invent existing functionality.
-
----
-
-# 3. New Features Hidden Inside the Design
-
-When a mockup introduces functionality that does not currently exist, do not treat it as a simple UI task.
-
-Investigate what is required across the full stack.
-
-Consider:
-
-* frontend UI
-* application state
-* business logic
-* database schema
-* Supabase queries
-* RLS policies
-* storage
-* authentication
-* authorization
-* notifications
-* background processing
-* PWA limitations
-* error handling
-* audit/history requirements
-
-For example, if a design shows:
-
-"Payment verified"
-
-determine whether the existing system already supports:
-
-* verification state
-* verifier identity
-* verification timestamp
-* database persistence
-* member notification
-* transaction history
-
-If not, identify those missing pieces before implementation.
-
----
-
-# 4. Never Fake Backend Functionality
-
-If the design contains functionality that requires backend/database support, do not create a UI that merely looks functional.
-
-Do not use:
-
-* fake data
-* hardcoded success states
-* local-only state pretending to be persisted
-* placeholder database records presented as real
-* simulated notifications presented as actual notifications
-
-unless explicitly requested for prototyping.
-
-The UI should accurately reflect what the system can actually do.
-
----
-
-# 5. Design Fidelity
-
-When implementing an approved design:
-
-Aim for high visual fidelity.
-
-Pay attention to:
-
-* spacing
-* typography
-* sizing
-* hierarchy
-* cards
-* buttons
-* icons
-* navigation
-* states
-* mobile layouts
-* desktop layouts
-* responsive transitions
-* empty states
-* loading states
-* error states
-* confirmation states
-
-Do not simplify the design merely because the existing code structure makes it inconvenient.
-
-If the existing structure is incompatible with the approved design, refactor the structure.
-
----
-
-# 6. Do Not Blindly Copy the Mockup
-
-The design is the target experience, but implementation must still respect:
-
-* accessibility
-* security
-* performance
-* responsive behavior
-* actual data availability
-* existing business rules
-* technical limitations
-
-If the mockup contains something that would create a poor technical or UX implementation, identify the issue and recommend a better solution.
-
----
-
-# 7. Feature Gap Analysis
-
-Before implementing a major redesigned screen, perform a feature gap analysis.
-
-Determine:
-
-### Design Requirements
-
-What the mockup expects.
-
-### Existing Capability
-
-What the current application already provides.
-
-### Missing Capability
-
-What must be built.
-
-### Data Requirements
-
-What information the UI needs.
-
-### Backend Requirements
-
-What API/database/storage functionality is required.
-
-### Security Requirements
-
-What permissions and RLS policies are required.
-
-### UX States
-
-What should happen during:
-
-* loading
-* success
-* failure
-* empty data
-* unauthorized access
-* pending processing
-
-Then implement accordingly.
-
----
-
-# 8. Preserve the Meaning, Not the Old Structure
-
-During this redesign:
-
-The old UI structure may be replaced.
-
-The old component structure may be replaced.
-
-The old CSS architecture may be replaced.
-
-The old navigation may be replaced.
-
-The old HTML structure may be replaced.
-
-However, the meaning and integrity of existing business operations must remain intact unless explicitly changed.
-
-The objective is:
-
-OLD IMPLEMENTATION
-↓
-UNDERSTAND EXISTING BEHAVIOR
-↓
-COMPARE WITH APPROVED DESIGN
-↓
-IDENTIFY GAPS
-↓
-BUILD TARGET EXPERIENCE
-↓
-PRESERVE BUSINESS INTEGRITY
-
----
-
-# 9. When a Design Feature Requires a Business Decision
-
-If the mockup introduces behavior that cannot be determined from the existing code or business rules, do not invent a financial or business rule.
-
-Flag it as a product decision.
-
-For example:
-
-> "The design shows an automatic overdue status, but the current system does not define whether a grace period applies. This needs a business decision before implementation."
-
-Technical assumptions are acceptable when low-risk.
-
-Business-rule assumptions involving money, permissions, or records are not.
-
----
-
-# 10. Definition of Done
-
-A redesigned feature is not complete merely because the UI matches the mockup.
-
-It is complete when:
-
-1. The UI matches the approved design closely.
-2. The intended user flow works.
-3. Existing business logic remains correct.
-4. New functionality is actually implemented rather than simulated.
-5. Database behavior is correct where applicable.
-6. Security and permissions are correct.
-7. Mobile behavior works.
-8. Desktop behavior works.
-9. Loading/error/empty states are handled.
-10. Existing functionality affected by the change has been regression-checked.
-
----
-
-# Core Principle
-
-The mockup tells you:
-
-**WHAT the new product should feel and behave like.**
-
-The codebase tells you:
-
-**WHAT currently exists.**
-
-The business rules tell you:
-
-**WHAT the system is allowed to do.**
-
-Your job is to safely transform the current implementation into the approved target experience while identifying and implementing the missing functionality.
-
-Never confuse a designed feature with an implemented feature.
+- Keep view render functions pure (no `render()` calls, no state mutation)
+- Add view-scoped styles under `.view-<name>` or generic `.view` rules
+- Test tab switches for state preservation and modal gating
+- Run smoke test before pushing

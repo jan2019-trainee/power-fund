@@ -411,7 +411,7 @@
       closeModal();
       await reload();
       showSuccess(
-        `✅ Payment submitted — ${C.peso(
+        `Payment submitted — ${C.peso(
           count * C.CONTRIBUTION_AMOUNT
         )} is waiting for treasurer verification.`
       );
@@ -1197,7 +1197,7 @@
       title: "Undo payout release?",
       bodyHtml:
         `Undo the Round ${round} payout release?<br><br>` +
-        `The round returns to <b>🟡 Payout Pending</b>. The recorded release date, ` +
+        `The round returns to <b>Payout Pending</b>. The recorded release date, ` +
         `note, amount and recipient are cleared.`,
       confirmLabel: "Yes, undo release",
       ctx: { round },
@@ -1379,6 +1379,10 @@
     download: '<path d="M12 3v13"/><polyline points="7 11 12 16 17 11"/><path d="M4 20h16"/>',
     upload: '<path d="M12 21V8"/><polyline points="7 13 12 8 17 13"/><path d="M4 4h16"/>',
     sheet: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h3"/>',
+    alert:
+      '<path d="M10.3 4.6 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.6a2 2 0 0 0-3.4 0Z"/><path d="M12 9.5v4"/><circle cx="12" cy="17" r=".9" fill="currentColor" stroke="none"/>',
+    check: '<polyline points="4 12 10 18 20 6"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
     trash:
       '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/><path d="M9 7V4h6v3"/>',
   };
@@ -1415,6 +1419,41 @@
         <rect class="batt-fill" x="22" y="${fillY}" width="52" height="${fillH}" fill="url(#battGrad)"/>
       </g>
     </svg>`;
+  }
+
+  /**
+   * Member avatar: initial in a circle, ringed in the colour of that member's
+   * standing. The ring is a redundant cue, never the only one — every card
+   * that shows one also states the same thing in words, so the roster stays
+   * readable without relying on colour.
+   *
+   * status: "paid-out" | "overdue" | "pending" | "current" | "idle"
+   */
+  function memberAvatar(name, status, size) {
+    const px = size || 44;
+    const initial = (name || "?").trim().charAt(0).toUpperCase();
+    return `<span class="avatar avatar-${status}" style="width:${px}px;height:${px}px;font-size:${Math.round(
+      px * 0.36
+    )}px" aria-hidden="true">${escapeHtml(initial)}</span>`;
+  }
+
+  /** One member's standing, used for the avatar ring and the card's wording. */
+  function memberStanding(memberId, cyclesDueSoFar, paidOut) {
+    if (paidOut) return "paid-out";
+    if (C.memberOverdueCount(state.contributions, state.cycles, memberId) > 0)
+      return "overdue";
+    for (let c = 1; c <= C.TOTAL_CYCLES; c++) {
+      if (C.statusOf(state.contributions, memberId, c) === C.STATUS_PENDING)
+        return "pending";
+    }
+    if (cyclesDueSoFar > 0) {
+      let paid = 0;
+      for (let c = 1; c <= cyclesDueSoFar; c++) {
+        if (C.statusOf(state.contributions, memberId, c) === C.STATUS_PAID) paid++;
+      }
+      if (paid >= cyclesDueSoFar) return "current";
+    }
+    return "idle";
   }
 
   /** Inline SVG for one icon, sized in px and inheriting the caller's colour. */
@@ -1979,7 +2018,7 @@
       if (allDone) {
         myStatus = {
           kind: "done",
-          label: `🎉 All ${C.TOTAL_ROUNDS} rounds complete — thanks, ${escapeHtml(
+          label: `All ${C.TOTAL_ROUNDS} rounds complete — thanks, ${escapeHtml(
             myMember.name
           )}!`,
           actionCycle: null,
@@ -1990,7 +2029,7 @@
         // that only happens once every member has paid every cycle in it.
         myStatus = {
           kind: "paid",
-          label: `🟢 You're paid up — Round ${curRound} is fully funded`,
+          label: `You're paid up — Round ${curRound} is fully funded`,
           actionCycle: null,
         };
       } else {
@@ -2000,7 +2039,7 @@
         if (myOverdue > 0) {
           myStatus = {
             kind: "overdue",
-            label: `🔴 Payment overdue — ${myOverdue} cycle${
+            label: `Payment overdue — ${myOverdue} cycle${
               myOverdue === 1 ? "" : "s"
             } unpaid past due`,
             actionCycle: canAct ? payCycle : null,
@@ -2008,15 +2047,15 @@
         } else if (myCycleStatus === C.STATUS_PENDING) {
           myStatus = {
             kind: "pending",
-            label: "🟣 Submitted — awaiting treasurer verification",
+            label: "Submitted — awaiting treasurer verification",
             actionCycle: null,
           };
         } else if (myCycleStatus === C.STATUS_PAID) {
-          myStatus = { kind: "paid", label: "🟢 You're paid up", actionCycle: null };
+          myStatus = { kind: "paid", label: "You're paid up", actionCycle: null };
         } else {
           myStatus = {
             kind: "due",
-            label: `🟡 Payment due${payCycleDue ? " " + C.formatDate(payCycleDue) : ""}`,
+            label: `Payment due${payCycleDue ? " " + C.formatDate(payCycleDue) : ""}`,
             actionCycle: payCycle,
           };
         }
@@ -2028,11 +2067,14 @@
       hasAutoOpened = true;
     }
 
+    // The dot is decorative; the pill always spells the state out too.
+    const pill = (cls, label) =>
+      `<span class="round-state ${cls}"><span class="round-dot"></span>${label}</span>`;
     const ROUND_PILL = {
-      not_started: '<span class="round-state not-started">⚪ Not started</span>',
-      collecting: '<span class="round-state collecting">🟢 Collecting</span>',
-      payout_pending: '<span class="round-state pending">🟡 Payout Pending</span>',
-      completed: '<span class="round-state completed">✅ Completed</span>',
+      not_started: pill("not-started", "Not started"),
+      collecting: pill("collecting", "Collecting"),
+      payout_pending: pill("pending", "Payout Pending"),
+      completed: pill("completed", "Completed"),
     };
 
     let html = "";
@@ -2181,7 +2223,7 @@
           ${
             payout.released
               ? `<div class="payout-status-box">
-                   <div>✅ Payout released to <b>${escapeHtml(
+                   <div>${icon("check", 14)} Payout released to <b>${escapeHtml(
                      payoutRecipientName(payout)
                    )}</b>${
                   payout.amount != null ? `, ${C.peso(payout.amount)}` : ""
@@ -2193,7 +2235,7 @@
                   payout.receipt_url
                     ? ` · <button type="button" class="ph-receipt" onclick="PowerFund.openLightbox('${inlineArg(
                         payout.receipt_url
-                      )}')">🧾 receipt</button>`
+                      )}')">${icon("sheet", 13)}<span>receipt</span></button>`
                     : ""
                 }</div>
                    ${
@@ -2209,7 +2251,7 @@
                 // which is visible on every render (not just while this
                 // round's accordion happens to be expanded). Two buttons
                 // for the same action on the same page is just noise.
-                `<div class="payout-status-box pending-box"><div>🟡 Payout Pending — ${C.peso(
+                `<div class="payout-status-box pending-box"><div><span class="round-dot pending"></span>Payout Pending — ${C.peso(
                   C.GOAL_PER_ROUND
                 )} reached</div></div>`
               : ""
@@ -2239,7 +2281,7 @@
             p.receipt_url
               ? `<button type="button" class="ph-receipt" onclick="PowerFund.openLightbox('${inlineArg(
                   p.receipt_url
-                )}')">🧾 View receipt</button>`
+                )}')">${icon("sheet", 13)}<span>View receipt</span></button>`
               : ""
           }
         </div>`;
@@ -2271,6 +2313,7 @@
       for (let c = 1; c <= cyclesDueSoFar; c++) {
         if (C.statusOf(state.contributions, m.id, c) === C.STATUS_PAID) mPaidSoFar++;
       }
+      const standing = memberStanding(m.id, cyclesDueSoFar, paidOut);
       html += `<div class="member-card ${paidOut ? "paid-out" : ""}">
         <div class="member-order-row">
           <span class="member-order-num">#${m.member_order} in order</span>
@@ -2287,7 +2330,10 @@
               : ""
           }
         </div>
-        <p class="member-name">${escapeHtml(m.name)}</p>
+        <div class="member-ident">
+          ${memberAvatar(m.name, standing, 40)}
+          <p class="member-name">${escapeHtml(m.name)}</p>
+        </div>
         <div class="member-contrib-label">Contributed</div>
         <div class="member-contrib">${C.peso(total)}</div>
         ${
@@ -2299,8 +2345,15 @@
         }
         <div class="member-payout-date">Payout target: ${
           payoutDue ? C.formatDate(payoutDue) : "—"
-        }${paidOut ? ' <span class="payout-done-tag">✅ done</span>' : ""}</div>
-        ${mOverdue ? `<div class="overdue-badge">⚠ ${mOverdue} overdue</div>` : ""}
+        }${paidOut ? ' <span class="payout-done-tag">paid out</span>' : ""}</div>
+        ${
+          mOverdue
+            ? `<div class="overdue-badge">${icon(
+                "alert",
+                13
+              )}<span>${mOverdue} overdue</span></div>`
+            : ""
+        }
       </div>`;
     });
     html += `</div>`;
@@ -2353,7 +2406,7 @@
         <li><b>Cycle status:</b> ✓ paid · … waiting for treasurer review · ✕ not paid (overdue is still fine to pay late)</li>
         <li><b>Round status:</b> each round targets ${C.peso(
           C.GOAL_PER_ROUND
-        )} — 🟢 Collecting → 🟡 Payout Pending → ✅ Completed. "Mark payout released" and "Start next round" are separate steps, so a previous round can stay Payout Pending while a new one collects</li>
+        )} — Collecting → Payout Pending → Completed. "Mark payout released" and "Start next round" are separate steps, so a previous round can stay Payout Pending while a new one collects</li>
       </ul>
     </div>`;
 
@@ -2368,7 +2421,7 @@
       if (myMember && myStatus) {
         return `<div class="my-status-card my-status-${myStatus.kind}">
           <div class="my-status-row">
-            <span class="my-status-text"><b>${escapeHtml(
+            <span class="my-status-text"><span class="status-dot"></span><b>${escapeHtml(
               myMember.name
             )}</b> — ${myStatus.label}</span>
             <button type="button" class="my-status-change" onclick="PowerFund.openWhoAmIPicker()">Not you?</button>
@@ -2412,7 +2465,7 @@
         )}%"></div></div>
         <div class="fund-total-meta">${
           C.allRoundsComplete(state.contributions, rounds)
-            ? "Fund complete ✅"
+            ? "Fund complete"
             : `${overallPct}% collected · <b>${C.peso(remaining)}</b> to go`
         }${
         pendingPesos > 0
@@ -2519,7 +2572,7 @@
         releaseRounds.forEach((r) => {
           const recip = members.find((m) => m.member_order === r);
           html += `<div class="attention-group">
-            <p class="attention-group-label">🟡 Round ${r}${
+            <p class="attention-group-label"><span class="round-dot pending"></span>Round ${r}${
             recip ? " — " + escapeHtml(recip.name) : ""
           } is funded — release the ${C.peso(C.GOAL_PER_ROUND)} payout</p>
             <button class="contribute-btn payout-btn" onclick="PowerFund.openPayoutModal(${r})">Mark payout released</button>
@@ -2584,7 +2637,7 @@
       <div class="hero-round-line">
         ${
           allDone
-            ? `<span class="hero-round-num">✅ All ${C.TOTAL_ROUNDS} Rounds Completed</span>`
+            ? `<span class="hero-round-num">${icon("check", 16)} All ${C.TOTAL_ROUNDS} Rounds Completed</span>`
             : `<span class="hero-round-num">Round ${curRound} of ${C.TOTAL_ROUNDS}${
                 heroRecipient ? ` — ${escapeHtml(heroRecipient.name)}` : ""
               }</span> ${ROUND_PILL[curStatus]}`
@@ -2934,7 +2987,7 @@
             ${
               payoutReceiptPreview
                 ? `<img src="${payoutReceiptPreview}" class="proof-preview" alt="Receipt preview">`
-                : `<span class="proof-upload-label">🧾 Attach a receipt (optional)</span>`
+                : `<span class="proof-upload-label">${icon("sheet", 14)}<span>Attach a receipt (optional)</span></span>`
             }
             <input type="file" accept="image/*" onchange="PowerFund.onPayoutReceiptSelected(this)" hidden>
           </label>
@@ -3009,7 +3062,7 @@
           <p class="modal-sub">Members scan this to pay the treasurer. Replacing it updates every member's app.</p>
           ${
             qrUploadMsg
-              ? `<p class="copy-feedback">✅ ${escapeHtml(qrUploadMsg)}</p>`
+              ? `<p class="copy-feedback">${icon("check", 14)} ${escapeHtml(qrUploadMsg)}</p>`
               : ""
           }
           ${

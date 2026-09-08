@@ -2547,3 +2547,21 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
   .toast { animation: none; }
 }
+
+/* No-recovery warning on the PIN screens. Shown when a PIN is chosen, not
+   after it's forgotten, since by then it's no use. */
+.pin-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 11px 12px;
+  border-radius: 12px;
+  background: rgba(245, 166, 35, 0.08);
+  border: 1px solid rgba(245, 166, 35, 0.3);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  text-align: left;
+}
+.pin-warning .icon { color: var(--accent); margin-top: 1px; }

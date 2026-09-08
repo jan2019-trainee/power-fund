@@ -1382,6 +1382,41 @@
     trash:
       '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/><path d="M9 7V4h6v3"/>',
   };
+  /**
+   * The fund's battery-cell progress visual: a cell that fills bottom-up.
+   *
+   * The terminal cap stays grey until the cell is actually full, so a
+   * part-charged battery never reads as a finished one at a glance — the
+   * colour only means "done" when it is.
+   */
+  function batteryCell(pct, size) {
+    const p = Math.max(0, Math.min(100, pct || 0));
+    const px = size || 96;
+    const full = p >= 100;
+    // Inner (clipped) area of the cell body, in the 96x96 viewBox.
+    const top = 13;
+    const bottom = 92;
+    const fillH = ((bottom - top) * p) / 100;
+    const fillY = bottom - fillH;
+    const capFill = full ? "#F5A623" : "rgba(255,255,255,0.16)";
+    return `<svg class="batt" viewBox="0 0 96 96" width="${px}" height="${px}" aria-hidden="true" focusable="false">
+      <defs>
+        <linearGradient id="battGrad" x1="0%" y1="100%" x2="0%" y2="0%">
+          <stop offset="0%" stop-color="#4CD9C0"/>
+          <stop offset="100%" stop-color="#F5A623"/>
+        </linearGradient>
+        <clipPath id="battClip"><rect x="22" y="${top}" width="52" height="${
+      bottom - top
+    }" rx="12"/></clipPath>
+      </defs>
+      <rect x="32" y="0" width="32" height="9" rx="4" fill="${capFill}"/>
+      <rect x="18" y="9" width="60" height="87" rx="16" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.1)" stroke-width="3"/>
+      <g clip-path="url(#battClip)">
+        <rect class="batt-fill" x="22" y="${fillY}" width="52" height="${fillH}" fill="url(#battGrad)"/>
+      </g>
+    </svg>`;
+  }
+
   /** Inline SVG for one icon, sized in px and inheriting the caller's colour. */
   function icon(name, size) {
     const d = ICON_PATHS[name];
@@ -2560,16 +2595,24 @@
           ? `${C.peso(C.TARGET_AMOUNT)} <span>/ ${C.peso(C.TARGET_AMOUNT)}</span>`
           : `${C.peso(curCollected)} <span>/ ${C.peso(C.GOAL_PER_ROUND)}</span>`
       }</div>
-      <div class="battery-shell" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(
+      <div class="hero-gauge" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(
         pct
       )}" aria-label="Round ${
       allDone ? C.TOTAL_ROUNDS : curRound
-    } funding progress"><div class="battery-fill" style="width:${pct}%"></div></div>
-      <div class="hero-progress-meta">${
-        allDone
-          ? "Fund fully funded"
-          : `<b>${C.peso(remainingToGo)}</b> to go · ${Math.round(pct)}%`
-      }</div>
+    } funding progress">
+        <div class="hero-batt">
+          ${batteryCell(pct, 96)}
+          <div class="hero-batt-label">
+            <span class="hero-batt-pct">${Math.round(pct)}%</span>
+            <span class="hero-batt-cap">funded</span>
+          </div>
+        </div>
+        <div class="hero-gauge-meta">${
+          allDone
+            ? "<b>Fund fully funded</b>"
+            : `<b>${C.peso(remainingToGo)}</b> still to collect this round`
+        }</div>
+      </div>
       ${
         pendingCount || overdueCount
           ? `<div class="cycle-note">${

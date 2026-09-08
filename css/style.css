@@ -1599,9 +1599,14 @@ body { padding-top: calc(28px + var(--pf-bar-h, 0px)); }
    modal styles needed. */
 
 /* ---------------------------------------------------------------------------
- * Tab shell — bottom nav bar (Home/Rounds/Members/Activity/Insights/Menu).
- * Desktop sidebar variant is a separate, later piece; this bar is the only
- * navigation chrome for now, at every viewport width.
+ * Tab shell.
+ *
+ * Two shells with deliberately different item sets, chosen in renderTabBar()
+ * rather than hidden with CSS:
+ *   mobile  — 5 tabs: Home / Rounds / Activity / Insights / Menu.
+ *             Members is a drill-down from Home, not a tab.
+ *   desktop — 5 sidebar items incl. Members, then a mode card and a
+ *             "Menu & settings" profile row where Menu lives instead.
  * ------------------------------------------------------------------------- */
 .tab-bar {
   position: fixed;
@@ -1698,6 +1703,58 @@ body { padding-top: calc(28px + var(--pf-bar-h, 0px)); }
   .tab-item:hover { background: rgba(255, 255, 255, 0.05); }
   .tab-item.active { background: var(--accent-soft); }
   .tab-item .tab-icon { font-size: 16px; }
+
+  /* Pushes the mode card and profile row to the foot of the sidebar, so the
+     navigation proper stays grouped at the top. */
+  .nav-spacer { flex: 1 1 auto; min-height: 16px; }
+
+  .nav-mode {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    width: 100%;
+    text-align: left;
+    padding: 10px 12px;
+    margin-bottom: 6px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text-muted);
+    font-family: 'Inter', sans-serif;
+    cursor: pointer;
+  }
+  .nav-mode:hover { background: rgba(255, 255, 255, 0.06); }
+  .nav-mode-label {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .nav-mode-state { font-size: 11.5px; line-height: 1.35; }
+  /* Unlocked is the state worth spotting from across the room. */
+  .nav-mode.on { border-color: rgba(245, 166, 35, 0.4); background: var(--accent-soft); }
+  .nav-mode.on .nav-mode-label { color: var(--accent); }
+  .nav-mode.on .nav-mode-state { color: var(--accent); }
+
+  .nav-profile .nav-profile-avatar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--bg-card-alt);
+    border: 1px solid var(--border);
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-primary);
+    flex-shrink: 0;
+  }
+  .nav-profile { gap: 10px; }
 
   /* With the width to spare, the stat tiles stop wrapping to one per row. */
   .stat-grid { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }

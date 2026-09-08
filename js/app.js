@@ -1623,6 +1623,8 @@
   // ===================================================================
   // Tab shell (Home / Rounds / Members / Activity / Insights / Menu)
   // ===================================================================
+  // Every view the router can reach. Which of them appear in the nav, and in
+  // what order, differs by shell — see NAV_MOBILE / NAV_DESKTOP below.
   const TAB_VIEWS = [
     { id: "home", label: "Home", icon: "home" },
     { id: "rounds", label: "Rounds", icon: "rounds" },
@@ -1631,6 +1633,22 @@
     { id: "insights", label: "Insights", icon: "insights" },
     { id: "menu", label: "Menu", icon: "menu" },
   ];
+
+  // The two shells navigate differently, and deliberately so.
+  //
+  // MOBILE — five tabs. Members is NOT one of them: it is a drill-down from
+  // Home's roster ("See all", or tapping an avatar), which is why it carries a
+  // back chevron and lights no tab. Six targets across a 390px bar would cost
+  // about a fifth of each tab's width for a screen that already has an entry
+  // point.
+  //
+  // DESKTOP — a persistent sidebar has the room, so Members returns to the nav.
+  // Menu leaves it instead, becoming the profile affordance at the foot of the
+  // sidebar ("Menu & settings"), under a card showing which mode you are in.
+  const NAV_MOBILE = ["home", "rounds", "activity", "insights", "menu"];
+  const NAV_DESKTOP = ["home", "rounds", "members", "activity", "insights"];
+  const navItems = (ids) =>
+    ids.map((id) => TAB_VIEWS.find((t) => t.id === id)).filter(Boolean);
   function setView(view) {
     if (currentView === view) return;
     // Leaving Members drops the drill-down, so coming back lands on the
@@ -1803,27 +1821,70 @@
 
     return html;
   }
-  /** One nav, two shells: the same markup is a bottom tab bar on narrow
-   * screens and a left sidebar on wide ones — CSS decides which, so there is
-   * no second render path to keep in sync. The brand block only shows in the
-   * sidebar, where there is room for it. */
-  function renderTabBar(active) {
+  /** One nav, two shells.
+   *
+   * The chrome is still a single element that CSS lays out as a bottom bar or
+   * a left sidebar — but the two shells no longer carry the same items, so the
+   * item list is chosen here rather than hidden with CSS. Rendering only what
+   * a shell actually shows keeps the hidden half out of the accessibility tree
+   * and out of the tab order.
+   *
+   * The sidebar's extra furniture — brand, mode card, profile row — has no
+   * equivalent on mobile, where the header already carries all three.
+   */
+  function renderTabBar(active, wide, myMember) {
+    const items = navItems(wide ? NAV_DESKTOP : NAV_MOBILE);
+    const btn = (t) => `
+        <button type="button" class="tab-item ${
+          t.id === active ? "active" : ""
+        }" aria-current="${t.id === active ? "page" : "false"}" onclick="PowerFund.setView('${
+      t.id
+    }')">
+          <span class="tab-icon">${icon(t.icon, 20)}</span>
+          <span class="tab-label">${escapeHtml(t.label)}</span>
+        </button>`;
+
+    if (!wide) {
+      return `<nav class="tab-bar" aria-label="Main">${items.map(btn).join("")}</nav>`;
+    }
+
+    // Mode card: states which side of the gate you are on, and is the way
+    // through it. Locked, it is the sidebar's "Unlock treasurer mode" entry.
+    const mode = `
+      <button type="button" class="nav-mode ${
+        unlocked ? "on" : ""
+      }" onclick="PowerFund.toggleUnlock()">
+        <span class="nav-mode-label">${icon(unlocked ? "unlocked" : "lock", 14)}<span>${
+      unlocked ? "Treasurer mode" : "Member mode"
+    }</span></span>
+        <span class="nav-mode-state">${
+          unlocked ? "Active" : "Unlock treasurer mode →"
+        }</span>
+      </button>`;
+
+    // Menu lives here on desktop, as the profile row rather than a sixth nav
+    // item — it is settings, not a destination alongside the fund's screens.
+    const profile = `
+      <button type="button" class="tab-item nav-profile ${
+        active === "menu" ? "active" : ""
+      }" aria-current="${
+      active === "menu" ? "page" : "false"
+    }" onclick="PowerFund.setView('menu')">
+        <span class="nav-profile-avatar">${
+          myMember ? escapeHtml(myMember.name.trim().charAt(0).toUpperCase()) : icon("menu", 16)
+        }</span>
+        <span class="tab-label">Menu &amp; settings</span>
+      </button>`;
+
     return `<nav class="tab-bar" aria-label="Main">
       <div class="tab-brand">
         <span class="tab-brand-mark">⚡</span>
         <span class="tab-brand-name">Power Fund</span>
       </div>
-      ${TAB_VIEWS.map(
-        (t) => `
-        <button type="button" class="tab-item ${
-          t.id === active ? "active" : ""
-        }" aria-current="${t.id === active ? "page" : "false"}" onclick="PowerFund.setView('${
-          t.id
-        }')">
-          <span class="tab-icon">${icon(t.icon, 20)}</span>
-          <span class="tab-label">${t.label}</span>
-        </button>`
-      ).join("")}
+      ${items.map(btn).join("")}
+      <div class="nav-spacer"></div>
+      ${mode}
+      ${profile}
     </nav>`;
   }
   /** Infers a coarse category from an activity-log message so the log can be
@@ -2405,7 +2466,7 @@
     // screen without its own render path — the desktop rules key off it.
     html += `<div class="view view-${currentView}">${viewHtml}</div>`;
 
-    html += renderTabBar(currentView);
+    html += renderTabBar(currentView, isWide, myMember);
 
     // Transient confirmation. Rendered last so it sits above the nav, and
     // announced politely rather than assertively — it confirms something the

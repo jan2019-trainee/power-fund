@@ -23,7 +23,10 @@ const M = require(path.join(__dirname, "mock-data"));
 
 const BASE = process.env.PF_BASE_URL || "http://localhost:8791/index.html";
 const SHOTS = process.env.PF_SHOT_DIR || null; // set to a dir to save screenshots
-const TABS = ["Home", "Rounds", "Members", "Activity", "Insights", "Menu"];
+// The two shells carry different nav items on purpose (see renderTabBar).
+// Members is a Home drill-down on mobile; Menu is the profile row on desktop.
+const TABS_MOBILE = ["Home", "Rounds", "Activity", "Insights", "Menu"];
+const TABS_DESKTOP = ["Home", "Rounds", "Members", "Activity", "Insights"];
 
 const results = [];
 function check(name, pass, detail) {
@@ -64,7 +67,7 @@ async function unlockTreasurer(page) {
 }
 
 /** Every tab renders its own content, with the shared chrome, in both shells. */
-async function tabsRender(browser, label, viewport, errors) {
+async function tabsRender(browser, label, viewport, errors, wide) {
   const page = await browser.newPage({ viewport });
   page.on("console", (m) => {
     // The blocked realtime socket is expected when running offline.
@@ -75,7 +78,27 @@ async function tabsRender(browser, label, viewport, errors) {
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(1500);
 
-  for (const tab of TABS) {
+  // The nav shows only its own shell's items — the other shell's are not
+  // rendered at all, rather than hidden, so they stay out of the tab order.
+  const navCount = await page.locator(".tab-item:not(.nav-profile)").count();
+  check(
+    `${label}/nav item count`,
+    navCount === (wide ? TABS_DESKTOP : TABS_MOBILE).length,
+    `items=${navCount}`
+  );
+  const navText = (await page.locator(".tab-bar").innerText()).replace(/\s+/g, " ");
+  check(
+    `${label}/Members in nav = ${wide}`,
+    /Members/.test(navText) === wide,
+    JSON.stringify(navText)
+  );
+  check(
+    `${label}/desktop-only chrome = ${wide}`,
+    (await page.locator(".nav-mode").count()) === (wide ? 1 : 0) &&
+      (await page.locator(".nav-profile").count()) === (wide ? 1 : 0)
+  );
+
+  for (const tab of wide ? TABS_DESKTOP : TABS_MOBILE) {
     await page.locator(".tab-item", { hasText: tab }).click();
     await page.waitForTimeout(200);
     const header = await page.locator(".header .title").count();
@@ -91,7 +114,10 @@ async function tabsRender(browser, label, viewport, errors) {
   }
 
   await unlockTreasurer(page);
-  await page.locator(".tab-item", { hasText: "Menu" }).click();
+  await (wide
+    ? page.locator(".nav-profile")
+    : page.locator(".tab-item", { hasText: "Menu" })
+  ).click();
   await page.waitForTimeout(250);
   const rows = await page.locator(".menu-row").count();
   const danger = await page.locator(".danger-zone").count();
@@ -101,6 +127,28 @@ async function tabsRender(browser, label, viewport, errors) {
   await page.waitForTimeout(250);
   const attention = await page.locator(".attention-panel").count();
   check(`${label}/attention panel`, attention === 1, `panels=${attention}`);
+
+  // Members has to stay reachable on mobile even though it left the bar:
+  // Home's roster "See all" is its entry point, and it opens with a way back.
+  if (!wide) {
+    await page.locator(".roster-strip-all").click();
+    await page.waitForTimeout(300);
+    const onMembers = await page.locator(".view-members").count();
+    const back = await page.locator(".detail-back").count();
+    const activeTabs = await page.locator(".tab-item.active").count();
+    check(
+      `${label}/Members via See all`,
+      onMembers === 1 && back === 1 && activeTabs === 0,
+      `view=${onMembers} back=${back} activeTabs=${activeTabs}`
+    );
+    await page.locator(".detail-back").click();
+    await page.waitForTimeout(250);
+    check(
+      `${label}/back returns Home`,
+      (await page.locator(".view-home").count()) === 1
+    );
+  }
+  if (SHOTS) await page.screenshot({ path: `${SHOTS}/${label}-nav.png` });
 
   await page.close();
 }
@@ -248,7 +296,10 @@ async function rejectionAndMasterPin(browser, errors) {
     "rejection: chip marked in Rounds",
     (await page.locator(".member-chip.rejected").count()) >= 1
   );
-  await page.locator(".tab-item", { hasText: "Members" }).click();
+  // Members is a Home drill-down on this shell, not a tab.
+  await page.locator(".tab-item", { hasText: "Home" }).click();
+  await page.waitForTimeout(300);
+  await page.locator(".roster-strip-all").click();
   await page.waitForTimeout(300);
   check(
     "rejection: roster ring is red",
@@ -289,6 +340,55 @@ async function rejectionAndMasterPin(browser, errors) {
   await page.close();
 }
 
+
+/** Crossing the 900px breakpoint swaps the shell, and must not strand state.
+ *  This is the whole risk of having two different nav item sets. */
+async function breakpointCrossing(browser, errors) {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  page.on("pageerror", (e) => errors.push(`breakpoint: ${e}`));
+  await serve(page, M.TABLE_DATA);
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1500);
+
+  const nav = async () => (await page.locator(".tab-bar").innerText()).replace(/\s+/g, " ");
+  check("breakpoint: starts as sidebar", /Members/.test(await nav()));
+
+  // Members is a desktop nav item. Narrowing has to keep the VIEW while
+  // dropping the item from the bar, not strand the user on a screen the
+  // shell can no longer describe.
+  await page.locator(".tab-item", { hasText: "Members" }).click();
+  await page.waitForTimeout(300);
+  await page.setViewportSize({ width: 430, height: 900 });
+  await page.waitForTimeout(500);
+  const narrowNav = await nav();
+  check(
+    "breakpoint: narrowing keeps Members open",
+    (await page.locator(".view-members").count()) === 1 &&
+      !/Members/.test(narrowNav) &&
+      (await page.locator(".detail-back").count()) === 1,
+    JSON.stringify(narrowNav)
+  );
+  check(
+    "breakpoint: sidebar chrome gone",
+    (await page.locator(".nav-mode").count()) === 0 &&
+      (await page.locator(".nav-profile").count()) === 0
+  );
+
+  // Menu is a mobile tab but the desktop profile row. Widening from it must
+  // keep it selected in its new home rather than losing the highlight.
+  await page.locator(".tab-item", { hasText: "Menu" }).click();
+  await page.waitForTimeout(300);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.waitForTimeout(500);
+  check(
+    "breakpoint: Menu stays selected as the profile row",
+    (await page.locator(".view-menu").count()) === 1 &&
+      (await page.locator(".nav-profile.active").count()) === 1
+  );
+
+  await page.close();
+}
+
 (async () => {
   const browser = await chromium.launch({
     executablePath: process.env.PF_CHROMIUM || undefined,
@@ -297,15 +397,17 @@ async function rejectionAndMasterPin(browser, errors) {
   const errors = [];
 
   console.log("\nTabs render (mobile shell)");
-  await tabsRender(browser, "mobile", { width: 430, height: 900 }, errors);
+  await tabsRender(browser, "mobile", { width: 430, height: 900 }, errors, false);
   console.log("\nTabs render (desktop shell)");
-  await tabsRender(browser, "desktop", { width: 1440, height: 900 }, errors);
+  await tabsRender(browser, "desktop", { width: 1440, height: 900 }, errors, true);
   console.log("\nMoney states");
   await moneyStates(browser, errors);
   console.log("\nMotion");
   await reducedMotion(browser);
   console.log("\nRejection & master PIN");
   await rejectionAndMasterPin(browser, errors);
+  console.log("\nBreakpoint");
+  await breakpointCrossing(browser, errors);
 
   await browser.close();
 

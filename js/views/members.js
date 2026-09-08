@@ -12,7 +12,7 @@ window.PFViews = window.PFViews || {};
 window.PFViews.members = function (ctx) {
   const {
     members, state, unlocked, escapeHtml, icon, memberAvatar,
-    memberStanding, getPayout, selectedMemberId, C
+    memberStanding, getPayout, selectedMemberId, isWide, C
   } = ctx;
   let html = "";
 
@@ -22,6 +22,15 @@ window.PFViews.members = function (ctx) {
     : null;
   if (selected) return renderMemberDetail(selected, ctx);
 
+  // On mobile the roster is a drill-down from Home rather than a tab, so it
+  // needs its own way back — nothing in the bottom bar is lit while it is
+  // open. On desktop it IS a sidebar item, and a back button would be a
+  // dead-end control pointing at a screen the nav already reaches.
+  if (!isWide) {
+    html += `<button type="button" class="detail-back" onclick="PowerFund.setView('home')">
+      ${icon("chevronLeft", 15)}<span>Home</span>
+    </button>`;
+  }
 
   html += `<div class="view-head">
     <h2 class="view-title">Members</h2>

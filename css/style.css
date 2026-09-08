@@ -1624,6 +1624,58 @@ body { padding-top: calc(28px + var(--pf-bar-h, 0px)); }
 }
 .tab-item .tab-icon { font-size: 18px; line-height: 1; }
 .tab-item.active { color: var(--accent); font-weight: 600; }
+/* Brand block belongs to the sidebar shell only — no room for it in the bar. */
+.tab-brand { display: none; }
+
+/* ---- Desktop shell: the same nav becomes a left sidebar ------------------
+ * Nothing about the views changes here; only the chrome around them moves,
+ * so both layouts render from one code path. */
+@media (min-width: 900px) {
+  body { padding-left: calc(232px + 32px); padding-right: 32px; padding-bottom: 48px; }
+  .wrap { max-width: 900px; margin: 0 auto; }
+
+  .tab-bar {
+    top: 0;
+    right: auto;
+    width: 232px;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: stretch;
+    gap: 2px;
+    padding: 20px 12px;
+    border-top: none;
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+  }
+  .tab-brand {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 4px 10px 20px;
+  }
+  .tab-brand-mark { font-size: 19px; line-height: 1; }
+  .tab-brand-name {
+    font-family: 'Space Grotesk', 'Inter', sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--text-primary);
+  }
+  .tab-item {
+    flex: 0 0 auto;
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 12px;
+    border-radius: 10px;
+    padding: 11px 12px;
+    font-size: 13.5px;
+  }
+  .tab-item:hover { background: rgba(255, 255, 255, 0.05); }
+  .tab-item.active { background: var(--accent-soft); }
+  .tab-item .tab-icon { font-size: 16px; }
+
+  /* With the width to spare, the stat tiles stop wrapping to one per row. */
+  .stat-grid { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+}
 
 /* Per-view heading, for tabs that are a screen in their own right rather than
    a section competing for room on the old single-page layout. */

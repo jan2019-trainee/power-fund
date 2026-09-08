@@ -526,6 +526,17 @@ body {
 .activity-time { color: var(--text-muted); font-size: 11px; }
 .activity-text { color: var(--text-primary); }
 .activity-empty { color: var(--text-muted); font-size: 13px; text-align: center; padding: 12px 0; }
+.activity-chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 10px; }
+.activity-chip {
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--bg-card);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.activity-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 
 .how-it-works-list {
   margin: 8px 0 0;

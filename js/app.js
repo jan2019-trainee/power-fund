@@ -82,6 +82,7 @@
 
   let activityLogOpen = false;
   let activityLogLimit = 30; // grows when the treasurer taps "Show older"
+  let activityFilter = "all"; // "all" | "payment" | "payout" | "admin"
   let shareModalOpen = false;
   let copyFeedback = null;
 
@@ -1352,6 +1353,23 @@
     activityLogOpen = !activityLogOpen;
     render();
   }
+  function setActivityFilter(type) {
+    activityFilter = type;
+    render();
+  }
+  /** Infers a coarse category from an activity-log message so the log can be
+   * filtered without a dedicated DB column — every logActivity() call site
+   * produces one of a small, stable set of message shapes. */
+  function activityCategory(message) {
+    if (/^Payout (released|release undone)/i.test(message)) return "payout";
+    if (
+      /marked .* as sent|recorded .*'s cycle .* as paid|reverted .*'s cycle .* to unpaid|confirmed .*'s .*cycle|rejected .*'s .*cycle/i.test(
+        message
+      )
+    )
+      return "payment";
+    return "admin"; // reset, PIN, round start, name edits, payout order swap, QR update, restore
+  }
   function expandAttentionQueue() {
     attentionQueueExpanded = true;
     render();
@@ -2339,6 +2357,16 @@
     // activity log
     html += (function () {
       const log = state.activityLog || [];
+      const filterLabels = {
+        all: "All",
+        payment: "Payments",
+        payout: "Payouts",
+        admin: "Admin",
+      };
+      const visible =
+        activityFilter === "all"
+          ? log
+          : log.filter((e) => activityCategory(e.message) === activityFilter);
       return `<div class="round activity-section">
         <div class="round-header" role="button" tabindex="0" aria-expanded="${
           activityLogOpen ? "true" : "false"
@@ -2352,9 +2380,25 @@
         </div>
         <div class="round-body ${activityLogOpen ? "open" : ""}">
           ${
+            activityLogOpen
+              ? `<div class="activity-chips">${Object.entries(filterLabels)
+                  .map(
+                    ([type, label]) => `
+                <button type="button" class="activity-chip ${
+                  activityFilter === type ? "active" : ""
+                }" onclick="PowerFund.setActivityFilter('${type}')">${label}</button>`
+                  )
+                  .join("")}</div>`
+              : ""
+          }
+          ${
             log.length === 0
               ? '<p class="activity-empty">No activity yet — actions will show up here as your group uses the tracker.</p>'
-              : `<div class="activity-list">${log
+              : visible.length === 0
+              ? `<p class="activity-empty">No ${filterLabels[
+                  activityFilter
+                ].toLowerCase()} entries in the loaded history — try "Show older entries" or switch filters.</p>`
+              : `<div class="activity-list">${visible
                   .map(
                     (e) => `
                 <div class="activity-item">
@@ -2364,12 +2408,12 @@
                   <span class="activity-text">${escapeHtml(e.message)}</span>
                 </div>`
                   )
-                  .join("")}</div>
-                ${
-                  log.length >= activityLogLimit
-                    ? `<button type="button" class="attention-more activity-more" onclick="PowerFund.loadMoreActivity()">Show older entries</button>`
-                    : ""
-                }`
+                  .join("")}</div>`
+          }
+          ${
+            log.length >= activityLogLimit
+              ? `<button type="button" class="attention-more activity-more" onclick="PowerFund.loadMoreActivity()">Show older entries</button>`
+              : ""
           }
         </div>
       </div>`;
@@ -2948,6 +2992,7 @@
     toggleUnlock,
     toggleRound,
     toggleActivityLog,
+    setActivityFilter,
     loadMoreActivity,
     openLightbox,
     closeLightbox,

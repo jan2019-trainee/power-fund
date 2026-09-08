@@ -106,6 +106,12 @@
   let qrNewPreview = null; // object URL for the preview
   let qrUploadMsg = null; // success / info line inside the QR panel
 
+  // Payout details modal: where one member's payout should be sent.
+  let payoutQrMemberId = null;
+  let payoutQrFile = null;
+  let payoutQrPreview = null;
+  let payoutQrFields = null; // { bank, accountName, accountNumber }
+
   let contributePicker = null; // cycle number for the "who are you?" picker, or null
   let modalWasOpen = false; // for moving focus into a dialog when it opens
 
@@ -1829,6 +1835,96 @@
     render();
   }
 
+  // ===================================================================
+  // Member payout details (treasurer only)
+  //
+  // Treasurer-managed rather than member-managed: this app has no per-member
+  // auth, so "members edit their own" would in practice mean anyone can edit
+  // anyone's — and a swapped QR redirects a ₱30,000 payout. Gating it behind
+  // the same treasurer PIN as every other money action is the honest limit of
+  // what this app can enforce. Every change is logged so a swap is visible.
+  // ===================================================================
+  function openPayoutQrModal(memberId) {
+    if (!unlocked) return;
+    const m = state.members.find((x) => x.id === memberId);
+    if (!m) return;
+    payoutQrMemberId = memberId;
+    payoutQrFields = {
+      bank: m.payout_bank || "",
+      accountName: m.payout_account_name || "",
+      accountNumber: m.payout_account_number || "",
+    };
+    clearPayoutQrSelection();
+    render();
+  }
+  function closePayoutQrModal() {
+    payoutQrMemberId = null;
+    payoutQrFields = null;
+    clearPayoutQrSelection();
+    render();
+  }
+  function clearPayoutQrSelection() {
+    if (payoutQrPreview) URL.revokeObjectURL(payoutQrPreview);
+    payoutQrFile = null;
+    payoutQrPreview = null;
+  }
+  function setPayoutQrField(field, value) {
+    if (!payoutQrFields) return;
+    payoutQrFields[field] = value;
+    // No re-render: the inputs already hold what was typed, and re-rendering
+    // mid-keystroke would move the caret.
+  }
+  function onPayoutQrFileSelected(input) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    if (!QR_ALLOWED_TYPES.includes((file.type || "").toLowerCase())) {
+      return showError("Please select a valid image file (JPG, PNG or WEBP).");
+    }
+    if (file.size === 0) {
+      return showError("That file is empty — please choose another image.");
+    }
+    if (file.size > QR_MAX_BYTES) {
+      return showError("The QR image must be smaller than 5 MB.");
+    }
+    clearPayoutQrSelection();
+    payoutQrFile = file;
+    payoutQrPreview = URL.createObjectURL(file);
+    render();
+  }
+  async function savePayoutDetails() {
+    if (!unlocked || !payoutQrMemberId || busy) return;
+    const memberId = payoutQrMemberId;
+    const m = state.members.find((x) => x.id === memberId);
+    busy = true;
+    render();
+    try {
+      const fields = {
+        payout_bank: payoutQrFields.bank.trim() || null,
+        payout_account_name: payoutQrFields.accountName.trim() || null,
+        payout_account_number: payoutQrFields.accountNumber.trim() || null,
+      };
+      // Upload first, save second: a failed upload must never blank the QR
+      // that is already on file.
+      if (payoutQrFile) {
+        fields.payout_qr_url = await window.DB.uploadMemberPayoutQr(payoutQrFile, memberId);
+      }
+      await window.DB.saveMemberPayoutDetails(memberId, fields);
+      await logActivity(
+        `Treasurer updated ${m ? m.name : "a member"}'s payout details${
+          payoutQrFile ? " and QR code" : ""
+        }`
+      );
+      closePayoutQrModal();
+      await reload();
+      showSuccess(`Payout details saved for ${m ? m.name : "the member"}.`);
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+
   async function confirmQrUpload() {
     if (!unlocked || !qrNewFile || busy) return;
     busy = true;
@@ -2201,6 +2297,7 @@
       // UI state, snapshotted so a view can't mutate it mid-render
       state, unlocked, busy, openRound, myMemberId, attentionQueueExpanded,
       overdueListOpen, startRoundConfirming, isWide, selectedMemberId,
+      payoutQrMemberId,
       // helpers the views render with
       escapeHtml, inlineArg, icon, memberAvatar, memberStanding, batteryCell,
       getPayout, payoutRecipientName, payoutDateText, sparkline, C,
@@ -2448,6 +2545,70 @@
         recipient ? escapeHtml(recipient.name) : "—"
       } · recorded now so it stays correct if the order changes later</p>
 
+          ${
+            recipient
+              ? (function () {
+                  const hasAny =
+                    recipient.payout_qr_url ||
+                    recipient.payout_bank ||
+                    recipient.payout_account_name ||
+                    recipient.payout_account_number;
+                  // The point of showing this here is verification: check the
+                  // account name against the person before sending, since a QR
+                  // image on its own is opaque.
+                  if (!hasAny) {
+                    return `<div class="payout-dest-warn">${icon(
+                      "alert",
+                      15
+                    )}<span>No payout details on file for ${escapeHtml(
+                      recipient.name
+                    )}. Add them from Members &rarr; ${escapeHtml(
+                      recipient.name
+                    )} so the destination is on record, or confirm it another way before sending.</span></div>`;
+                  }
+                  return `<div class="payout-dest payout-dest-inline">
+                    <div class="payout-dest-main">
+                      ${
+                        recipient.payout_qr_url
+                          ? `<button type="button" class="payout-dest-qr" onclick="PowerFund.openLightbox('${inlineArg(
+                              recipient.payout_qr_url
+                            )}')"><img src="${escapeHtml(
+                              recipient.payout_qr_url
+                            )}" alt="Payout QR for ${escapeHtml(
+                              recipient.name
+                            )}"></button>`
+                          : ""
+                      }
+                      <div class="payout-dest-lines">
+                        <div class="payout-dest-label">Sending to</div>
+                        ${
+                          recipient.payout_bank
+                            ? `<div class="payout-dest-bank">${escapeHtml(
+                                recipient.payout_bank
+                              )}</div>`
+                            : ""
+                        }
+                        ${
+                          recipient.payout_account_name
+                            ? `<div class="payout-dest-name">${escapeHtml(
+                                recipient.payout_account_name
+                              )}</div>`
+                            : ""
+                        }
+                        ${
+                          recipient.payout_account_number
+                            ? `<div class="payout-dest-num">${escapeHtml(
+                                recipient.payout_account_number
+                              )}</div>`
+                            : ""
+                        }
+                      </div>
+                    </div>
+                  </div>`;
+                })()
+              : ""
+          }
+
           <label class="payout-field-label" for="payout-amount">Amount paid out</label>
           <input id="payout-amount" class="pin-input payout-amount-input" type="text"
                  inputmode="decimal" value="${escapeHtml(payoutAmountValue)}"
@@ -2588,6 +2749,54 @@
     }
 
     // "Record a contribution" — pick which member you are
+    if (payoutQrMemberId) {
+      const pm = state.members.find((x) => x.id === payoutQrMemberId);
+      const f = payoutQrFields || { bank: "", accountName: "", accountNumber: "" };
+      const currentQr = pm && pm.payout_qr_url;
+      html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closePayoutQrModal()">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pq-title" tabindex="-1">
+          <h3 id="pq-title">Payout details${pm ? " — " + escapeHtml(pm.name) : ""}</h3>
+          <p class="modal-sub">Where this member's ₱${C.GOAL_PER_ROUND.toLocaleString(
+            "en-PH"
+          )} payout gets sent. The account name is what lets you check you're paying the right person.</p>
+
+          <label class="field-label" for="pq-bank">Bank or e-wallet</label>
+          <input id="pq-bank" class="text-input" type="text" placeholder="GCash, Maya, BPI…" value="${escapeHtml(
+            f.bank
+          )}" oninput="PowerFund.setPayoutQrField('bank', this.value)">
+
+          <label class="field-label" for="pq-name">Account name</label>
+          <input id="pq-name" class="text-input" type="text" placeholder="Name on the account" value="${escapeHtml(
+            f.accountName
+          )}" oninput="PowerFund.setPayoutQrField('accountName', this.value)">
+
+          <label class="field-label" for="pq-num">Account or mobile number</label>
+          <input id="pq-num" class="text-input" type="text" inputmode="numeric" placeholder="09XX XXX XXXX" value="${escapeHtml(
+            f.accountNumber
+          )}" oninput="PowerFund.setPayoutQrField('accountNumber', this.value)">
+
+          <label class="field-label">Receiving QR code</label>
+          ${
+            payoutQrPreview
+              ? `<img class="qr-preview" src="${payoutQrPreview}" alt="New payout QR preview">`
+              : currentQr
+              ? `<img class="qr-preview" src="${escapeHtml(
+                  currentQr
+                )}" alt="Current payout QR">`
+              : `<p class="qr-empty">No QR on file yet.</p>`
+          }
+          <input type="file" accept="image/*" class="file-input" onchange="PowerFund.onPayoutQrFileSelected(this)">
+
+          <div class="modal-actions">
+            <button class="modal-btn-primary" onclick="PowerFund.savePayoutDetails()" ${
+              busy ? "disabled" : ""
+            }>${busy ? "Saving…" : "Save"}</button>
+            <button class="modal-btn-secondary" onclick="PowerFund.closePayoutQrModal()">Cancel</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
     if (contributePicker != null) {
       const cyc = contributePicker;
       const due = C.dueDateOf(state.cycles, cyc);
@@ -2802,6 +3011,11 @@
     loadMoreActivity,
     setView,
     openMemberDetail,
+    openPayoutQrModal,
+    closePayoutQrModal,
+    setPayoutQrField,
+    onPayoutQrFileSelected,
+    savePayoutDetails,
     closeMemberDetail,
     openLightbox,
     closeLightbox,

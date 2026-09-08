@@ -99,14 +99,19 @@ window.PFViews.members = function (ctx) {
   return html;
 };
 
+/** Escape a value being dropped into an inline onclick string literal. */
+function inlineArgSafe(v) {
+  return String(v).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
 /**
- * One member's full record: standing, the money, and every cycle grouped by
- * round. Read-only by design — recording and reviewing payments stays on the
- * cycle grids in Rounds, so this can't become a second, divergent way to
- * change someone's payment history.
+ * One member's full record: standing, the money, where their payout goes, and
+ * every cycle grouped by round. Payment history is read-only by design —
+ * recording and reviewing stays on the cycle grids in Rounds, so this can't
+ * become a second, divergent way to change what someone has paid.
  */
 function renderMemberDetail(m, ctx) {
-  const { state, escapeHtml, icon, memberAvatar, memberStanding, getPayout, C } = ctx;
+  const { state, unlocked, escapeHtml, icon, memberAvatar, memberStanding, getPayout, C } = ctx;
   const cyclesDueSoFar = C.completedCyclesCount(state.cycles);
   const paidOut = getPayout(m.member_order).released;
   const standing = memberStanding(m.id, cyclesDueSoFar, paidOut);
@@ -156,6 +161,61 @@ function renderMemberDetail(m, ctx) {
       ? "no dated payments yet"
       : "paid on time (" + onTime.onTime + "/" + onTime.counted + ")"
   }</div></div>
+  </div>`;
+
+  // Where this member's payout goes. Shown to everyone (so a member can check
+  // their own details are right) but only editable in treasurer mode.
+  const hasPayoutDetails =
+    m.payout_qr_url || m.payout_bank || m.payout_account_name || m.payout_account_number;
+  html += `<p class="section-label">Payout destination</p>
+  <div class="payout-dest">
+    ${
+      hasPayoutDetails
+        ? `<div class="payout-dest-main">
+             ${
+               m.payout_qr_url
+                 ? `<button type="button" class="payout-dest-qr" onclick="PowerFund.openLightbox('${inlineArgSafe(
+                     m.payout_qr_url
+                   )}')"><img src="${escapeHtml(
+                     m.payout_qr_url
+                   )}" alt="${escapeHtml(m.name)}'s payout QR code"></button>`
+                 : ""
+             }
+             <div class="payout-dest-lines">
+               ${
+                 m.payout_bank
+                   ? `<div class="payout-dest-bank">${escapeHtml(m.payout_bank)}</div>`
+                   : ""
+               }
+               ${
+                 m.payout_account_name
+                   ? `<div class="payout-dest-name">${escapeHtml(
+                       m.payout_account_name
+                     )}</div>`
+                   : ""
+               }
+               ${
+                 m.payout_account_number
+                   ? `<div class="payout-dest-num">${escapeHtml(
+                       m.payout_account_number
+                     )}</div>`
+                   : ""
+               }
+               ${
+                 m.payout_qr_url ? "" : `<div class="payout-dest-num">No QR on file</div>`
+               }
+             </div>
+           </div>`
+        : `<p class="payout-dest-empty">Nothing on file yet — the treasurer records where this payout should be sent.</p>`
+    }
+    ${
+      unlocked
+        ? `<button type="button" class="payout-dest-edit" onclick="PowerFund.openPayoutQrModal('${m.id}')">${icon(
+            hasPayoutDetails ? "qr" : "upload",
+            14
+          )}<span>${hasPayoutDetails ? "Edit payout details" : "Add payout details"}</span></button>`
+        : ""
+    }
   </div>`;
 
   // Grouped by round rather than one flat run of 30 rows, so the history

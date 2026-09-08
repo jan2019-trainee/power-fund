@@ -2565,3 +2565,111 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   text-align: left;
 }
 .pin-warning .icon { color: var(--accent); margin-top: 1px; }
+
+/* ---------------------------------------------------------------------------
+ * Member payout destination — where a payout gets sent.
+ *
+ * The typed account name matters as much as the QR: a QR image is opaque, so
+ * the name is what actually lets a treasurer verify who they're about to pay.
+ * ------------------------------------------------------------------------- */
+.payout-dest {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 16px;
+}
+.payout-dest-inline { margin: 4px 0 16px; }
+.payout-dest-main { display: flex; align-items: center; gap: 14px; }
+.payout-dest-qr {
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  line-height: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.payout-dest-qr img { width: 72px; height: 72px; object-fit: contain; display: block; }
+.payout-dest-lines { min-width: 0; }
+.payout-dest-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+}
+.payout-dest-bank { font-size: 12.5px; color: var(--text-muted); }
+.payout-dest-name {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+.payout-dest-num { font-size: 12.5px; color: var(--text-muted); }
+.payout-dest-empty { margin: 0; font-size: 12.5px; color: var(--text-muted); line-height: 1.6; }
+.payout-dest-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 12px;
+  padding: 9px 13px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.payout-dest-edit:hover { background: var(--bg-card-alt); }
+.payout-dest-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0 16px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(245, 166, 35, 0.08);
+  border: 1px solid rgba(245, 166, 35, 0.3);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  text-align: left;
+}
+.payout-dest-warn .icon { color: var(--accent); margin-top: 1px; }
+
+.field-label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin: 14px 0 5px;
+  text-align: left;
+}
+.text-input {
+  width: 100%;
+  padding: 11px 12px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+}
+.text-input:focus { outline: none; border-color: var(--accent); }
+.qr-preview {
+  display: block;
+  width: 130px;
+  height: 130px;
+  object-fit: contain;
+  background: #fff;
+  border-radius: 10px;
+  padding: 6px;
+  margin: 4px 0 8px;
+}
+.qr-empty { margin: 4px 0 8px; font-size: 12.5px; color: var(--text-muted); }
+.file-input { font-size: 12.5px; color: var(--text-muted); }

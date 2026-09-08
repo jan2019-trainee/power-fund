@@ -367,6 +367,66 @@ window.DB = (function () {
    * receipts/. Returns the public URL. Only called when the treasurer attaches
    * one while releasing a payout.
    */
+  /**
+   * A member's receiving QR — where their payout gets sent. Same bucket and
+   * failure handling as the fund's own payment QR; kept under payout-qr/ so
+   * the two are distinguishable in storage.
+   *
+   * Returns the public URL. Saving it onto the member row is the caller's job,
+   * so a failed upload can never blank an existing QR.
+   */
+  async function uploadMemberPayoutQr(file, memberId) {
+    const ext = (file.name.split(".").pop() || "png").toLowerCase();
+    const path = `payout-qr/${memberId}-${Date.now()}.${ext}`;
+    const res = await client.storage
+      .from(ASSET_BUCKET)
+      .upload(path, file, { upsert: false, contentType: file.type || "image/png" });
+    if (res.error) {
+      console.error("Payout QR upload failed:", res.error);
+      const m = res.error.message || "";
+      if (/bucket.*not.*found|not.*found|does not exist/i.test(m)) {
+        throw new Error(
+          "The 'payment-assets' storage bucket is missing. Run " +
+            "supabase/migrations/005_member_payout_details.sql in the Supabase SQL editor."
+        );
+      }
+      if (/policy|permission|unauthor/i.test(m)) {
+        throw new Error(
+          "Storage rejected the upload — the 'payment-assets' bucket policies " +
+            "are not set. Run supabase/migrations/003_payment_qr.sql."
+        );
+      }
+      throw new Error("Couldn't upload the payout QR. Please try again.");
+    }
+    const { data } = client.storage.from(ASSET_BUCKET).getPublicUrl(path);
+    return data.publicUrl;
+  }
+
+  /**
+   * Save a member's payout details. Surfaces the specific "run the migration"
+   * message when the columns aren't there yet, rather than a generic failure
+   * that leaves the treasurer guessing.
+   */
+  async function saveMemberPayoutDetails(memberId, fields) {
+    const res = await client
+      .from("members")
+      .update({ ...fields, payout_updated_at: new Date().toISOString() })
+      .eq("id", memberId)
+      .select()
+      .single();
+    if (res.error) {
+      const m = res.error.message || "";
+      if (/column .* does not exist|payout_/i.test(m)) {
+        throw new Error(
+          "Payout details need a database update. Run " +
+            "supabase/migrations/005_member_payout_details.sql in the Supabase SQL editor."
+        );
+      }
+      throw new Error("Couldn't save the payout details. Please try again.");
+    }
+    return res.data;
+  }
+
   async function uploadPayoutReceipt(file, roundNumber) {
     const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
     const path = `receipts/round-${roundNumber}-${Date.now()}.${ext}`;
@@ -693,6 +753,8 @@ window.DB = (function () {
     deleteProof,
     archiveProof,
     uploadPaymentQr,
+    uploadMemberPayoutQr,
+    saveMemberPayoutDetails,
     uploadPayoutReceipt,
     deletePaymentAsset,
     getPayouts,

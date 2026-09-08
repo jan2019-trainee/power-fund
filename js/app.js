@@ -46,6 +46,11 @@
 
   // ---- UI state (not persisted) -------------------------------------
   let currentView = "home"; // "home" | "rounds" | "members" | "activity" | "insights" | "menu"
+  // Some views genuinely differ on a wide screen (rounds becomes a master list
+  // plus a detail pane), which CSS alone can't express. Tracked here and passed
+  // to the views; a re-render happens only when the breakpoint actually flips.
+  const wideQuery = window.matchMedia("(min-width: 900px)");
+  let isWide = wideQuery.matches;
   let unlocked = false; // treasurer mode
   let busy = false; // a write is in flight — block double clicks
   let appError = null; // string shown in the red banner
@@ -2130,22 +2135,26 @@
       myMember, myStatus, ROUND_PILL,
       // UI state, snapshotted so a view can't mutate it mid-render
       state, unlocked, busy, openRound, myMemberId, attentionQueueExpanded,
-      overdueListOpen, startRoundConfirming,
+      overdueListOpen, startRoundConfirming, isWide,
       // helpers the views render with
       escapeHtml, inlineArg, icon, memberAvatar, memberStanding, batteryCell,
       getPayout, payoutRecipientName, payoutDateText, C,
     };
 
     const view = window.PFViews && window.PFViews[currentView];
+    let viewHtml;
     if (currentView === "activity") {
-      html += renderActivityView();
+      viewHtml = renderActivityView();
     } else if (currentView === "insights") {
-      html += renderInsightsView(members);
+      viewHtml = renderInsightsView(members);
     } else if (view) {
-      html += view(ctx);
+      viewHtml = view(ctx);
     } else {
-      html += renderPlaceholderView(currentView);
+      viewHtml = renderPlaceholderView(currentView);
     }
+    // The wrapper is what lets a view lay itself out differently on a wide
+    // screen without its own render path — the desktop rules key off it.
+    html += `<div class="view view-${currentView}">${viewHtml}</div>`;
 
     html += renderTabBar(currentView);
 
@@ -2631,6 +2640,16 @@
   // Init + keeping devices in sync
   // ===================================================================
   async function init() {
+    // Re-render when the layout breakpoint flips, so a view that renders
+    // differently wide (rounds) switches shape on resize or rotation.
+    const onWideChange = (e) => {
+      if (e.matches === isWide) return;
+      isWide = e.matches;
+      if (state) render();
+    };
+    if (wideQuery.addEventListener) wideQuery.addEventListener("change", onWideChange);
+    else if (wideQuery.addListener) wideQuery.addListener(onWideChange); // older Safari
+
     try {
       await loadAll();
       render();

@@ -13,9 +13,12 @@ window.PFViews.rounds = function (ctx) {
   const {
     members, rounds, curCycle, allDone, curRound, ROUND_PILL, state,
     unlocked, openRound, escapeHtml, inlineArg, icon, getPayout,
-    payoutRecipientName, payoutDateText, C
+    payoutRecipientName, payoutDateText, C, isWide
   } = ctx;
   let html = "";
+  // Filled only on wide screens, where the list and detail render separately.
+  let listHtml = "";
+  let detailHtml = "";
 
 
   html += `<div class="view-head">
@@ -37,7 +40,7 @@ window.PFViews.rounds = function (ctx) {
     const rStatus = C.roundStatus(state.contributions, rounds, r); // not_started|collecting|payout_pending|completed
     const endDue = C.dueDateOf(state.cycles, endCycle);
 
-    html += `<div class="round">
+    const headerHtml = `<div class="round ${isOpen ? "is-open" : ""}">
       <div class="round-header" role="button" tabindex="0" aria-expanded="${
         isOpen ? "true" : "false"
       }" onclick="PowerFund.toggleRound(${r})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();PowerFund.toggleRound(${r})}">
@@ -51,8 +54,8 @@ window.PFViews.rounds = function (ctx) {
     }${roundPending ? ` · ${roundPending} pending` : ""}${
       endDue ? ` · ${C.formatDate(endDue)}` : ""
     }</div>
-      </div>
-      <div class="round-body ${isOpen ? "open" : ""}">
+      </div>`;
+    const bodyHtml = `<div class="round-body ${isOpen ? "open" : ""}">
         <div class="cycle-list">
           ${(function () {
             let rowsHtml = "";
@@ -152,11 +155,30 @@ window.PFViews.rounds = function (ctx) {
               )} reached</div></div>`
             : ""
         }
-      </div>
-    </div>`;
+      </div>`;
+
+    // On a wide screen the list and the open round's detail sit side by side,
+    // so rounds read as a master list with a detail pane instead of an
+    // accordion that pushes everything below it down the page.
+    if (isWide) {
+      listHtml += headerHtml + `</div>`;
+      if (isOpen) detailHtml += bodyHtml;
+    } else {
+      html += headerHtml + bodyHtml + `</div>`;
+    }
   }
 
   // ---- Payout history: released payouts, recipient/amount as recorded ----
+  if (isWide) {
+    html += `<div class="rounds-split">
+      <div class="rounds-list">${listHtml}</div>
+      <div class="rounds-detail">${
+        detailHtml ||
+        `<p class="rounds-detail-empty">Pick a round to see its cycles.</p>`
+      }</div>
+    </div>`;
+  }
+
   (function () {
     const released = (state.payouts || [])
       .filter((p) => p.released)

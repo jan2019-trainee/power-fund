@@ -1647,8 +1647,10 @@ body { padding-top: calc(28px + var(--pf-bar-h, 0px)); }
  * Nothing about the views changes here; only the chrome around them moves,
  * so both layouts render from one code path. */
 @media (min-width: 900px) {
-  body { padding-left: calc(232px + 32px); padding-right: 32px; padding-bottom: 48px; }
-  .wrap { max-width: 900px; margin: 0 auto; }
+  body { padding-left: calc(232px + 40px); padding-right: 40px; padding-bottom: 48px; }
+  /* Wide enough for the two-column views to breathe, capped so text lines
+     never run to an uncomfortable measure on a very large monitor. */
+  .wrap { max-width: 1180px; margin: 0 auto; }
 
   .tab-bar {
     top: 0;
@@ -2152,3 +2154,84 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
    so it flips to the dark ink the fill was designed against. */
 .hero-batt-label.on-fill .hero-batt-pct { color: #14213D; }
 .hero-batt-label.on-fill .hero-batt-cap { color: rgba(20, 33, 61, 0.75); }
+
+/* ===========================================================================
+ * Desktop layouts (≥900px)
+ *
+ * The wide screen is not the phone layout stretched: each view reflows into
+ * the shape the design called for. All of it keys off the .view-<name>
+ * wrapper, so there is still one render path — CSS decides the shape.
+ * ======================================================================== */
+@media (min-width: 900px) {
+  /* HOME — main column carries the money; the rail carries what needs doing,
+     so a treasurer sees both without scrolling past one to reach the other. */
+  .view-home {
+    display: grid;
+    grid-template-columns: minmax(0, 1.65fr) minmax(260px, 1fr);
+    gap: 22px;
+    align-items: start;
+  }
+  .view-home > .fund-total,
+  .view-home > .battery-hero,
+  .view-home > .prev-round { grid-column: 1; }
+  .view-home > .my-status-card,
+  .view-home > .my-status-setup,
+  .view-home > .attention-panel { grid-column: 2; margin-bottom: 0; }
+  .view-home > .attention-panel { margin-top: 0; }
+
+  /* MEMBERS — the roster reads as a board at this width, not a long list. */
+  .view-members .member-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+  /* ACTIVITY — timestamp and entry sit on one line instead of stacking, so
+     the eye can scan down the times. (The log stores a freeform message, not
+     typed columns, so this is two columns rather than the design's six.) */
+  .view-activity .activity-item {
+    display: grid;
+    grid-template-columns: 150px minmax(0, 1fr);
+    align-items: baseline;
+    gap: 16px;
+    padding: 11px 0;
+  }
+  .view-activity .activity-time { font-size: 12px; }
+
+  /* INSIGHTS — the bars have room for a wider label column. */
+  .view-insights .round-bar-row,
+  .view-insights .leader-row { grid-template-columns: 120px minmax(0, 1fr) auto; }
+
+  /* MENU — settings and the explainer sit side by side rather than the
+     explainer pushing the danger zone off-screen. */
+  .view-menu {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 22px;
+    align-items: start;
+  }
+  .view-menu > .view-head { grid-column: 1 / -1; }
+  .view-menu > .footer-note { grid-column: 2; grid-row: 2 / span 20; margin-bottom: 0; }
+}
+
+/* ROUNDS on desktop — master list beside the open round's detail. The list
+   stays put while the detail scrolls, so picking through rounds doesn't move
+   the thing you're clicking. */
+@media (min-width: 900px) {
+  .rounds-split {
+    display: grid;
+    grid-template-columns: minmax(240px, 0.85fr) minmax(0, 1.6fr);
+    gap: 20px;
+    align-items: start;
+  }
+  .rounds-list { position: sticky; top: 24px; }
+  .rounds-list .round { margin-bottom: 8px; cursor: pointer; }
+  .rounds-list .round.is-open {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .rounds-list .round-chevron { display: none; }
+  .rounds-detail .round-body { max-height: none; opacity: 1; overflow: visible; }
+  .rounds-detail-empty {
+    color: var(--text-muted);
+    font-size: 13px;
+    text-align: center;
+    padding: 40px 12px;
+  }
+}

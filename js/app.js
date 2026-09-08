@@ -1487,15 +1487,15 @@
     currentView = view;
     render();
   }
-  /** Piece 2 stub: real content for these tabs moves in over pieces 3-7.
-   * Kept intentionally plain so it's obvious this is a placeholder, not a
-   * finished screen. */
+  /** Fallback when a view can't be found on window.PFViews. Every tab has a
+   * view now, so reaching this means its script didn't load — say that,
+   * rather than implying the feature was never built. */
   function renderPlaceholderView(view) {
     const meta = TAB_VIEWS.find((t) => t.id === view);
     const label = meta ? meta.label : view;
     return `<div class="view-placeholder">
       <p>${meta ? icon(meta.icon, 18) : ""} <b>${escapeHtml(label)}</b></p>
-      <p class="view-placeholder-note">This tab is coming soon — its content still lives on Home for now.</p>
+      <p class="view-placeholder-note">This screen didn't load. Check your connection and reload — if it keeps happening, the app may need updating.</p>
     </div>`;
   }
   /** Activity tab. The log used to be a collapsed accordion competing for

@@ -21,7 +21,7 @@
  * ------------------------------------------------------------------------- */
 
 /* Bump this string on every deploy that should invalidate the shell cache. */
-const CACHE = "pf-v1";
+const CACHE = "pf-v2";
 
 const PRECACHE = [
   "/",
@@ -31,6 +31,10 @@ const PRECACHE = [
   "/js/config.js",
   "/js/calculations.js",
   "/js/database.js",
+  "/js/views/home.js",
+  "/js/views/rounds.js",
+  "/js/views/members.js",
+  "/js/views/menu.js",
   "/js/app.js",
   "/js/pwa.js",
   "/js/vendor/supabase-2.45.4.min.js",

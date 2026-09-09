@@ -123,13 +123,22 @@ window.PFViews.rounds = function (ctx) {
                   // status badges — a dashed border marks those as also
                   // being buttons (tap to revert / review), not just info.
                   const treasurerTap = unlocked && status !== 0 && status !== 3;
-                  return `<span class="member-chip ${cls} ${
+                  // A real <button>, not a <span onclick>. Every per-cycle
+                  // money action on this screen — confirm, revert, record,
+                  // resubmit — is driven from these chips, and as spans they
+                  // were unreachable by keyboard and invisible to a screen
+                  // reader, while the `title` tooltip that carried their only
+                  // label never fires on touch. Home's chips were already
+                  // buttons; this makes the two agree.
+                  return `<button type="button" class="member-chip ${cls} ${
                     clickable ? "editable" : ""
-                  } ${
-                    treasurerTap ? "treasurer-tap" : ""
-                  }" onclick="PowerFund.cellClicked('${m.id}', ${c})" title="${escapeHtml(
-                    m.name
-                  )}: ${tip}">${escapeHtml(m.name)}${icon ? ` ${icon}` : ""}</span>`;
+                  } ${treasurerTap ? "treasurer-tap" : ""}" ${
+                    clickable ? "" : "disabled"
+                  } onclick="PowerFund.cellClicked('${inlineArg(
+                    m.id
+                  )}', ${c})" aria-label="${escapeHtml(m.name)}: ${escapeHtml(
+                    tip
+                  )}">${escapeHtml(m.name)}${icon ? ` ${icon}` : ""}</button>`;
                 })
                 .join("");
               // Undoing one confirmed payment, inline under the row whose pill

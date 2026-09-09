@@ -276,6 +276,25 @@
     clearTimeout(successTimer);
     console.error("App error:", msg);
     render();
+    // The banner renders at the top of the document. A treasurer confirming a
+    // payment from the bottom of Rounds would never see it, so put it in front
+    // of them. render() assigns innerHTML on its last line, so the node exists
+    // only after this call returns — hence the next frame.
+    requestAnimationFrame(() => {
+      const el = document.getElementById("appErrorBanner");
+      if (!el) return;
+      const reduce =
+        window.matchMedia &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      try {
+        el.scrollIntoView({
+          behavior: reduce ? "auto" : "smooth",
+          block: "center",
+        });
+      } catch (e) {
+        el.scrollIntoView();
+      }
+    });
   }
 
   /** Run the failed action again, clearing the banner first so a second
@@ -1405,18 +1424,26 @@
     busy = true;
     render();
     try {
-      // The receipt image is optional — if its upload fails (e.g. the storage
-      // bucket isn't set up), the payout must STILL be releasable. Degrade to
-      // a warning, don't abort.
+      // The receipt is REQUIRED (decision D4), and "required" has to survive a
+      // failed upload too. This used to catch the error and release anyway with
+      // receipt_url null, which recorded a real payout with no evidence and no
+      // way to attach any afterwards — the guard above says the receipt is the
+      // record that the payout was sent, so releasing without one contradicts
+      // it. Abort instead: the round stays Payout Pending, which is the honest
+      // state when the app holds no proof, and the treasurer can retry.
       let receiptUrl = null;
-      let receiptWarning = false;
-      if (payoutReceiptFile) {
-        try {
-          receiptUrl = await window.DB.uploadPayoutReceipt(payoutReceiptFile, round);
-        } catch (e) {
-          receiptWarning = true;
-          console.warn("Payout receipt upload failed:", e.message);
-        }
+      try {
+        receiptUrl = await window.DB.uploadPayoutReceipt(payoutReceiptFile, round);
+      } catch (e) {
+        console.warn("Payout receipt upload failed:", e.message);
+        busy = false;
+        showError(
+          "The receipt photo could not be uploaded, so the payout was NOT " +
+            "released — nothing was recorded. Check your connection and try " +
+            "again. If this keeps happening the storage bucket may not be set up.",
+          () => markPayoutReleased(round)
+        );
+        return render();
       }
 
       // The release itself uses only pre-existing columns, so it always works.
@@ -1446,8 +1473,7 @@
         `Payout released — Round ${round} (${
           recipient ? recipient.name : "—"
         }) · ${C.peso(amount)}` +
-          (payoutNoteValue ? ": " + payoutNoteValue : "") +
-          (receiptWarning ? " — receipt image was NOT saved" : ""),
+          (payoutNoteValue ? ": " + payoutNoteValue : ""),
         {
           type: "payout",
           amount: amount,
@@ -1458,13 +1484,9 @@
       closePayoutModal();
       await reload();
 
+      // A failed receipt upload no longer reaches this point — it aborts the
+      // release above rather than recording an unevidenced payout.
       const problems = [];
-      if (receiptWarning) {
-        problems.push(
-          "the receipt image could not be uploaded — the 'payment-assets' " +
-            "storage bucket isn't set up (run supabase/migrations/003)"
-        );
-      }
       if (accWarning) {
         problems.push(
           "the recipient / amount record could not be saved (run " +
@@ -1490,7 +1512,9 @@
       bodyHtml:
         `Undo the Round ${round} payout release?<br><br>` +
         `The round returns to <b>Payout Pending</b>. The recorded release date, ` +
-        `note, amount and recipient are cleared.`,
+        `note, amount, recipient and <b>the receipt photo</b> are cleared from ` +
+        `the payout. The receipt's link is written to the activity log first, ` +
+        `so the evidence is not lost.`,
       confirmLabel: "Yes, undo release",
       ctx: { round },
     });
@@ -1499,6 +1523,12 @@
   async function doUnmarkPayoutReleased(round) {
     if (busy) return;
     const recipient = sortedMembers().find((m) => m.member_order === round);
+    // The receipt is the only proof a real transfer happened. Undoing the
+    // release nulls receipt_url, so capture it BEFORE the write and put it in
+    // the activity log — otherwise a reversible-sounding confirmation quietly
+    // destroys the evidence for money that actually moved.
+    const prior = getPayout(round) || {};
+    const priorReceipt = prior.receipt_url || null;
     busy = true;
     render();
     try {
@@ -1520,7 +1550,8 @@
         console.warn("Payout accountability fields not cleared:", e.message);
       }
       await logActivity(
-        `Payout release undone — Round ${round} (${recipient ? recipient.name : "—"})`,
+        `Payout release undone — Round ${round} (${recipient ? recipient.name : "—"})` +
+          (priorReceipt ? ` — receipt kept on record: ${priorReceipt}` : ""),
         {
           type: "payout",
           amount: -C.GOAL_PER_ROUND,
@@ -3093,7 +3124,9 @@
       } else {
         const myOverdue = C.memberOverdueCount(state.contributions, state.cycles, myMember.id);
         const myCycleStatus = C.statusOf(state.contributions, myMember.id, payCycle);
-        const canAct = myCycleStatus === C.STATUS_UNPAID;
+        // Rejected still owes the cycle, so it is actionable exactly like
+        // unpaid — C.isOwed is the single place that rule lives.
+        const canAct = C.isOwed(myCycleStatus);
         if (myOverdue > 0) {
           myStatus = {
             kind: "overdue",
@@ -3110,6 +3143,16 @@
           };
         } else if (myCycleStatus === C.STATUS_PAID) {
           myStatus = { kind: "paid", label: "You're paid up", actionCycle: null };
+        } else if (myCycleStatus === C.STATUS_REJECTED) {
+          // The card used to read "Payment due" here, so the one state that
+          // needs explaining looked identical to a cycle nobody had touched.
+          // The rejected card above carries the reason and the action; this
+          // just has to agree with it.
+          myStatus = {
+            kind: "rejected",
+            label: "Payment not accepted — please send it again",
+            actionCycle: null,
+          };
         } else {
           myStatus = {
             kind: "due",
@@ -3175,9 +3218,14 @@
     </div>`;
 
     if (appError) {
-      html += `<div class="save-error-banner">${icon("alert", 15)}<span>${escapeHtml(
-        appError
-      )}</span>${
+      // role="alert" so a screen reader announces a failed write on insertion.
+      // Without it — and without the scroll below — a save that failed while
+      // the user was further down the page was completely silent, and they
+      // would reasonably assume the money went through.
+      html += `<div class="save-error-banner" role="alert" id="appErrorBanner">${icon(
+        "alert",
+        15
+      )}<span>${escapeHtml(appError)}</span>${
         appErrorRetry
           ? ` <button type="button" class="banner-retry" onclick="PowerFund.retryLastAction()">Retry</button>`
           : ""

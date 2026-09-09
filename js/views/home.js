@@ -107,7 +107,11 @@ window.PFViews.home = function (ctx) {
           <button type="button" class="my-status-change" onclick="PowerFund.openWhoAmIPicker()">Not you?</button>
         </div>
         ${
-          myStatus.actionCycle
+          // Suppressed while a rejection is showing: the rejected card directly
+          // above already offers "Resubmit payment" for the same member and the
+          // same cycle. Two buttons in two colours doing one job, on the one
+          // screen where the member is already asking why their money vanished.
+          myStatus.actionCycle && !myRejection
             ? `<button type="button" class="my-status-cta" onclick="PowerFund.openContributeModal('${inlineArg(
                 myMember.id
               )}', ${myStatus.actionCycle})">＋ Record my payment — ${C.peso(
@@ -427,23 +431,49 @@ window.PFViews.home = function (ctx) {
                ${members
                  .map((m) => {
                    const s = C.statusOf(state.contributions, m.id, payCycle);
-                   const cls = s === 2 ? "paid" : s === 1 ? "pending" : "unpaid";
-                   // No icon for "not paid yet" — a plain unpaid chip on a
-                   // freshly-opened cycle isn't an error, so it shouldn't
-                   // read like one (matches the Rounds & cycles grid below,
-                   // which also shows no icon for a not-yet-due unpaid cycle).
+                   const overdue = C.isOverdue(
+                     state.contributions,
+                     state.cycles,
+                     m.id,
+                     payCycle
+                   );
+                   // All FIVE states the app actually has, matching the Rounds
+                   // grid and the legend in Menu. These chips used to collapse
+                   // to paid / pending / unpaid, which made a REJECTED claim
+                   // and an OVERDUE member pixel-identical to someone who
+                   // simply hasn't paid yet — on the screen both roles open
+                   // first, and for the two states that most need acting on.
+                   // Still no mark for a not-yet-due unpaid cycle: that isn't
+                   // an error and shouldn't read like one.
+                   const cls =
+                     s === 2
+                       ? "paid"
+                       : s === 1
+                       ? "pending"
+                       : s === 3
+                       ? "rejected"
+                       : overdue
+                       ? "overdue"
+                       : "unpaid";
                    // Mark trails the name, matching the Rounds grid. Leading it
                    // ("… Regine") reads as truncated text rather than a state.
-                   const mark = s === 2 ? "✓" : s === 1 ? "…" : "";
+                   const mark =
+                     s === 2 ? "✓" : s === 1 ? "…" : s === 3 ? "✕" : overdue ? "!" : "";
                    const word =
                      s === 2
                        ? "paid"
                        : s === 1
                        ? "sent, awaiting review"
+                       : s === 3
+                       ? "rejected — needs sending again"
+                       : overdue
+                       ? "overdue"
                        : "not paid";
                    // Same rule as the Rounds & cycles grid: treasurer can act
                    // on any chip, members only on their own unpaid one.
-                   const clickable = unlocked || s === 0;
+                   // Rejected still owes the cycle (C.isOwed), so a member can
+                   // act on their own rejected chip exactly as on an unpaid one.
+                   const clickable = unlocked || s === 0 || s === 3;
                    const action = !clickable
                      ? ""
                      : unlocked
@@ -607,11 +637,18 @@ window.PFViews.home = function (ctx) {
   }</p>
     </div>
     ${
-      payCycle
+      // Same predicate as the mobile floating CTA (hasFloatingCta above). This
+      // used to key off payCycle alone, so an identified member who had
+      // already submitted was still shown a primary "Pay this cycle" beside a
+      // rail reading "awaiting treasurer verification" — the duplicate-payment
+      // invitation the mobile fix closed, left open on desktop.
+      hasFloatingCta
         ? `<button type="button" class="home-greet-cta" onclick="PowerFund.openContributePicker(${payCycle})">${icon(
             "plus",
             15
-          )}<span>${unlocked ? "Record contribution" : "Pay this cycle"}</span></button>`
+          )}<span>${
+            unlocked ? "Record contribution" : "Pay this cycle"
+          }</span></button>`
         : ""
     }
   </div>`;

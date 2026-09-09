@@ -1070,6 +1070,160 @@ async function designGates(browser, errors) {
   await page.close();
 }
 
+
+/** QA round 2: the findings the independent review raised. */
+async function qaFixes(browser, errors) {
+  // --- a receipt that cannot be stored must NOT release the payout ---------
+  const paid = [];
+  let id = 8500;
+  M.CYCLES.filter((c) => c.cycle_number <= 6).forEach((cy) =>
+    M.MEMBERS.forEach((m) =>
+      paid.push({
+        id: uuid(id++), cycle_id: cy.id, member_id: m.id, status: 2,
+        amount: 1000, proof_url: null, paid_at: new Date(cy.due_date).toISOString(),
+      })
+    )
+  );
+  const funded = {
+    ...M.TABLE_DATA,
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234" },
+    contributions: paid,
+    payouts: M.PAYOUTS.map((p) => (p.round_number === 1 ? { ...p, released: false } : p)),
+  };
+
+  const page = await browser.newPage({ viewport: { width: 430, height: 1000 } });
+  page.on("pageerror", (e) => errors.push(`qa/receipt: ${e}`));
+  await serve(page, funded);
+  await page.route("**/storage/v1/**", (r) => r.abort()); // the upload fails
+  let released = false;
+  await page.route("**/rest/v1/payouts**", (r) => {
+    const req = r.request();
+    if (req.method() === "PATCH" && /released/.test(req.postData() || "")) released = true;
+    return r.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1500);
+  await unlockTreasurer(page);
+  await page.locator(".release-card .payout-btn").click();
+  await page.waitForTimeout(400);
+  await page.locator(".modal input[type=file]").last().setInputFiles({
+    name: "receipt.png", mimeType: "image/png",
+    buffer: Buffer.from("89504e470d0a1a0a", "hex"),
+  });
+  await page.waitForTimeout(300);
+  await page.locator(".modal-btn-primary").last().click();
+  await page.waitForTimeout(1500);
+  check(
+    "qa/no receipt stored means no release recorded",
+    released === false,
+    `released=${released}`
+  );
+  check(
+    "qa/and it says so, retryably",
+    (await page.locator(".save-error-banner").count()) === 1 &&
+      /NOT released/i.test(await page.locator(".save-error-banner").innerText())
+  );
+  await page.close();
+
+  // --- a failed write is announced and brought into view -------------------
+  // The cash path goes through showError(), which is the banner this covers.
+  // Contribute uses the in-sheet state machine instead, so it is the wrong
+  // path to test here.
+  const err = await browser.newPage({ viewport: { width: 430, height: 700 } });
+  err.on("pageerror", (e) => errors.push(`qa/error: ${e}`));
+  await serve(err, { ...M.TABLE_DATA, app_settings: { ...M.SETTINGS, treasurer_pin: "1234" } });
+  await err.goto(BASE, { waitUntil: "domcontentloaded" });
+  await err.waitForTimeout(1500);
+  await unlockTreasurer(err);
+  await err.locator(".tab-item", { hasText: "Rounds" }).click();
+  await err.waitForTimeout(300);
+  const unpaidSel2 = ".member-chip.editable:not(.paid):not(.pending):not(.rejected)";
+  const rc = await err.locator(".round").count();
+  for (let i = 0; i < rc; i++) {
+    await err.locator(".round").nth(i).click();
+    await err.waitForTimeout(250);
+    if ((await err.locator(unpaidSel2).count()) > 0) break;
+  }
+  await err.locator(unpaidSel2).first().click();
+  await err.waitForTimeout(300);
+  // Block the write, then scroll away so the banner is off-screen when it fires.
+  await err.route("**/rest/v1/contributions**", (r) =>
+    r.request().method() === "GET"
+      ? r.continue()
+      : r.fulfill({ status: 500, contentType: "application/json", body: '{"message":"boom"}' })
+  );
+  await err.locator(".mark-paid-panel button", { hasText: "Record as paid" }).click();
+  await err.waitForTimeout(1600);
+  const banner = err.locator(".save-error-banner");
+  check("qa/a failed write surfaces a banner", (await banner.count()) === 1);
+  if ((await banner.count()) === 1) {
+    check("qa/error banner is announced", (await banner.getAttribute("role")) === "alert");
+    const inView = await banner.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return r.top < window.innerHeight && r.bottom > 0;
+    });
+    check("qa/error banner is scrolled into view", inView);
+  }
+  await err.close();
+
+  // --- Home chips carry every state, not three of five ---------------------
+  const chips = await browser.newPage({ viewport: { width: 430, height: 900 } });
+  chips.on("pageerror", (e) => errors.push(`qa/chips: ${e}`));
+  const rejectedData = {
+    ...M.TABLE_DATA,
+    contributions: M.CONTRIBUTIONS.map((c) =>
+      c.status === 1 ? { ...c, status: 3, rejection_note: "Blurry" } : c
+    ),
+  };
+  await serve(chips, rejectedData);
+  await chips.goto(BASE, { waitUntil: "domcontentloaded" });
+  await chips.waitForTimeout(1500);
+  check(
+    "qa/a rejected member is visible on Home",
+    (await chips.locator(".mini-chip.rejected").count()) >= 1,
+    `rejected=${await chips.locator(".mini-chip.rejected").count()}`
+  );
+  await chips.close();
+
+  // --- Rounds chips are real controls --------------------------------------
+  const kb = await browser.newPage({ viewport: { width: 430, height: 900 } });
+  kb.on("pageerror", (e) => errors.push(`qa/kb: ${e}`));
+  await serve(kb, M.TABLE_DATA);
+  await kb.goto(BASE, { waitUntil: "domcontentloaded" });
+  await kb.waitForTimeout(1500);
+  await kb.locator(".tab-item", { hasText: "Rounds" }).click();
+  await kb.waitForTimeout(300);
+  await kb.locator(".round").first().click();
+  await kb.waitForTimeout(300);
+  check(
+    "qa/rounds chips are buttons, not spans",
+    (await kb.locator("span.member-chip").count()) === 0 &&
+      (await kb.locator("button.member-chip").count()) > 0
+  );
+  check(
+    "qa/rounds chips carry a label for assistive tech",
+    !!(await kb.locator("button.member-chip").first().getAttribute("aria-label"))
+  );
+  await kb.close();
+
+  // --- Undo Release names the receipt it removes ---------------------------
+  const undo = await browser.newPage({ viewport: { width: 430, height: 900 } });
+  undo.on("pageerror", (e) => errors.push(`qa/undo: ${e}`));
+  await serve(undo, { ...M.TABLE_DATA, app_settings: { ...M.SETTINGS, treasurer_pin: "1234" } });
+  await undo.goto(BASE, { waitUntil: "domcontentloaded" });
+  await undo.waitForTimeout(1500);
+  await unlockTreasurer(undo);
+  await undo.evaluate(() => window.PowerFund.unmarkPayoutReleased(1));
+  await undo.waitForTimeout(400);
+  const undoText = await undo.locator(".modal").last().innerText();
+  check(
+    "qa/undo release names the receipt",
+    /receipt/i.test(undoText),
+    JSON.stringify(undoText.replace(/\s+/g, " ").slice(0, 160))
+  );
+  await undo.close();
+}
+
 (async () => {
   const browser = await chromium.launch({
     executablePath: process.env.PF_CHROMIUM || undefined,
@@ -1099,6 +1253,8 @@ async function designGates(browser, errors) {
   await feedbackStates(browser, errors);
   console.log("\nDesign gates");
   await designGates(browser, errors);
+  console.log("\nQA round 2");
+  await qaFixes(browser, errors);
 
   await browser.close();
 

@@ -182,7 +182,9 @@ window.PFViews.rounds = function (ctx) {
                 : "";
 
               rowsHtml += `<div class="cycle-row ${isDue ? "current-row" : ""}">
-                <div class="cycle-date">${due ? C.formatDate(due) : `Cycle ${c}`}${
+                <div class="cycle-date">${
+                  due ? C.formatDate(due) : `Cycle ${c}`
+                }<span class="cycle-ref">Cycle ${c}</span>${
                 rowTag ? ` <span class="today-tag">${rowTag}</span>` : ""
               }</div>
                 <div class="cycle-chips">${chips}</div>

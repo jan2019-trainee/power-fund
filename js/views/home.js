@@ -169,6 +169,20 @@ window.PFViews.home = function (ctx) {
     </div>`;
   })();
 
+  // ---- Fund complete: the terminal state, for everyone --------------
+  // Every fund reaches this and the screen used to just fall silent — the
+  // attention panel and the release card are both gated on !allDone, and the
+  // CTA needs a payCycle that no longer exists. Say it is finished.
+  if (allDone) {
+    html += `<div class="attention-panel caught-up fund-complete-panel">
+      <p class="attention-title">${icon("check", 15)}<span>Fund complete</span></p>
+      <p class="attention-caught-up-note">All ${C.TOTAL_ROUNDS} rounds collected and paid out — ${C.peso(
+      C.TARGET_AMOUNT
+    )} in total. Nothing is outstanding.</p>
+    </div>`;
+  }
+  S.complete = section();
+
   // ---- Treasurer action center: "Needs your attention" --------------
   // Only actionable items. Hidden entirely when there is nothing to do.
   if (unlocked && !allDone) {
@@ -263,15 +277,11 @@ window.PFViews.home = function (ctx) {
               })
               .join("")}
           </div>
-          ${
-            batches.length > shown.length
-              ? `<button type="button" class="attention-more" onclick="PowerFund.expandAttentionQueue()">${
-                  attentionQueueExpanded
-                    ? `Show ${batches.length - shown.length} more`
-                    : `Review ${waiting} →`
-                }</button>`
-              : ""
-          }
+          <button type="button" class="attention-more" onclick="PowerFund.expandAttentionQueue()" aria-expanded="${
+            attentionQueueExpanded ? "true" : "false"
+          }">${
+            attentionQueueExpanded ? "Hide the queue" : `Review ${waiting} →`
+          }</button>
         </div>`;
       }
 
@@ -488,7 +498,9 @@ window.PFViews.home = function (ctx) {
                      treasurerTap ? "treasurer-tap" : ""
                    }" ${
                      clickable ? "" : "disabled"
-                   } onclick="PowerFund.cellClicked('${m.id}', ${payCycle})" aria-label="${escapeHtml(
+                   } onclick="PowerFund.cellClicked('${inlineArg(
+                     m.id
+                   )}', ${payCycle})" aria-label="${escapeHtml(
                      m.name
                    )}: ${word}${action}">${escapeHtml(m.name)}${mark ? " " + mark : ""}</button>`;
                  })
@@ -500,7 +512,7 @@ window.PFViews.home = function (ctx) {
     <button class="share-btn" onclick="PowerFund.openShareModal()">${icon(
       "sheet",
       14
-    )}<span>Copy status update</span></button>
+    )}<span>Share fund status</span></button>
   </div>`;
 
   S.hero = section();
@@ -521,6 +533,14 @@ window.PFViews.home = function (ctx) {
         ? "＋ Record / review a payment"
         : `＋ Pay this cycle · ${C.peso(C.CONTRIBUTION_AMOUNT)}`
     }</button></div>`;
+  } else if (allDone && unlocked) {
+    // The design's terminal CTA. A member has nothing left to do, so they
+    // correctly get none — but the treasurer still has to close the books.
+    hasFloatingCta = true;
+    html += `<div class="floating-cta"><button type="button" class="hero-cta" onclick="PowerFund.exportCsv()">${icon(
+      "sheet",
+      15
+    )}<span>Export final report</span></button></div>`;
   }
 
   S.cta = section();
@@ -608,8 +628,9 @@ window.PFViews.home = function (ctx) {
    * ===================================================================== */
   if (!isWide) {
     return (
-      S.dayOne + S.rejected + S.myStatus + S.release + S.attention + S.fundTotal +
-      S.hero + S.cta + S.roster + S.roundsLink + S.prevRounds + S.spacer
+      S.dayOne + S.rejected + S.myStatus + S.complete + S.release + S.attention +
+      S.fundTotal + S.hero + S.cta + S.roster + S.roundsLink + S.prevRounds +
+      S.spacer
     );
   }
 
@@ -735,7 +756,7 @@ window.PFViews.home = function (ctx) {
         ${S.fundTotal}${S.hero}${S.roster}${S.roundsLink}${recentPanel}${S.prevRounds}
       </div>
       <aside class="home-rail">
-        ${S.rejected}${S.myStatus}${S.release}${S.attention}${overview}${quick}
+        ${S.rejected}${S.myStatus}${S.complete}${S.release}${S.attention}${overview}${quick}
       </aside>
     </div>` +
     S.cta +

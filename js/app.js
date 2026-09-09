@@ -183,6 +183,14 @@
     return [...state.members].sort((a, b) => a.member_order - b.member_order);
   }
 
+  /** The fund's display name — settings first, falling back to the product
+   *  name. Sidebar, header and the share text all read this, so a renamed fund
+   *  cannot show two different names on one screen or paste the wrong one into
+   *  the group chat. */
+  function fundName() {
+    return (state.settings && state.settings.fund_name) || "Power Fund";
+  }
+
   function getPayout(round) {
     return (
       (state.payouts || []).find((p) => p.round_number === round) || {
@@ -1259,6 +1267,20 @@
     render();
   }
 
+  function hasMasterPin() {
+    return !!(state.settings && state.settings.master_pin);
+  }
+
+  /** Set or rotate the group's recovery PIN. Until now this existed only as a
+   *  one-off SQL statement, so a fund deployed without running it had no
+   *  recovery path and nothing in the app said so. */
+  function openMasterPin() {
+    pinInputValue = "";
+    pinError = null;
+    pinModalMode = "master";
+    render();
+  }
+
   function openChangePin() {
     pinInputValue = "";
     pinError = null;
@@ -1267,6 +1289,36 @@
   }
 
   async function submitPin() {
+    if (pinModalMode === "master") {
+      if (!pinInputValue || pinInputValue.length < 4) {
+        pinError = "The master PIN must be at least 4 digits.";
+        return render();
+      }
+      if (state.settings && pinInputValue === state.settings.treasurer_pin) {
+        // Same digits for both defeats the point: the master PIN exists to be
+        // usable when the treasurer PIN is the thing that has been lost.
+        pinError = "Use different digits from the treasurer PIN.";
+        return render();
+      }
+      const rotating = hasMasterPin();
+      try {
+        await window.DB.updateMasterPin(pinInputValue);
+        // The digits are never logged — only that it changed, and by whom.
+        await logActivity(
+          rotating ? "Master PIN was changed" : "Master PIN was set",
+          { type: "admin" }
+        );
+        closePinModal();
+        await reload();
+        showSuccess(
+          rotating ? "Master PIN updated." : "Master PIN set. Keep it somewhere safe."
+        );
+      } catch (e) {
+        pinError = e.message;
+        render();
+      }
+      return;
+    }
     if (pinModalMode === "setup" || pinModalMode === "change") {
       if (!pinInputValue || pinInputValue.length < 4) {
         pinError = "PIN must be at least 4 digits.";
@@ -1927,6 +1979,10 @@
     markPaidTarget = null;
     currentView = view;
     render();
+    // A new screen starts at its top. render() replaces innerHTML but leaves
+    // the window scrolled where the last view was, so switching from a
+    // scrolled Rounds to Activity landed mid-list.
+    window.scrollTo(0, 0);
   }
   /**
    * Open one member's record.
@@ -1993,8 +2049,11 @@
           (roundChoice === "all" || Number(e.round_number) === Number(roundChoice))));
 
     const visible = log.filter(matches);
-    // How many rows the attribution filters cannot speak for, so the table can
-    // say so rather than look complete.
+    // Everything the current filters exclude, split by WHY. The notice used to
+    // count only untagged rows, so with the round filter defaulting to the
+    // current round a released ₱30,000 payout simply disappeared from a
+    // financial log with nothing said about it.
+    const hiddenTotal = log.length - visible.length;
     const unattributed = log.filter(
       (e) => e.member_id == null && e.round_number == null
     ).length;
@@ -2130,12 +2189,12 @@
     const listHtml = `${
       log.length === 0
         ? `<div class="activity-empty-state">${icon("activity", 22)}
-             <p><b>Nothing here yet</b></p>
+             <p><b>No activity yet</b></p>
              <p class="activity-empty-note">Actions show up here as your group uses the tracker.</p>
            </div>`
         : groups.length === 0
         ? `<div class="activity-empty-state">${icon("activity", 22)}
-             <p><b>Nothing here yet</b></p>
+             <p><b>Nothing matches this filter</b></p>
              <p class="activity-empty-note">No ${filterLabels[
                activityFilter
              ].toLowerCase()} in the loaded history — try "Show older entries" or switch filters.</p>
@@ -2192,11 +2251,17 @@
                   : type === "payment"
                   ? "Contribution"
                   : "Admin";
+              // Sign means DIRECTION of cash, consistently: money into the
+              // fund is +, money out is −, and anything not yet settled is
+              // unsigned. A released payout is the fund's largest outflow and
+              // used to render unsigned, identical to an unconfirmed claim.
               let amountHtml = "—";
               if (amt != null && amt !== 0) {
                 const abs = C.peso(Math.abs(amt));
-                const cls = amt < 0 ? "out" : st === C.STATUS_PAID ? "in" : "flat";
-                const sign = amt < 0 ? "−" : st === C.STATUS_PAID ? "+" : "";
+                const outward = amt < 0 || (type === "payout" && st == null);
+                const settled = st === C.STATUS_PAID || type === "payout";
+                const cls = outward ? "out" : settled ? "in" : "flat";
+                const sign = outward ? "−" : settled ? "+" : "";
                 amountHtml = `<span class="activity-amt ${cls}">${sign}${escapeHtml(
                   abs
                 )}</span>`;
@@ -2242,25 +2307,34 @@
       ${
         visible.length === 0
           ? `<div class="activity-empty-state">${icon("activity", 22)}
-               <p><b>Nothing here yet</b></p>
+               <p><b>${
+                 log.length === 0 ? "No activity yet" : "Nothing matches these filters"
+               }</b></p>
                <p class="activity-empty-note">${
                  log.length === 0
                    ? "Actions show up here as your group uses the tracker."
-                   : "No activity matches this filter."
+                   : "Try a different member, round or type."
                }</p>
              </div>`
           : ""
       }
     </div>
     ${
-      // Say what a member/round filter cannot reach. Entries written before
-      // migration 007 carry no attribution and can only ever appear unfiltered
-      // — leaving that unsaid would make a partial view of the log look whole.
-      unattributed > 0 &&
-      (activityMemberFilter !== "all" || roundChoice !== "all")
-        ? `<p class="activity-unattributed">${icon("alert", 13)}<span>${unattributed} earlier ${
-            unattributed === 1 ? "entry is" : "entries are"
-          } not tagged with a member or round and cannot appear under these filters. Choose <b>All members</b> and <b>All rounds</b> to see the full log.</span></p>`
+      // Account for every row the filters are holding back, not just the
+      // untagged ones — a partial view of financial history must never look
+      // whole.
+      hiddenTotal > 0
+        ? `<p class="activity-unattributed">${icon("alert", 13)}<span><b>${hiddenTotal} ${
+            hiddenTotal === 1 ? "entry is" : "entries are"
+          } hidden by the current filters.</b>${
+            unattributed > 0
+              ? ` ${unattributed} of them ${
+                  unattributed === 1 ? "was" : "were"
+                } recorded before entries carried a member and round, so ${
+                  unattributed === 1 ? "it" : "they"
+                } can only appear unfiltered.`
+              : ""
+          } Choose <b>All</b>, <b>All members</b> and <b>All rounds</b> to see the full log.</span></p>`
         : ""
     }
     ${
@@ -2464,7 +2538,9 @@
       ${tile(
         overallOnTime === null ? "—" : `${Math.round(overallOnTime)}%`,
         overallOnTime === null ? "no dated payments yet" : "paid on time" + (trendHtml ? " · " + trendHtml : ""),
-        overallOnTime === null ? "" : overallOnTime >= 80 ? "success" : "danger"
+        // Deliberately unthemed: "79% on time" is information, not a fault,
+        // and colouring it red implied a threshold the app never states.
+        ""
       )}
       ${tile(String(overdue), overdueSub, overdue ? "danger" : "success")}
     </div>`;
@@ -2585,7 +2661,7 @@
     return `<nav class="tab-bar" aria-label="Main">
       <div class="tab-brand">
         <span class="tab-brand-mark">⚡</span>
-        <span class="tab-brand-name">Power Fund</span>
+        <span class="tab-brand-name">${escapeHtml(fundName())}</span>
       </div>
       ${items.map(btn).join("")}
       <div class="nav-spacer"></div>
@@ -2607,7 +2683,10 @@
     return "admin"; // reset, PIN, round start, name edits, payout order swap, QR update, restore
   }
   function expandAttentionQueue() {
-    attentionQueueExpanded = true;
+    // A toggle, not a one-way door. This only ever set true, and the control
+    // that called it rendered only while collapsed — so once opened, the queue
+    // held the fold for the rest of the session with no way back.
+    attentionQueueExpanded = !attentionQueueExpanded;
     render();
   }
   function toggleOverdueList() {
@@ -2857,7 +2936,7 @@
       else unpaid.push(m.name);
     });
 
-    let text = `⚡ Power Fund Update — ${C.formatDate(now)}\n`;
+    let text = `⚡ ${fundName()} Update — ${C.formatDate(now)}\n`;
     if (round) {
       const label = status === "payout_pending" ? " (🟡 payout pending)" : "";
       text += `Round ${round} of ${C.TOTAL_ROUNDS} — ${
@@ -3185,11 +3264,11 @@
     // of whichever view happens to be open.
     html += `<div class="header">
       <div class="header-titles">
-        <p class="title">⚡ ${escapeHtml(
-          (state.settings && state.settings.fund_name) || "Power Fund"
-        )}</p>
-        <p class="subtitle">${escapeHtml(
-          (function () {
+        <p class="title" title="${escapeHtml(fundName())}">⚡ ${escapeHtml(
+      fundName()
+    )}</p>
+        ${(function () {
+          const sub = (function () {
             const fundName = (state.settings && state.settings.fund_name) || "";
             const configured = (window.APP_CONFIG && window.APP_CONFIG.SUBTITLE) || "";
             // Before fund_name existed the group's name lived in the config
@@ -3203,8 +3282,13 @@
             return `${members.length}-member sinking fund · ${C.peso(
               C.CONTRIBUTION_AMOUNT
             )} on the 15th & end of every month`;
-          })()
-        )}</p>
+          })();
+          // The subtitle is clipped to one line on narrow screens, so carry the
+          // full text in `title` — nothing is lost, only folded.
+          return `<p class="subtitle" title="${escapeHtml(sub)}">${escapeHtml(
+            sub
+          )}</p>`;
+        })()}
       </div>
       <button class="unlock-btn ${
         unlocked ? "unlocked" : ""
@@ -3254,6 +3338,7 @@
       state, unlocked, busy, openRound, myMemberId, attentionQueueExpanded,
       overdueListOpen, startRoundConfirming, isWide, selectedMemberId,
       undoPaidTarget, markPaidTarget,
+      hasMasterPin: hasMasterPin(),
       payoutQrMemberId,
       // Helpers the views render with.
       //
@@ -3435,22 +3520,24 @@
               rejectConfirming
                 ? `<p class="reject-confirm-text">Reject this claim? ${
                     multi ? `All ${rc.length} cycles go` : "It goes"
-                  } back to unpaid and stay due. ${
+                  } back to unpaid and ${multi ? "stay" : "stays"} due. ${
                     memberName(reviewTarget.memberId)
                   } sees your reason and can send a new screenshot.</p>
-                   <label class="reject-note-label" for="reject-note">Why wasn't it accepted?</label>
-                   <textarea id="reject-note" class="reject-note-input" rows="2"
+                   <label class="reject-note-label" for="reject-note">Why wasn't it accepted? <span class="field-required">required</span></label>
+                   <textarea id="reject-note" class="reject-note-input" rows="2" required
+                     aria-describedby="reject-note-help"
                      placeholder="e.g. The screenshot doesn't show the amount or the date clearly."
                      oninput="PowerFund.setRejectNote(this.value)">${escapeHtml(
                        rejectNoteValue
                      )}</textarea>
+                   <p id="reject-note-help" class="reject-note-help">A rejection with no reason leaves the member no way to fix it — this is the only thing they are told.</p>
                    ${
                      rejectError
                        ? `<p class="pin-error" role="alert">${escapeHtml(rejectError)}</p>`
                        : ""
                    }
                    <button class="modal-btn-primary confirm-yes" onclick="PowerFund.doRejectReview()" ${
-                     busy ? "disabled" : ""
+                     busy || !rejectNoteValue.trim() ? "disabled" : ""
                    }>Yes, reject</button>
                    <button class="modal-btn-secondary" onclick="PowerFund.cancelRejectConfirm()">Never mind</button>`
                 : `<button class="modal-btn-primary modal-btn-confirm" onclick="PowerFund.confirmReview()" ${
@@ -3475,6 +3562,7 @@
         setup: "Create a treasurer PIN",
         enter: "Enter treasurer PIN",
         change: "Change treasurer PIN",
+        master: hasMasterPin() ? "Change the master PIN" : "Set a master PIN",
       };
       const subs = {
         setup:
@@ -3484,14 +3572,18 @@
             ? "Enter the PIN to unlock treasurer actions. Forgotten it? The group's master PIN also works, then set a new one from Menu → Change PIN."
             : "Enter the PIN to unlock treasurer actions. A forgotten PIN can't be recovered — ask whoever else in the group has it.",
         change: "Set a new PIN. This replaces the current one for everyone.",
+        master:
+          "The master PIN is the group's way back in if the treasurer PIN is " +
+          "forgotten. It also unlocks treasurer mode, so keep it somewhere safe " +
+          "and separate — ideally with a second person in the group.",
       };
       // There is deliberately no PIN recovery: any reset that worked without
       // the PIN would let whoever is holding the phone take treasurer control.
       // That is a fine trade only if people are told BEFORE they forget, so
       // the warning sits on the screens where a PIN is chosen.
-      const hasMaster = !!(state.settings && state.settings.master_pin);
+      const hasMaster = hasMasterPin();
       const noRecovery =
-        pinModalMode === "enter"
+        pinModalMode === "enter" || pinModalMode === "master"
           ? ""
           : `<p class="pin-warning">${icon("alert", 14)}<span>${
               hasMaster
@@ -3537,7 +3629,11 @@
           ${noRecovery}
           <div class="modal-actions">
             <button class="modal-btn-primary" onclick="PowerFund.submitPin()">${
-              pinModalMode === "enter" ? "Unlock" : "Save PIN"
+              pinModalMode === "enter"
+                ? "Unlock"
+                : pinModalMode === "master"
+                ? "Save master PIN"
+                : "Save PIN"
             }</button>
             <button class="modal-btn-secondary" onclick="PowerFund.closePinModal()">Cancel</button>
           </div>
@@ -4046,6 +4142,11 @@
 
     // Move focus into a dialog the first render it appears (a11y).
     const modalNow = isAnyModalOpen();
+    // Lock the page behind an open sheet/dialog. overscroll-behavior stops
+    // scroll CHAINING, but a touch that begins on the overlay itself still
+    // scrolled the app underneath — the sheet appeared to stick while the
+    // page moved. Class-based so the CSS keeps the rule.
+    document.body.classList.toggle("modal-open", modalNow);
     if (modalNow && !modalWasOpen) {
       requestAnimationFrame(() => {
         const root =
@@ -4203,6 +4304,11 @@
     setRejectNote: (v) => {
       rejectNoteValue = v;
       rejectError = null;
+      // Toggle the button in place rather than calling render(): render()
+      // rebuilds innerHTML, which would destroy the textarea being typed into
+      // and drop focus after the first character.
+      const btn = document.querySelector(".modal-actions .confirm-yes");
+      if (btn) btn.disabled = busy || !v.trim();
     },
     cancelRejectConfirm,
     doRejectReview,
@@ -4218,6 +4324,7 @@
     submitConfirm,
     closePinModal,
     openChangePin,
+    openMasterPin,
     submitPin,
     pinKey,
     openPayoutModal,

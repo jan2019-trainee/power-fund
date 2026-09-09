@@ -119,6 +119,11 @@ function memberRow(m, ctx, cyclesDueSoFar, isWide) {
     cycWord = "all paid";
   } else {
     const st = C.statusOf(state.contributions, m.id, openCycle);
+    // "not due yet" contradicted Home, which asks for this very cycle
+    // ("Payment due Dec 15") and offers a button to pay it. Both were reading
+    // the same cycle and telling the member opposite things. Name the date
+    // instead: same fact, no contradiction, and more useful than either.
+    const due = C.dueDateOf(state.cycles, openCycle);
     cycWord =
       st === C.STATUS_PENDING
         ? "pending review"
@@ -126,7 +131,9 @@ function memberRow(m, ctx, cyclesDueSoFar, isWide) {
         ? "rejected"
         : C.isOverdue(state.contributions, state.cycles, m.id, openCycle)
         ? "overdue"
-        : "not due yet";
+        : due
+        ? `due ${C.formatDate(due)}`
+        : "due";
   }
 
   return `<div class="member-row-wrap ${open ? "open" : ""}">

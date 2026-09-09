@@ -621,6 +621,24 @@ window.DB = (function () {
     return data || { id: 1, treasurer_pin: null };
   }
 
+  /** The group's recovery PIN (migration 006). Set once and rarely rotated;
+   *  it is the way back in when the treasurer PIN is forgotten, so it can be
+   *  changed but never blanked from the app. */
+  async function updateMasterPin(pin) {
+    const res = await client
+      .from("app_settings")
+      .upsert({ id: 1, master_pin: pin }, { onConflict: "id" })
+      .select()
+      .single();
+    if (res.error && /master_pin/i.test(res.error.message || "")) {
+      throw new Error(
+        "This database doesn't have the master PIN column yet — run " +
+          "supabase/migrations/006_redesign_foundation.sql first."
+      );
+    }
+    return unwrap(res, "Couldn't save the master PIN");
+  }
+
   async function updateTreasurerPin(pin) {
     return unwrap(
       await client
@@ -875,6 +893,7 @@ window.DB = (function () {
     addActivityLog,
     getSettings,
     updateTreasurerPin,
+    updateMasterPin,
     loadEverything,
     resetAll,
     restoreFromBackup,

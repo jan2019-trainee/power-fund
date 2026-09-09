@@ -252,13 +252,27 @@ async function moneyStates(browser, errors) {
     await page.goto(BASE, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(1400);
     await unlockTreasurer(page);
-    const caught = await page.locator(".attention-panel.caught-up").count();
+    // "All caught up" (mid-fund, nothing waiting) and "Fund complete" (the
+    // terminal state) are different answers and must not share a marker.
+    const caught = await page.locator(
+      ".attention-panel.caught-up:not(.fund-complete-panel)"
+    ).count();
     const done = await page.locator(".battery-hero.fund-complete").count();
+    const panel = await page.locator(".fund-complete-panel").count();
     check(
       `state: ${name}`,
-      caught === expect.caught && done === expect.complete,
-      `caughtUp=${caught} fundComplete=${done}`
+      caught === expect.caught && done === expect.complete && panel === expect.complete,
+      `caughtUp=${caught} fundComplete=${done} panel=${panel}`
     );
+    if (expect.complete) {
+      // The terminal state needs a closing action, not just a silent screen.
+      const cta = (await page.locator(".floating-cta .hero-cta").innerText().catch(() => "")) || "";
+      check(
+        "state: fund complete offers the treasurer a final report",
+        /export final report/i.test(cta),
+        JSON.stringify(cta)
+      );
+    }
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/state-${name.replace(/\s/g, "-")}.png` });
     await page.close();
   }
@@ -808,12 +822,20 @@ async function activityAndInsights(browser, errors) {
   );
   // Entries written before 007 have no attribution. They must never be
   // silently dropped from a filtered view of financial history.
+  // Every row the filters hold back is accounted for, not just the untagged
+  // ones — the default round filter was hiding a released payout silently.
   check(
-    "p2/untagged entries are declared, not hidden",
+    "p2/hidden rows are all declared, with the untagged ones explained",
     (await wide.locator(".activity-unattributed").count()) === 1 &&
-      /cannot appear under these filters/i.test(
+      /\d+ entries are hidden by the current filters/i.test(
         await wide.locator(".activity-unattributed").innerText()
-      )
+      ) &&
+      /recorded before entries carried a member and round/i.test(
+        await wide.locator(".activity-unattributed").innerText()
+      ),
+    JSON.stringify(
+      (await wide.locator(".activity-unattributed").innerText()).replace(/\s+/g, " ").slice(0, 170)
+    )
   );
   const filteredCount = await wide.locator(".at-row").count();
   await wide.evaluate(() => PowerFund.setActivityRound("all"));
@@ -1205,6 +1227,62 @@ async function qaFixes(browser, errors) {
     !!(await kb.locator("button.member-chip").first().getAttribute("aria-label"))
   );
   await kb.close();
+
+  // --- a rejection must carry a reason ------------------------------------
+  const rej = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  rej.on("pageerror", (e) => errors.push(`qa/reject: ${e}`));
+  await serve(rej, { ...M.TABLE_DATA, app_settings: { ...M.SETTINGS, treasurer_pin: "1234" } });
+  await rej.goto(BASE, { waitUntil: "domcontentloaded" });
+  await rej.waitForTimeout(1500);
+  await unlockTreasurer(rej);
+  await rej.locator(".attention-more").click();
+  await rej.waitForTimeout(300);
+  await rej.locator(".queue-btn-review").first().click();
+  await rej.waitForTimeout(400);
+  await rej.locator(".modal-btn-secondary.reject").click();
+  await rej.waitForTimeout(400);
+  const yes = rej.locator(".modal-actions .confirm-yes");
+  check("qa/reject is blocked until a reason is given", (await yes.isDisabled()) === true);
+  check(
+    "qa/and the field says it is required",
+    /required/i.test(await rej.locator(".reject-note-label").innerText())
+  );
+  await rej.locator("#reject-note").fill("Screenshot is unreadable");
+  await rej.waitForTimeout(250);
+  check("qa/reject enables once a reason exists", (await yes.isDisabled()) === false);
+  // Typing must not blow away the textarea mid-word.
+  check(
+    "qa/the reason survives typing",
+    (await rej.locator("#reject-note").inputValue()) === "Screenshot is unreadable"
+  );
+  await rej.close();
+
+  // --- the master PIN is administrable from the app ------------------------
+  const mp = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  mp.on("pageerror", (e) => errors.push(`qa/master: ${e}`));
+  await serve(mp, { ...M.TABLE_DATA, app_settings: { ...M.SETTINGS, treasurer_pin: "1234" } });
+  await mp.goto(BASE, { waitUntil: "domcontentloaded" });
+  await mp.waitForTimeout(1500);
+  await unlockTreasurer(mp);
+  await mp.locator(".tab-item", { hasText: "Menu" }).click();
+  await mp.waitForTimeout(400);
+  const menuText = await mp.locator(".view-menu, .view").last().innerText();
+  check(
+    "qa/menu offers the recovery PIN, and says when it is unset",
+    /master pin/i.test(menuText) && /no way back from a forgotten pin/i.test(menuText),
+    JSON.stringify(menuText.replace(/\s+/g, " ").slice(0, 120))
+  );
+  await mp.evaluate(() => window.PowerFund.openMasterPin());
+  await mp.waitForTimeout(350);
+  // It must not simply mirror the treasurer PIN.
+  await mp.keyboard.type("1234");
+  await mp.locator(".modal-btn-primary").first().click();
+  await mp.waitForTimeout(400);
+  check(
+    "qa/master PIN cannot duplicate the treasurer PIN",
+    /different digits/i.test(await mp.locator(".pin-error").innerText())
+  );
+  await mp.close();
 
   // --- Undo Release names the receipt it removes ---------------------------
   const undo = await browser.newPage({ viewport: { width: 430, height: 900 } });

@@ -16,7 +16,7 @@
 window.PFViews = window.PFViews || {};
 
 window.PFViews.menu = function (ctx) {
-  const { members, unlocked, myMember, escapeHtml, icon, memberAvatar, C } = ctx;
+  const { members, unlocked, myMember, escapeHtml, icon, memberAvatar, C, hasMasterPin } = ctx;
 
   /** One tappable settings row. `note` is the quiet second line. */
   const row = (iconName, label, action, note) =>
@@ -73,7 +73,18 @@ window.PFViews.menu = function (ctx) {
     ]);
 
     html += group("Security", [
-      row("key", "Change PIN", "PowerFund.openChangePin()"),
+      row("key", "Change PIN", "PowerFund.openChangePin()", "The PIN that unlocks treasurer mode"),
+      // The recovery PIN had no UI at all — it existed only as a one-off SQL
+      // statement, so a fund deployed without it had no way back from a
+      // forgotten treasurer PIN and nothing anywhere said so.
+      row(
+        "lock",
+        hasMasterPin ? "Change the master PIN" : "Set a master PIN",
+        "PowerFund.openMasterPin()",
+        hasMasterPin
+          ? "The group's way back in if the treasurer PIN is forgotten"
+          : "Not set — there is currently no way back from a forgotten PIN"
+      ),
       row("lock", "Lock treasurer mode", "PowerFund.toggleUnlock()"),
     ]);
 
@@ -133,8 +144,8 @@ window.PFViews.menu = function (ctx) {
     C.GOAL_PER_ROUND
   )} payout per round, ${C.TOTAL_ROUNDS} rounds in total (${C.peso(
     C.TARGET_AMOUNT
-  )} overall). Pay via the QR shown in "Record a contribution" — every payment needs a screenshot as proof</li>
-      <li><b>Members:</b> tap <b>＋ Record a contribution</b> → scan the QR → attach your payment screenshot (required) → <b>I've sent this</b></li>
+  )} overall). Pay via the QR shown when you tap <b>Pay this cycle</b> — every payment needs a screenshot as proof</li>
+      <li><b>Members:</b> tap <b>＋ Pay this cycle</b> → scan the QR → attach your payment screenshot (required) → <b>I've sent this</b></li>
       <li><b>Treasurer:</b> reviews the screenshot, then <b>Confirm</b> or <b>Reject</b>. A rejected payment keeps its record and says why, so it can be sent again. Paying several cycles in one transfer is reviewed together</li>
       <li><b>Cycle status:</b> ✓ paid · … waiting for treasurer review · ✕ rejected, send again · not paid (overdue is still fine to pay late)</li>
       <li><b>Round status:</b> each round targets ${C.peso(

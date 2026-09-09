@@ -350,6 +350,14 @@ conclusions are not discoverable from artboard markup. See `design/README.md`.
 - **Forgot PIN** — solved with a master PIN (`app_settings.master_pin`), not the
   design's destructive reset. Non-destructive; every use is logged.
 - **Profile photos, onboarding** — deferred.
+- **PIN entry does not auto-submit** on the 4th digit, though the design's
+  annotation asks for it. PINs here may be longer than four digits (setup
+  enforces only a minimum), and auto-submitting would make a longer PIN
+  impossible to type, since a wrong attempt clears the field. The confirm
+  button costs one tap and always works. Recorded as a deviation, not a bug.
+- **The master PIN is now set from the app** (Menu → Security), not only by
+  hand in SQL. It still cannot be blanked, and it may not duplicate the
+  treasurer PIN — sharing digits would defeat the one case it exists for.
 
 ## Phases done
 

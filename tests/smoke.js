@@ -154,6 +154,21 @@ async function tabsRender(browser, label, viewport, errors, wide) {
     JSON.stringify(queueText.slice(0, 140))
   );
 
+  // MONEY SAFETY: confirming a payment must never be reachable from Home.
+  // A one-tap "Confirm 6" here approved ₱6,000 without the proof ever being
+  // shown — the design puts confirmation inside the review sheet, after the
+  // screenshot. Guard both the button and the global that backed it.
+  check(
+    `${label}/no confirm action in the review queue`,
+    (await page.locator(".attention-panel .queue-btn-confirm").count()) === 0 &&
+      !/\bConfirm\b/.test(queueText),
+    JSON.stringify(queueText.slice(0, 140))
+  );
+  check(
+    `${label}/confirmBatch is not exposed globally`,
+    (await page.evaluate(() => typeof window.PowerFund.confirmBatch)) === "undefined"
+  );
+
   // Members has to stay reachable on mobile even though it left the bar:
   // Home's roster "See all" is its entry point, and it opens with a way back.
   if (!wide) {

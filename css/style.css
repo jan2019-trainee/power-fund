@@ -1290,18 +1290,16 @@ body {
   font-weight: 600;
   cursor: pointer;
 }
+/* Review is the queue card's ONLY action. Confirming a payment happens inside
+   the review sheet, after the screenshot has actually been shown — see the
+   design's review-notes annotation. A confirm button here would approve money
+   without the proof ever being looked at. */
 .queue-btn-review {
   background: var(--bg-card);
-  border: 1px solid var(--border);
-  color: var(--text-primary);
+  border: 1px solid var(--accent);
+  color: var(--accent);
 }
-.queue-btn-review:hover { border-color: var(--accent); color: var(--accent); }
-.queue-btn-confirm {
-  background: var(--success);
-  border: 1px solid var(--success);
-  color: #08130E;
-}
-.queue-btn-confirm:hover { filter: brightness(1.08); }
+.queue-btn-review:hover { background: var(--accent-soft); }
 .queue-btn:disabled { opacity: 0.5; cursor: default; }
 
 .attention-more {

@@ -709,13 +709,6 @@
     await confirmCycles(memberId, cycles);
   }
 
-  /** Confirm a batch straight from the review queue (skips opening the modal). */
-  async function confirmBatch(memberId, firstCycle) {
-    if (busy) return;
-    const cycles = C.pendingRun(state.contributions, memberId, firstCycle);
-    await confirmCycles(memberId, cycles);
-  }
-
   /** Shared worker: mark the given pending cycles as confirmed-paid. */
   async function confirmCycles(memberId, cycles) {
     if (busy || !cycles || !cycles.length) return;
@@ -3864,7 +3857,6 @@
     openReviewModal,
     closeReviewModal,
     confirmReview,
-    confirmBatch,
     expandAttentionQueue,
     toggleOverdueList,
     cancelUndoPaid,

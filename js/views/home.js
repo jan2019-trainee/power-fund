@@ -237,11 +237,8 @@ window.PFViews.home = function (ctx) {
                     }
                     <button type="button" class="queue-btn queue-btn-review" onclick="PowerFund.openReviewModal('${inlineArg(
                       b.memberId
-                    )}', ${b.cycles[0]})">Review</button>
-                    <button type="button" class="queue-btn queue-btn-confirm" onclick="PowerFund.confirmBatch('${inlineArg(
-                      b.memberId
-                    )}', ${b.cycles[0]})" ${busy ? "disabled" : ""}>${
-                  multi ? `Confirm ${b.cycles.length}` : "Confirm"
+                    )}', ${b.cycles[0]})">${
+                  multi ? `Review ${b.cycles.length}` : "Review"
                 }</button>
                   </div>
                 </div>`;

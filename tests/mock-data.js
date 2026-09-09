@@ -75,19 +75,22 @@ const _day = (n, h, m) => {
   d.setHours(h, m, 0, 0);
   return d.toISOString();
 };
+// member_id / round_number arrive with migration 007. The last two rows
+// deliberately carry NEITHER, standing in for entries written before it — the
+// desktop table has to keep showing them unfiltered and say they exist.
 const ACTIVITY_LOG = [
   { id: uuid(201), message: 'Jan marked cycle 8 as sent — ₱1,000', created_at: _day(0, 10, 42),
-    event_type: 'payment', amount: 1000, ref_status: 1 },
+    event_type: 'payment', amount: 1000, ref_status: 1, member_id: uuid(3), round_number: 2 },
   { id: uuid(202), message: "Treasurer confirmed Sarah's cycle 7 as paid — ₱1,000", created_at: _day(0, 9, 15),
-    event_type: 'payment', amount: 1000, ref_status: 2 },
+    event_type: 'payment', amount: 1000, ref_status: 2, member_id: uuid(2), round_number: 2 },
   { id: uuid(203), message: 'Payout released — Round 1 (Regine) · ₱30,000', created_at: _day(1, 16, 2),
-    event_type: 'payout', amount: 30000, ref_status: null },
+    event_type: 'payout', amount: 30000, ref_status: null, member_id: uuid(1), round_number: 1 },
   { id: uuid(204), message: "Treasurer reverted Clara's cycle 6 to unpaid", created_at: _day(1, 11, 20),
-    event_type: 'payment', amount: -1000, ref_status: 0 },
+    event_type: 'payment', amount: -1000, ref_status: 0, member_id: uuid(4), round_number: 1 },
   { id: uuid(205), message: "Treasurer rejected Verdz's cycle 5 claim — \"Blurry screenshot\"", created_at: _day(1, 14, 30),
-    event_type: 'payment', amount: 1000, ref_status: 3 },
+    event_type: 'payment', amount: 1000, ref_status: 3, member_id: uuid(5), round_number: 1 },
   { id: uuid(206), message: 'Treasurer started Round 2', created_at: _day(4, 8, 0),
-    event_type: 'admin', amount: null, ref_status: null },
+    event_type: 'admin', amount: null, ref_status: null, member_id: null, round_number: 2 },
   { id: uuid(207), message: 'Payout order: Clara swapped positions with Verdz', created_at: _day(5, 7, 45) },
   { id: uuid(208), message: 'Fund was reset — all contributions cleared', created_at: _day(6, 8, 0) },
 ];

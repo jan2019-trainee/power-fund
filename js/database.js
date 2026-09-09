@@ -577,9 +577,24 @@ window.DB = (function () {
       if (meta.type != null) row.event_type = String(meta.type);
       if (meta.amount != null) row.amount = meta.amount;
       if (meta.refStatus != null) row.ref_status = meta.refStatus;
+      // Migration 007: who it was about and which round it belongs to, so the
+      // desktop Activity table can filter on them without guessing at names
+      // inside `message`.
+      if (meta.memberId != null) row.member_id = meta.memberId;
+      if (meta.round != null) row.round_number = meta.round;
     }
 
     let res = await client.from("activity_log").insert(row);
+
+    // 007 missing but 006 present: drop just the attribution columns.
+    if (res.error && /member_id|round_number/i.test(res.error.message || "")) {
+      console.warn(
+        "Migration 007 not applied — logging without attribution:",
+        res.error.message
+      );
+      const { member_id, round_number, ...rest } = row;
+      res = await client.from("activity_log").insert(rest);
+    }
 
     if (res.error && /event_type|ref_status|amount/i.test(res.error.message || "")) {
       console.warn(

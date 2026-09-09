@@ -120,6 +120,11 @@
 
   let activityLogLimit = 30; // grows when the treasurer taps "Show older"
   let activityFilter = "all"; // "all" | "payment" | "payout" | "admin"
+  // Desktop-only dropdowns (migration 007). "all" or a member id / round
+  // number. Round defaults to the fund's current round, as the design does —
+  // resolved at render time, since the current round moves.
+  let activityMemberFilter = "all";
+  let activityRoundFilter = null; // null = "not chosen yet, use current round"
   let shareModalOpen = false;
   let copyFeedback = null;
 
@@ -524,7 +529,13 @@
         `${memberName(memberId)} marked ${range} as sent — ${C.peso(
           count * C.CONTRIBUTION_AMOUNT
         )}`,
-        { type: "payment", amount: count * C.CONTRIBUTION_AMOUNT, refStatus: C.STATUS_PENDING }
+        {
+          type: "payment",
+          amount: count * C.CONTRIBUTION_AMOUNT,
+          refStatus: C.STATUS_PENDING,
+          memberId: memberId,
+          round: C.roundOfCycle(cycleNumber),
+        }
       );
     });
 
@@ -624,7 +635,13 @@
         `Treasurer recorded ${memberName(memberId)}'s cycle ${cycleNumber} as paid (direct) — ${C.peso(
           C.CONTRIBUTION_AMOUNT
         )}`,
-        { type: "payment", amount: C.CONTRIBUTION_AMOUNT, refStatus: C.STATUS_PAID }
+        {
+          type: "payment",
+          amount: C.CONTRIBUTION_AMOUNT,
+          refStatus: C.STATUS_PAID,
+          memberId: memberId,
+          round: C.roundOfCycle(cycleNumber),
+        }
       );
       await reload();
     } catch (e) {
@@ -651,7 +668,13 @@
       await logActivity(
         `Treasurer reverted ${memberName(memberId)}'s cycle ${cycleNumber} to unpaid` +
           outcome.logSuffix,
-        { type: "payment", amount: -C.CONTRIBUTION_AMOUNT, refStatus: C.STATUS_UNPAID }
+        {
+          type: "payment",
+          amount: -C.CONTRIBUTION_AMOUNT,
+          refStatus: C.STATUS_UNPAID,
+          memberId: memberId,
+          round: C.roundOfCycle(cycleNumber),
+        }
       );
       await reload();
       if (outcome.warning) {
@@ -753,7 +776,13 @@
         `Treasurer confirmed ${memberName(memberId)}'s ${cycleRangeLabel(
           cycles
         )} as paid — ${C.peso(total)}`,
-        { type: "payment", amount: total, refStatus: C.STATUS_PAID }
+        {
+          type: "payment",
+          amount: total,
+          refStatus: C.STATUS_PAID,
+          memberId: memberId,
+          round: cycles.length ? C.roundOfCycle(cycles[0]) : null,
+        }
       );
       closeReviewModal();
       await reload();
@@ -835,6 +864,8 @@
           type: "payment",
           amount: cycles.length * C.CONTRIBUTION_AMOUNT,
           refStatus: C.STATUS_REJECTED,
+          memberId: memberId,
+          round: cycles.length ? C.roundOfCycle(cycles[0]) : null,
         }
       );
       closeReviewModal();
@@ -1417,7 +1448,12 @@
         }) · ${C.peso(amount)}` +
           (payoutNoteValue ? ": " + payoutNoteValue : "") +
           (receiptWarning ? " — receipt image was NOT saved" : ""),
-        { type: "payout", amount: amount }
+        {
+          type: "payout",
+          amount: amount,
+          memberId: recipient ? recipient.id : null,
+          round: round,
+        }
       );
       closePayoutModal();
       await reload();
@@ -1485,7 +1521,12 @@
       }
       await logActivity(
         `Payout release undone — Round ${round} (${recipient ? recipient.name : "—"})`,
-        { type: "payout", amount: -C.GOAL_PER_ROUND }
+        {
+          type: "payout",
+          amount: -C.GOAL_PER_ROUND,
+          memberId: recipient ? recipient.id : null,
+          round: round,
+        }
       );
       await reload();
     } catch (e) {
@@ -1529,7 +1570,10 @@
       // updated is [] when the round was already started on another device —
       // that is fine, we just refresh to show the real state.
       if (Array.isArray(updated) && updated.length > 0) {
-        await logActivity(`Treasurer started Round ${next}`, { type: "admin" });
+        await logActivity(`Treasurer started Round ${next}`, {
+          type: "admin",
+          round: next,
+        });
       }
       await reload();
     } catch (e) {
@@ -1628,6 +1672,14 @@
   }
   function setActivityFilter(type) {
     activityFilter = type;
+    render();
+  }
+  function setActivityMember(id) {
+    activityMemberFilter = id;
+    render();
+  }
+  function setActivityRound(round) {
+    activityRoundFilter = round;
     render();
   }
 
@@ -1892,8 +1944,29 @@
 
     // event_type when the row has one; the old regex otherwise.
     const typeOf = (e) => e.event_type || activityCategory(e.message);
-    const visible =
-      activityFilter === "all" ? log : log.filter((e) => typeOf(e) === activityFilter);
+
+    // Member and round come from real columns (migration 007), never from
+    // parsing `message` — see the note above the table markup below. Rows
+    // written before 007 carry null and are shown, unattributed, only in the
+    // unfiltered view; a filter that silently swallowed them would be a
+    // filtered view of financial history that omits records without saying so.
+    const roundChoice =
+      activityRoundFilter === null
+        ? C.currentRound(state.payouts, state.contributions)
+        : activityRoundFilter;
+
+    const matches = (e) =>
+      (activityFilter === "all" || typeOf(e) === activityFilter) &&
+      (!isWide ||
+        ((activityMemberFilter === "all" || e.member_id === activityMemberFilter) &&
+          (roundChoice === "all" || Number(e.round_number) === Number(roundChoice))));
+
+    const visible = log.filter(matches);
+    // How many rows the attribution filters cannot speak for, so the table can
+    // say so rather than look complete.
+    const unattributed = log.filter(
+      (e) => e.member_id == null && e.round_number == null
+    ).length;
 
     // Group by calendar day, newest first. The log already arrives in that
     // order, so a single pass keeps it.
@@ -1966,7 +2039,14 @@
         isWide
           ? "Full transaction history"
           : "Every contribution, payout &amp; admin action"
-      } · ${log.length} ${log.length === 1 ? "entry" : "entries"} loaded</p>
+      } · ${
+        // Don't print a total the table isn't showing: with the round filter
+        // defaulting to the current round, "8 entries loaded" above 3 rows
+        // reads as a fault.
+        visible.length === log.length
+          ? `${log.length} ${log.length === 1 ? "entry" : "entries"} loaded`
+          : `showing ${visible.length} of ${log.length} loaded`
+      }</p>
     </div>
     <div class="activity-chips">${Object.entries(filterLabels)
       .map(
@@ -1975,7 +2055,46 @@
         activityFilter === type ? "active" : ""
       }" onclick="PowerFund.setActivityFilter('${type}')">${label}</button>`
       )
-      .join("")}</div>`;
+      .join("")}${
+      // The two dropdowns are desktop-only, as in the design — the phone
+      // shell has no room for them and its list is date-grouped instead.
+      isWide
+        ? `<span class="activity-selects">
+            <label class="activity-select">
+              <span class="sr-only">Filter by member</span>
+              <select onchange="PowerFund.setActivityMember(this.value)">
+                <option value="all"${
+                  activityMemberFilter === "all" ? " selected" : ""
+                }>All members</option>
+                ${sortedMembers()
+                  .map(
+                    (m) =>
+                      `<option value="${escapeHtml(m.id)}"${
+                        activityMemberFilter === m.id ? " selected" : ""
+                      }>${escapeHtml(m.name)}</option>`
+                  )
+                  .join("")}
+              </select>
+            </label>
+            <label class="activity-select">
+              <span class="sr-only">Filter by round</span>
+              <select onchange="PowerFund.setActivityRound(this.value === 'all' ? 'all' : Number(this.value))">
+                <option value="all"${
+                  roundChoice === "all" ? " selected" : ""
+                }>All rounds</option>
+                ${Array.from({ length: C.TOTAL_ROUNDS }, (_, i) => i + 1)
+                  .map(
+                    (r) =>
+                      `<option value="${r}"${
+                        Number(roundChoice) === r ? " selected" : ""
+                      }>Round ${r}</option>`
+                  )
+                  .join("")}
+              </select>
+            </label>
+          </span>`
+        : ""
+    }</div>`;
 
     const listHtml = `${
       log.length === 0
@@ -2008,22 +2127,23 @@
     }`;
 
     // Desktop gets a real table rather than the phone list stretched wide —
-    // the design's own desktop treatment. Columns are limited to what the
-    // activity_log actually stores (created_at, event_type, message, amount,
-    // ref_status): it has no member_id and no round reference, so the design's
-    // Member and Round columns — and the two dropdowns that filter on them —
-    // cannot be built truthfully from this table. Deriving them by matching
-    // names inside `message` would look right and filter wrong: those messages
-    // snapshot the name at write time, and renaming a member (Menu → Edit
-    // member names) would silently drop their older rows from a filtered view
-    // of financial history. Reported rather than faked; closing it needs
-    // member_id / round_number columns on activity_log.
+    // the design's own desktop treatment. Member and Round are real columns
+    // (migration 007), not names scraped out of `message`: those messages
+    // snapshot the name at write time, so after a rename a text-matched filter
+    // would silently drop that member's older rows. Rows written before 007
+    // have no attribution and say so.
+    const memberNameById = (id) => {
+      const m = state.members.find((x) => x.id === id);
+      return m ? m.name : null;
+    };
     const tableHtml = `<div class="activity-table-wrap">
       <table class="activity-table">
         <thead>
           <tr>
             <th class="at-when">When</th>
+            <th class="at-member">Member</th>
             <th class="at-type">Type</th>
+            <th class="at-round">Round</th>
             <th class="at-detail">Detail</th>
             <th class="at-amount">Amount</th>
             <th class="at-status">Status</th>
@@ -2060,13 +2180,26 @@
                   : type === "payout"
                   ? `<span class="activity-chip-state released">Released</span>`
                   : `<span class="at-dash">—</span>`;
+              const who = memberNameById(e.member_id);
               return `<tr class="at-row at-${type}">
                 <td class="at-when"><span class="at-date">${escapeHtml(
                   activityDayLabel(e.created_at)
                 )}</span><span class="at-time">${escapeHtml(
                 activityClockLabel(e.created_at)
               )}</span></td>
+                <td class="at-member">${
+                  who
+                    ? `<span class="at-avatar">${escapeHtml(
+                        who.trim().charAt(0).toUpperCase()
+                      )}</span><span class="at-who">${escapeHtml(who)}</span>`
+                    : `<span class="at-dash">—</span>`
+                }</td>
                 <td class="at-type"><span class="at-type-tag ${type}">${typeLabel}</span></td>
+                <td class="at-round">${
+                  e.round_number == null
+                    ? `<span class="at-dash">—</span>`
+                    : `Round ${Number(e.round_number)}`
+                }</td>
                 <td class="at-detail">${escapeHtml(e.message)}</td>
                 <td class="at-amount">${amountHtml}</td>
                 <td class="at-status">${statusHtml}</td>
@@ -2088,6 +2221,17 @@
           : ""
       }
     </div>
+    ${
+      // Say what a member/round filter cannot reach. Entries written before
+      // migration 007 carry no attribution and can only ever appear unfiltered
+      // — leaving that unsaid would make a partial view of the log look whole.
+      unattributed > 0 &&
+      (activityMemberFilter !== "all" || roundChoice !== "all")
+        ? `<p class="activity-unattributed">${icon("alert", 13)}<span>${unattributed} earlier ${
+            unattributed === 1 ? "entry is" : "entries are"
+          } not tagged with a member or round and cannot appear under these filters. Choose <b>All members</b> and <b>All rounds</b> to see the full log.</span></p>`
+        : ""
+    }
     ${
       log.length >= activityLogLimit
         ? `<button type="button" class="attention-more activity-more" onclick="PowerFund.loadMoreActivity()">Show older entries</button>`
@@ -2593,7 +2737,7 @@
         `Treasurer updated ${m ? m.name : "a member"}'s payout details${
           payoutQrFile ? " and QR code" : ""
         }`,
-        { type: "admin" }
+        { type: "admin", memberId: memberId }
       );
       closePayoutQrModal();
       await reload();
@@ -3967,6 +4111,8 @@
     toggleUnlock,
     toggleRound,
     setActivityFilter,
+    setActivityMember,
+    setActivityRound,
     loadMoreActivity,
     setView,
     openMemberDetail,

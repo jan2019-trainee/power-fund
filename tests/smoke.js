@@ -791,11 +791,53 @@ async function activityAndInsights(browser, errors) {
     (await wide.locator(".activity-list-tab").count()) === 0
   );
   check(
-    "p2/table columns are the ones the log can actually fill",
+    "p2/table carries the design's columns",
     (await wide.locator(".activity-table thead th").allInnerTexts())
       .map((t) => t.trim().toLowerCase())
-      .join("|") === "when|type|detail|amount|status"
+      .join("|") === "when|member|type|round|detail|amount|status"
   );
+  // Migration 007: attribution comes from real columns. The round dropdown
+  // defaults to the fund's CURRENT round, as the design does.
+  check(
+    "p2/round filter defaults to the current round",
+    (await wide.locator(".activity-select select").nth(1).inputValue()) === "2"
+  );
+  check(
+    "p2/member column shows who, not a parsed name",
+    (await wide.locator(".at-row .at-who").allInnerTexts()).length >= 1
+  );
+  // Entries written before 007 have no attribution. They must never be
+  // silently dropped from a filtered view of financial history.
+  check(
+    "p2/untagged entries are declared, not hidden",
+    (await wide.locator(".activity-unattributed").count()) === 1 &&
+      /cannot appear under these filters/i.test(
+        await wide.locator(".activity-unattributed").innerText()
+      )
+  );
+  const filteredCount = await wide.locator(".at-row").count();
+  await wide.evaluate(() => PowerFund.setActivityRound("all"));
+  await wide.waitForTimeout(250);
+  const allRounds = await wide.locator(".at-row").count();
+  check(
+    "p2/All rounds reveals every row, notice included",
+    allRounds > filteredCount &&
+      (await wide.locator(".activity-unattributed").count()) === 0,
+    `${filteredCount}→${allRounds}`
+  );
+  await wide.selectOption(".activity-select select >> nth=0", { label: "Sarah" });
+  await wide.waitForTimeout(250);
+  const sarah = await wide.locator(".at-row").count();
+  check(
+    "p2/member dropdown narrows to that member",
+    sarah > 0 && sarah < allRounds &&
+      (await wide.locator(".at-row .at-who").allInnerTexts()).every(
+        (t) => t.trim() === "Sarah"
+      ),
+    `rows=${sarah}`
+  );
+  await wide.evaluate(() => PowerFund.setActivityMember("all"));
+  await wide.waitForTimeout(250);
   check(
     "p2/no horizontal overflow at 1440",
     (await wide.evaluate(

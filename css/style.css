@@ -3683,3 +3683,81 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
   .submit-spinner { animation: none; border-top-color: var(--text-muted); }
 }
+
+/* ==========================================================================
+   Activity — desktop table
+   The design gives desktop its own treatment rather than the phone list at a
+   wider measure. Columns cover what activity_log actually holds; see the note
+   in renderActivityView() for why Member and Round are not among them.
+   ========================================================================== */
+.activity-table-wrap {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-card);
+  overflow: hidden;
+}
+.activity-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+.activity-table thead th {
+  text-align: left;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.activity-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  vertical-align: top;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+.activity-table tbody tr:last-child td { border-bottom: 0; }
+.activity-table tbody tr:hover td { background: rgba(255, 255, 255, 0.025); }
+
+/* Date over time, so the column stays narrow and the day is what you scan. */
+.at-when { white-space: nowrap; width: 1%; }
+.at-date { display: block; font-weight: 600; }
+.at-time { display: block; font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+
+.at-type { width: 1%; }
+.at-type-tag {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.at-type-tag.payment { border-color: var(--success); color: var(--success); }
+.at-type-tag.payout { border-color: var(--accent); color: var(--accent); }
+
+.at-detail { min-width: 0; }
+/* Amounts line up as a column of figures, so they compare down the page. */
+.at-amount {
+  text-align: right;
+  white-space: nowrap;
+  width: 1%;
+  font-variant-numeric: tabular-nums;
+}
+.at-status { width: 1%; white-space: nowrap; }
+.at-dash { color: var(--text-muted); }
+.activity-chip-state.confirmed {
+  background: var(--success-soft);
+  color: var(--success);
+}
+.activity-chip-state.released {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.activity-table-wrap .activity-empty-state { border-top: 1px solid var(--border); }

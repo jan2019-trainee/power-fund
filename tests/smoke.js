@@ -770,6 +770,60 @@ async function activityAndInsights(browser, errors) {
     )
   );
   await page.close();
+
+  // Desktop Activity is a TABLE, not the phone list at a wider measure — the
+  // one place the design gives desktop its own treatment and the app had been
+  // reflowing instead.
+  const wide = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  wide.on("pageerror", (e) => errors.push(`p2/activity-table: ${e}`));
+  await serve(wide, M.TABLE_DATA);
+  await wide.goto(BASE, { waitUntil: "domcontentloaded" });
+  await wide.waitForTimeout(1500);
+  await wide.locator(".tab-item", { hasText: "Activity" }).click();
+  await wide.waitForTimeout(400);
+  check(
+    "p2/desktop activity renders a table",
+    (await wide.locator(".activity-table").count()) === 1 &&
+      (await wide.locator(".at-row").count()) >= 1
+  );
+  check(
+    "p2/desktop activity drops the phone list",
+    (await wide.locator(".activity-list-tab").count()) === 0
+  );
+  check(
+    "p2/table columns are the ones the log can actually fill",
+    (await wide.locator(".activity-table thead th").allInnerTexts())
+      .map((t) => t.trim().toLowerCase())
+      .join("|") === "when|type|detail|amount|status"
+  );
+  check(
+    "p2/no horizontal overflow at 1440",
+    (await wide.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth
+    )) === 0
+  );
+  // The type filter still works against the table rows, and empties cleanly.
+  const before = await wide.locator(".at-row").count();
+  await wide.locator(".activity-chip", { hasText: "Payouts" }).click();
+  await wide.waitForTimeout(300);
+  const after = await wide.locator(".at-row").count();
+  check("p2/table respects the type filter", after > 0 && after < before, `${before}→${after}`);
+  await wide.close();
+
+  // Mobile keeps the grouped list.
+  const narrow = await browser.newPage({ viewport: { width: 390, height: 900 } });
+  narrow.on("pageerror", (e) => errors.push(`p2/activity-list: ${e}`));
+  await serve(narrow, M.TABLE_DATA);
+  await narrow.goto(BASE, { waitUntil: "domcontentloaded" });
+  await narrow.waitForTimeout(1500);
+  await narrow.locator(".tab-item", { hasText: "Activity" }).click();
+  await narrow.waitForTimeout(400);
+  check(
+    "p2/mobile activity keeps the grouped list",
+    (await narrow.locator(".activity-table").count()) === 0 &&
+      (await narrow.locator(".activity-list-tab").count()) >= 1
+  );
+  await narrow.close();
 }
 
 

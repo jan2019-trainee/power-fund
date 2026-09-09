@@ -1959,11 +1959,14 @@
       </div>`;
     };
 
-    return `<div class="view-head">
+    // Title and filter chips are shared; the body below differs per shell.
+    const head = `<div class="view-head">
       <h2 class="view-title">Activity</h2>
-      <p class="view-sub">Every contribution, payout &amp; admin action · ${
-        log.length
-      } ${log.length === 1 ? "entry" : "entries"} loaded</p>
+      <p class="view-sub">${
+        isWide
+          ? "Full transaction history"
+          : "Every contribution, payout &amp; admin action"
+      } · ${log.length} ${log.length === 1 ? "entry" : "entries"} loaded</p>
     </div>
     <div class="activity-chips">${Object.entries(filterLabels)
       .map(
@@ -1972,8 +1975,9 @@
         activityFilter === type ? "active" : ""
       }" onclick="PowerFund.setActivityFilter('${type}')">${label}</button>`
       )
-      .join("")}</div>
-    ${
+      .join("")}</div>`;
+
+    const listHtml = `${
       log.length === 0
         ? `<div class="activity-empty-state">${icon("activity", 22)}
              <p><b>Nothing here yet</b></p>
@@ -2002,6 +2006,95 @@
         ? `<button type="button" class="attention-more activity-more" onclick="PowerFund.loadMoreActivity()">Show older entries</button>`
         : ""
     }`;
+
+    // Desktop gets a real table rather than the phone list stretched wide —
+    // the design's own desktop treatment. Columns are limited to what the
+    // activity_log actually stores (created_at, event_type, message, amount,
+    // ref_status): it has no member_id and no round reference, so the design's
+    // Member and Round columns — and the two dropdowns that filter on them —
+    // cannot be built truthfully from this table. Deriving them by matching
+    // names inside `message` would look right and filter wrong: those messages
+    // snapshot the name at write time, and renaming a member (Menu → Edit
+    // member names) would silently drop their older rows from a filtered view
+    // of financial history. Reported rather than faked; closing it needs
+    // member_id / round_number columns on activity_log.
+    const tableHtml = `<div class="activity-table-wrap">
+      <table class="activity-table">
+        <thead>
+          <tr>
+            <th class="at-when">When</th>
+            <th class="at-type">Type</th>
+            <th class="at-detail">Detail</th>
+            <th class="at-amount">Amount</th>
+            <th class="at-status">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${visible
+            .map((e) => {
+              const type = typeOf(e);
+              const st = e.ref_status == null ? null : Number(e.ref_status);
+              const amt = e.amount == null ? null : Number(e.amount);
+              const typeLabel =
+                type === "payout"
+                  ? "Payout"
+                  : type === "payment"
+                  ? "Contribution"
+                  : "Admin";
+              let amountHtml = "—";
+              if (amt != null && amt !== 0) {
+                const abs = C.peso(Math.abs(amt));
+                const cls = amt < 0 ? "out" : st === C.STATUS_PAID ? "in" : "flat";
+                const sign = amt < 0 ? "−" : st === C.STATUS_PAID ? "+" : "";
+                amountHtml = `<span class="activity-amt ${cls}">${sign}${escapeHtml(
+                  abs
+                )}</span>`;
+              }
+              const statusHtml =
+                st === C.STATUS_PAID
+                  ? `<span class="activity-chip-state confirmed">Confirmed</span>`
+                  : st === C.STATUS_PENDING
+                  ? `<span class="activity-chip-state pending">In review</span>`
+                  : st === C.STATUS_REJECTED
+                  ? `<span class="activity-chip-state rejected">Rejected</span>`
+                  : type === "payout"
+                  ? `<span class="activity-chip-state released">Released</span>`
+                  : `<span class="at-dash">—</span>`;
+              return `<tr class="at-row at-${type}">
+                <td class="at-when"><span class="at-date">${escapeHtml(
+                  activityDayLabel(e.created_at)
+                )}</span><span class="at-time">${escapeHtml(
+                activityClockLabel(e.created_at)
+              )}</span></td>
+                <td class="at-type"><span class="at-type-tag ${type}">${typeLabel}</span></td>
+                <td class="at-detail">${escapeHtml(e.message)}</td>
+                <td class="at-amount">${amountHtml}</td>
+                <td class="at-status">${statusHtml}</td>
+              </tr>`;
+            })
+            .join("")}
+        </tbody>
+      </table>
+      ${
+        visible.length === 0
+          ? `<div class="activity-empty-state">${icon("activity", 22)}
+               <p><b>Nothing here yet</b></p>
+               <p class="activity-empty-note">${
+                 log.length === 0
+                   ? "Actions show up here as your group uses the tracker."
+                   : "No activity matches this filter."
+               }</p>
+             </div>`
+          : ""
+      }
+    </div>
+    ${
+      log.length >= activityLogLimit
+        ? `<button type="button" class="attention-more activity-more" onclick="PowerFund.loadMoreActivity()">Show older entries</button>`
+        : ""
+    }`;
+
+    return head + (isWide ? tableHtml : listHtml);
   }
 
   /** Calendar-day identity, so entries group by the day they happened. */

@@ -556,10 +556,38 @@ window.DB = (function () {
    * the treasurer that the action happened without an audit line.
    * Returns true on success, false on failure.
    */
-  async function addActivityLog(message) {
-    const res = await client
-      .from("activity_log")
-      .insert({ message: String(message) });
+  /**
+   * Write one activity-log entry.
+   *
+   * `meta` carries the typed columns migration 006 added — event_type, a signed
+   * amount, and the contribution status the action produced. They exist so the
+   * Activity screen can show an amount column and a status chip; neither is
+   * recoverable from the message prose, which the app previously regex-matched
+   * to guess a category.
+   *
+   * The amount is a DISPLAY value only. Nothing reads it back for funding —
+   * every total comes from the contributions table.
+   *
+   * A database without 006 rejects the extra columns, so the write is retried
+   * with the message alone rather than losing the audit line entirely.
+   */
+  async function addActivityLog(message, meta) {
+    const row = { message: String(message) };
+    if (meta) {
+      if (meta.type != null) row.event_type = String(meta.type);
+      if (meta.amount != null) row.amount = meta.amount;
+      if (meta.refStatus != null) row.ref_status = meta.refStatus;
+    }
+
+    let res = await client.from("activity_log").insert(row);
+
+    if (res.error && /event_type|ref_status|amount/i.test(res.error.message || "")) {
+      console.warn(
+        "Migration 006 not applied — logging without typed columns:",
+        res.error.message
+      );
+      res = await client.from("activity_log").insert({ message: String(message) });
+    }
     if (res.error) {
       console.warn("Couldn't write to the activity log:", res.error);
       return false;

@@ -521,6 +521,61 @@ window.Calc = (function () {
   }
 
   /**
+   * Fund-wide on-time rate for one round, so two rounds can be compared.
+   * Same rule as onTimeStats(): a confirmed payment carrying a date, measured
+   * against its cycle's due date. Rounds nobody has paid into return null
+   * rather than 0% — no data is not the same as bad.
+   */
+  function onTimeRateForRound(contributions, cycles, round) {
+    const { startCycle, endCycle } = roundCycleRange(round);
+    let onTime = 0;
+    let counted = 0;
+    for (const c of contributions || []) {
+      if (c.status !== STATUS_PAID || !c.paid_at) continue;
+      if (c.cycle_number < startCycle || c.cycle_number > endCycle) continue;
+      const due = dueDateOf(cycles, c.cycle_number);
+      if (!due) continue;
+      counted++;
+      if (startOfDay(new Date(c.paid_at)) <= startOfDay(due)) onTime++;
+    }
+    return { onTime, counted, rate: counted ? (onTime / counted) * 100 : null };
+  }
+
+  /**
+   * Where each member stands in one round — the state of the earliest cycle of
+   * that round they have not settled. Matches what the Members roster shows, so
+   * the two screens cannot disagree about who is behind.
+   *
+   * Returns counts plus the member ids behind each, so a caller can name them
+   * rather than only counting them.
+   */
+  function roundMemberStates(contributions, cycles, members, round) {
+    const { startCycle, endCycle } = roundCycleRange(round);
+    const out = {
+      paid: [], pending: [], rejected: [], overdue: [], notDue: [],
+    };
+    for (const m of members || []) {
+      let open = null;
+      for (let c = startCycle; c <= endCycle; c++) {
+        if (statusOf(contributions, m.id, c) !== STATUS_PAID) {
+          open = c;
+          break;
+        }
+      }
+      if (open === null) {
+        out.paid.push(m.id);
+        continue;
+      }
+      const st = statusOf(contributions, m.id, open);
+      if (st === STATUS_PENDING) out.pending.push(m.id);
+      else if (st === STATUS_REJECTED) out.rejected.push(m.id);
+      else if (isOverdue(contributions, cycles, m.id, open)) out.overdue.push(m.id);
+      else out.notDue.push(m.id);
+    }
+    return out;
+  }
+
+  /**
    * Every (member, cycle) pair that is past due and not confirmed paid.
    * A pending claim still counts as "not yet collected".
    */
@@ -661,6 +716,8 @@ window.Calc = (function () {
     memberOverdueCount,
     totalOverdueCount,
     onTimeStats,
+    onTimeRateForRound,
+    roundMemberStates,
     missedContributions,
 
     currentCycle,

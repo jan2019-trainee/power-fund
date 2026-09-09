@@ -171,6 +171,43 @@ console.log("\nA rejected cycle can still be paid");
   eq("pending stops the run", C.maxAdvanceCount(pending, MEMBER, 1, 3), 0);
 }
 
+console.log("\nPer-round on-time rate and member states");
+{
+  const members = [{ id: MEMBER }, { id: OTHER }];
+  // Round 1 is cycles 1-6. Cycle 1 was paid late, cycle 2 on time.
+  const rows = [
+    row({ id: "a", cycle_id: "c1", cycle_number: 1, status: C.STATUS_PAID,
+          paid_at: "2026-02-01T00:00:00Z" }),                      // late (due Jan 15)
+    row({ id: "b", cycle_id: "c2", cycle_number: 2, status: C.STATUS_PAID,
+          paid_at: "2026-01-20T00:00:00Z" }),                      // on time (due Jan 31)
+  ];
+  const r1 = C.onTimeRateForRound(rows, cycles, 1);
+  eq("counts only that round's dated payments", r1.counted, 2);
+  eq("on-time count", r1.onTime, 1);
+  eq("rate", Math.round(r1.rate), 50);
+  // A round nobody has paid into reports null, not 0% — no data is not failure.
+  eq("empty round -> null", C.onTimeRateForRound(rows, cycles, 3).rate, null);
+
+  // roundMemberStates buckets each member by their earliest unsettled cycle.
+  const st = C.roundMemberStates(rows, cycles, members, 1);
+  // MEMBER paid cycles 1-2 but not 3-6, and cycle 3 is far future -> not due.
+  eq("payer is not counted overdue", st.overdue.indexOf(MEMBER), -1);
+  eq("payer sits in notDue", st.notDue.indexOf(MEMBER) >= 0, true);
+  // OTHER has paid nothing; cycle 1 is long past due -> overdue.
+  eq("non-payer is overdue", st.overdue.indexOf(OTHER) >= 0, true);
+  // Every member lands in exactly one bucket.
+  const total =
+    st.paid.length + st.pending.length + st.rejected.length +
+    st.overdue.length + st.notDue.length;
+  eq("every member bucketed once", total, members.length);
+
+  // A rejected claim shows as rejected, not silently as unpaid.
+  const rej = [row({ id: "z", member_id: OTHER, cycle_id: "c1", cycle_number: 1,
+                     status: C.STATUS_REJECTED, proof_url: "p.jpg" })];
+  const st2 = C.roundMemberStates(rej, cycles, [{ id: OTHER }], 1);
+  eq("rejected bucketed as rejected", st2.rejected.indexOf(OTHER) >= 0, true);
+}
+
 console.log("\nFund constants are unchanged");
 {
   eq("contribution", C.CONTRIBUTION_AMOUNT, 1000);

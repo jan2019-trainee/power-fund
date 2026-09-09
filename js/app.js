@@ -229,8 +229,8 @@
     return escapeHtml(String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'"));
   }
 
-  async function logActivity(message) {
-    const ok = await window.DB.addActivityLog(message);
+  async function logActivity(message, meta) {
+    const ok = await window.DB.addActivityLog(message, meta);
     if (ok === false) {
       // The action itself succeeded; make sure the missing audit line is seen.
       appWarning =
@@ -426,7 +426,8 @@
       await logActivity(
         `${memberName(memberId)} marked ${range} as sent — ${C.peso(
           count * C.CONTRIBUTION_AMOUNT
-        )}`
+        )}`,
+        { type: "payment", amount: count * C.CONTRIBUTION_AMOUNT, refStatus: C.STATUS_PENDING }
       );
       closeModal();
       await reload();
@@ -515,7 +516,8 @@
       await logActivity(
         `Treasurer recorded ${memberName(memberId)}'s cycle ${cycleNumber} as paid (direct) — ${C.peso(
           C.CONTRIBUTION_AMOUNT
-        )}`
+        )}`,
+        { type: "payment", amount: C.CONTRIBUTION_AMOUNT, refStatus: C.STATUS_PAID }
       );
       await reload();
     } catch (e) {
@@ -541,7 +543,8 @@
 
       await logActivity(
         `Treasurer reverted ${memberName(memberId)}'s cycle ${cycleNumber} to unpaid` +
-          outcome.logSuffix
+          outcome.logSuffix,
+        { type: "payment", amount: -C.CONTRIBUTION_AMOUNT, refStatus: C.STATUS_UNPAID }
       );
       await reload();
       if (outcome.warning) {
@@ -649,7 +652,8 @@
       await logActivity(
         `Treasurer confirmed ${memberName(memberId)}'s ${cycleRangeLabel(
           cycles
-        )} as paid — ${C.peso(total)}`
+        )} as paid — ${C.peso(total)}`,
+        { type: "payment", amount: total, refStatus: C.STATUS_PAID }
       );
       closeReviewModal();
       await reload();
@@ -715,7 +719,12 @@
       await logActivity(
         `Treasurer rejected ${memberName(memberId)}'s ${cycleRangeLabel(
           cycles
-        )} claim — "${note}"` + logSuffix
+        )} claim — "${note}"` + logSuffix,
+        {
+          type: "payment",
+          amount: cycles.length * C.CONTRIBUTION_AMOUNT,
+          refStatus: C.STATUS_REJECTED,
+        }
       );
       closeReviewModal();
       await reload();
@@ -770,7 +779,8 @@
         { id: b.id, member_order: a.member_order },
       ]);
       await logActivity(
-        `Payout order: ${a.name} swapped positions with ${b.name}`
+        `Payout order: ${a.name} swapped positions with ${b.name}`,
+        { type: "admin" }
       );
       await reload();
     } catch (e) {
@@ -805,7 +815,7 @@
     render();
     try {
       await window.DB.resetAll();
-      await logActivity("Fund was reset — all contributions cleared");
+      await logActivity("Fund was reset — all contributions cleared", { type: "admin" });
       // Reset keeps the PIN; the current session re-locks so treasurer mode
       // can only be re-entered with it.
       unlocked = false;
@@ -976,7 +986,7 @@
     render();
     try {
       await window.DB.restoreFromBackup(data);
-      await logActivity("Fund data restored from a backup file");
+      await logActivity("Fund data restored from a backup file", { type: "admin" });
       await reload();
     } catch (e) {
       showError(e.message);
@@ -1080,7 +1090,8 @@
         await logActivity(
           wasChange
             ? "Treasurer PIN was changed"
-            : "Treasurer PIN was set for the first time"
+            : "Treasurer PIN was set for the first time",
+          { type: "admin" }
         );
         unlocked = true;
         closePinModal();
@@ -1110,7 +1121,7 @@
         // Logged so a master-PIN entry is visible after the fact, the same way
         // migration 005 makes payout-QR changes auditable.
         try {
-          await logActivity("Treasurer mode unlocked with the master PIN");
+          await logActivity("Treasurer mode unlocked with the master PIN", { type: "admin" });
           await reload();
         } catch (e) {
           console.warn("Could not log the master-PIN unlock:", e.message);
@@ -1257,7 +1268,8 @@
           recipient ? recipient.name : "—"
         }) · ${C.peso(amount)}` +
           (payoutNoteValue ? ": " + payoutNoteValue : "") +
-          (receiptWarning ? " — receipt image was NOT saved" : "")
+          (receiptWarning ? " — receipt image was NOT saved" : ""),
+        { type: "payout", amount: amount }
       );
       closePayoutModal();
       await reload();
@@ -1324,7 +1336,8 @@
         console.warn("Payout accountability fields not cleared:", e.message);
       }
       await logActivity(
-        `Payout release undone — Round ${round} (${recipient ? recipient.name : "—"})`
+        `Payout release undone — Round ${round} (${recipient ? recipient.name : "—"})`,
+        { type: "payout", amount: -C.GOAL_PER_ROUND }
       );
       await reload();
     } catch (e) {
@@ -1368,7 +1381,7 @@
       // updated is [] when the round was already started on another device —
       // that is fine, we just refresh to show the real state.
       if (Array.isArray(updated) && updated.length > 0) {
-        await logActivity(`Treasurer started Round ${next}`);
+        await logActivity(`Treasurer started Round ${next}`, { type: "admin" });
       }
       await reload();
     } catch (e) {
@@ -1435,7 +1448,7 @@
           await window.DB.updateMember(m.id, { name: trimmed[m.id] });
         }
       }
-      await logActivity(`Name(s) updated: ${changes.join(", ")}`);
+      await logActivity(`Name(s) updated: ${changes.join(", ")}`, { type: "admin" });
       closeEditNamesModal();
       await reload();
     } catch (e) {
@@ -1703,18 +1716,88 @@
   /** Activity tab. The log used to be a collapsed accordion competing for
    * room on the old single-page layout; on its own tab it is the whole screen,
    * so it renders expanded with the filter chips always in reach. */
+  /**
+   * Activity — grouped by date, "amount-forward like a bank transaction list"
+   * (canvas.json, activity-analytics-notes).
+   *
+   * Rows carry typed columns from migration 006. Entries written before it, or
+   * on a database without it, have none — those fall back to inferring a
+   * category from the message text and simply show no amount or chip, rather
+   * than an empty column that looks like missing data.
+   */
   function renderActivityView() {
     const log = state.activityLog || [];
-    const filterLabels = {
-      all: "All",
-      payment: "Payments",
-      payout: "Payouts",
-      admin: "Admin",
-    };
+    const filterLabels = { all: "All", payment: "Payments", payout: "Payouts", admin: "Admin" };
+
+    // event_type when the row has one; the old regex otherwise.
+    const typeOf = (e) => e.event_type || activityCategory(e.message);
     const visible =
-      activityFilter === "all"
-        ? log
-        : log.filter((e) => activityCategory(e.message) === activityFilter);
+      activityFilter === "all" ? log : log.filter((e) => typeOf(e) === activityFilter);
+
+    // Group by calendar day, newest first. The log already arrives in that
+    // order, so a single pass keeps it.
+    const groups = [];
+    let current = null;
+    for (const e of visible) {
+      const key = activityDayKey(e.created_at);
+      if (!current || current.key !== key) {
+        current = { key, label: activityDayLabel(e.created_at), rows: [] };
+        groups.push(current);
+      }
+      current.rows.push(e);
+    }
+
+    const rowHtml = (e) => {
+      const type = typeOf(e);
+      const st = e.ref_status == null ? null : Number(e.ref_status);
+      const amt = e.amount == null ? null : Number(e.amount);
+
+      // Icon and tone say what KIND of thing happened before the text is read.
+      let mark = { icon: "key", tone: "admin" };
+      if (type === "payout") mark = { icon: "party", tone: "payout" };
+      else if (type === "payment") {
+        mark =
+          st === C.STATUS_PAID
+            ? { icon: "check", tone: "in" }
+            : st === C.STATUS_PENDING
+            ? { icon: "clock", tone: "pending" }
+            : st === C.STATUS_REJECTED
+            ? { icon: "alert", tone: "rejected" }
+            : st === C.STATUS_UNPAID
+            ? { icon: "alert", tone: "out" }
+            : { icon: "check", tone: "admin" };
+      }
+
+      // Signed only where money actually moved: confirmed in, reverted out.
+      // A pending or rejected claim shows its amount plainly — nothing has
+      // changed hands yet.
+      let amountHtml = "";
+      if (amt != null && amt !== 0) {
+        const abs = C.peso(Math.abs(amt));
+        const cls = amt < 0 ? "out" : st === C.STATUS_PAID ? "in" : "flat";
+        const sign = amt < 0 ? "−" : st === C.STATUS_PAID ? "+" : "";
+        amountHtml = `<span class="activity-amt ${cls}">${sign}${escapeHtml(abs)}</span>`;
+      }
+
+      const chip =
+        st === C.STATUS_PENDING
+          ? `<span class="activity-chip-state pending">Pending review</span>`
+          : st === C.STATUS_REJECTED
+          ? `<span class="activity-chip-state rejected">Rejected</span>`
+          : "";
+
+      return `<div class="activity-row">
+        <span class="activity-mark ${mark.tone}">${icon(mark.icon, 14)}</span>
+        <span class="activity-body">
+          <span class="activity-text">${escapeHtml(e.message)}</span>
+          <span class="activity-meta">${escapeHtml(activityClockLabel(e.created_at))}${
+        chip ? " " + chip : ""
+      }</span>
+        </span>
+        ${amountHtml}
+      </div>`;
+    };
+
     return `<div class="view-head">
       <h2 class="view-title">Activity</h2>
       <p class="view-sub">Every contribution, payout &amp; admin action · ${
@@ -1731,22 +1814,27 @@
       .join("")}</div>
     ${
       log.length === 0
-        ? '<p class="activity-empty">No activity yet — actions will show up here as your group uses the tracker.</p>'
-        : visible.length === 0
-        ? `<p class="activity-empty">No ${filterLabels[
-            activityFilter
-          ].toLowerCase()} entries in the loaded history — try "Show older entries" or switch filters.</p>`
-        : `<div class="activity-list activity-list-tab">${visible
+        ? `<div class="activity-empty-state">${icon("activity", 22)}
+             <p><b>Nothing here yet</b></p>
+             <p class="activity-empty-note">Actions show up here as your group uses the tracker.</p>
+           </div>`
+        : groups.length === 0
+        ? `<div class="activity-empty-state">${icon("activity", 22)}
+             <p><b>Nothing here yet</b></p>
+             <p class="activity-empty-note">No ${filterLabels[
+               activityFilter
+             ].toLowerCase()} in the loaded history — try "Show older entries" or switch filters.</p>
+           </div>`
+        : groups
             .map(
-              (e) => `
-        <div class="activity-item">
-          <span class="activity-time">${escapeHtml(
-            activityTimeLabel(e.created_at)
-          )}</span>
-          <span class="activity-text">${escapeHtml(e.message)}</span>
-        </div>`
+              (g) => `<div class="activity-group">
+                <p class="activity-day">${escapeHtml(g.label)}</p>
+                <div class="activity-list activity-list-tab">${g.rows
+                  .map(rowHtml)
+                  .join("")}</div>
+              </div>`
             )
-            .join("")}</div>`
+            .join("")
     }
     ${
       log.length >= activityLogLimit
@@ -1754,9 +1842,112 @@
         : ""
     }`;
   }
+
+  /** Calendar-day identity, so entries group by the day they happened. */
+  function activityDayKey(iso) {
+    const d = new Date(iso);
+    return isNaN(d) ? "?" : `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  }
+
+  /** "Today" / "Yesterday" / "Sep 3" — a date heading a person reads quickly. */
+  function activityDayLabel(iso) {
+    const d = new Date(iso);
+    if (isNaN(d)) return "Earlier";
+    const today = new Date();
+    const key = (x) => `${x.getFullYear()}-${x.getMonth()}-${x.getDate()}`;
+    if (key(d) === key(today)) return "Today";
+    const yest = new Date(today);
+    yest.setDate(today.getDate() - 1);
+    if (key(d) === key(yest)) return "Yesterday";
+    return d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: d.getFullYear() === today.getFullYear() ? undefined : "numeric",
+    });
+  }
+
+  /** Time of day only — the group heading already carries the date. */
+  function activityClockLabel(iso) {
+    const d = new Date(iso);
+    if (isNaN(d)) return "";
+    return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  }
+
   /** Insights tab — read-only summary of what the fund data already says.
    * Every number here is derived from confirmed contributions via Calc; this
    * view never writes and never gates an action. */
+  /** Label for the rounds-completed tile — says what is happening, not just N/5. */
+  function allDoneLabel(contributions, payouts, curRound) {
+    if (C.allRoundsComplete(contributions, payouts)) return "rounds completed · fund closed";
+    return `rounds completed · Round ${curRound} in progress`;
+  }
+
+  /**
+   * Where the group stands in the current round, as a donut.
+   *
+   * A STATUS chart, not a categorical one: the four slices are reserved states
+   * that mean the same thing everywhere else in the app, so they reuse the
+   * app's own semantic colours rather than a chart palette. Identity is never
+   * carried by colour alone — every slice is named with its count in the legend
+   * beside it, and the legend text stays in normal ink with a small colour chip
+   * doing the matching. A 2px gap of the card's own background separates
+   * neighbouring arcs so they read as distinct segments.
+   */
+  function renderRoundStatusDonut(members, round) {
+    const st = C.roundMemberStates(state.contributions, state.cycles, members, round);
+    const slices = [
+      { key: "paid", label: "Paid", n: st.paid.length, color: "#4CAF83" },
+      { key: "pending", label: "In review", n: st.pending.length, color: "#9B7FE0" },
+      { key: "rejected", label: "Rejected", n: st.rejected.length, color: "#E15353" },
+      { key: "overdue", label: "Overdue", n: st.overdue.length, color: "#E15353" },
+      { key: "notdue", label: "Not due yet", n: st.notDue.length, color: "rgba(255,255,255,0.16)" },
+    ].filter((x) => x.n > 0);
+
+    const total = slices.reduce((sum, x) => sum + x.n, 0);
+    if (!total) return "";
+
+    // One ring, drawn with stroke-dasharray so each arc is a plain circle.
+    const R = 42;
+    const CIRC = 2 * Math.PI * R;
+    const GAP = slices.length > 1 ? 2 : 0; // px of surface between arcs
+    let offset = 0;
+    const arcs = slices
+      .map((x) => {
+        const len = (x.n / total) * CIRC;
+        const draw = Math.max(0, len - GAP);
+        const el = `<circle cx="60" cy="60" r="${R}" fill="none" stroke="${
+          x.color
+        }" stroke-width="16" stroke-dasharray="${draw.toFixed(2)} ${(
+          CIRC - draw
+        ).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}"></circle>`;
+        offset += len;
+        return el;
+      })
+      .join("");
+
+    return `<p class="section-label">This round's status</p>
+    <div class="donut-card">
+      <svg class="donut" viewBox="0 0 120 120" width="120" height="120" role="img"
+           aria-label="Round ${round}: ${slices
+      .map((x) => `${x.label} ${x.n}`)
+      .join(", ")}">
+        <circle cx="60" cy="60" r="${R}" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="16"></circle>
+        <g transform="rotate(-90 60 60)">${arcs}</g>
+      </svg>
+      <ul class="donut-legend">
+        ${slices
+          .map(
+            (x) => `<li class="donut-legend-row">
+              <span class="donut-swatch" style="background:${x.color}"></span>
+              <span class="donut-legend-label">${x.label}</span>
+              <span class="donut-legend-n">${x.n}</span>
+            </li>`
+          )
+          .join("")}
+      </ul>
+    </div>`;
+  }
+
   function renderInsightsView(members) {
     const contributions = state.contributions;
     const collected = C.totalCollected(contributions);
@@ -1772,21 +1963,62 @@
     let html = `<div class="view-head">
       <h2 class="view-title">Insights</h2>
       <p class="view-sub">How the fund is tracking, from confirmed payments only</p>
-    </div>
-    <div class="stat-grid">
+    </div>`;
+    // On-time rate, with the change since the previous round. A trend needs two
+    // rounds with dated payments in them; before that it just states the rate.
+    const curRound = C.currentRound(state.payouts, contributions);
+    const thisRound = C.onTimeRateForRound(contributions, state.cycles, curRound);
+    const prevRound =
+      curRound > 1 ? C.onTimeRateForRound(contributions, state.cycles, curRound - 1) : null;
+    const overallOnTime = (() => {
+      let on = 0;
+      let n = 0;
+      for (const m of members) {
+        const st = C.onTimeStats(contributions, state.cycles, m.id);
+        on += st.onTime;
+        n += st.counted;
+      }
+      return n ? (on / n) * 100 : null;
+    })();
+    let trendHtml = "";
+    if (thisRound.rate !== null && prevRound && prevRound.rate !== null) {
+      const delta = Math.round(thisRound.rate - prevRound.rate);
+      trendHtml =
+        delta === 0
+          ? `level with Round ${curRound - 1}`
+          : `${delta > 0 ? "↑" : "↓"} ${Math.abs(delta)}pts vs Round ${curRound - 1}`;
+    }
+
+    // Name who is behind rather than only counting: "1 · Dan · Round 2".
+    const missed = C.missedContributions(contributions, state.cycles, members);
+    const overdueNames = [];
+    for (const x of missed) {
+      const st = C.statusOf(contributions, x.memberId, x.cycleNumber);
+      if (!C.isOwed(st)) continue;
+      const m = members.find((mm) => mm.id === x.memberId);
+      if (m && overdueNames.indexOf(m.name) === -1) overdueNames.push(m.name);
+    }
+    const overdueSub = overdueNames.length
+      ? overdueNames.slice(0, 2).join(", ") +
+        (overdueNames.length > 2 ? ` +${overdueNames.length - 2}` : "")
+      : "nobody behind";
+
+    html += `<div class="stat-grid">
       ${tile(C.peso(collected), `collected of ${C.peso(C.TARGET_AMOUNT)}`)}
       ${tile(
-        `${Math.round(C.progressPercentOverall(contributions))}%`,
-        "of the full fund"
+        `${roundsDone} / ${C.TOTAL_ROUNDS}`,
+        allDoneLabel(contributions, state.payouts, curRound)
       )}
-      ${tile(`${roundsDone} / ${C.TOTAL_ROUNDS}`, "rounds completed")}
       ${tile(
-        String(overdue),
-        overdue === 1 ? "overdue cycle" : "overdue cycles",
-        overdue ? "danger" : "success"
+        overallOnTime === null ? "—" : `${Math.round(overallOnTime)}%`,
+        overallOnTime === null ? "no dated payments yet" : "paid on time" + (trendHtml ? " · " + trendHtml : ""),
+        overallOnTime === null ? "" : overallOnTime >= 80 ? "success" : "danger"
       )}
-      ${tile(String(pending), pending === 1 ? "awaiting review" : "awaiting review", pending ? "pending" : "")}
+      ${tile(String(overdue), overdueSub, overdue ? "danger" : "success")}
+      ${tile(String(pending), "awaiting review", pending ? "pending" : "")}
     </div>`;
+
+    html += renderRoundStatusDonut(members, curRound);
 
     // Per-round bar chart. Inline markup sized by percentage — the same
     // approach the battery hero already uses, so no charting library.
@@ -2083,7 +2315,8 @@
       await logActivity(
         `Treasurer updated ${m ? m.name : "a member"}'s payout details${
           payoutQrFile ? " and QR code" : ""
-        }`
+        }`,
+        { type: "admin" }
       );
       closePayoutQrModal();
       await reload();
@@ -2102,7 +2335,7 @@
     render();
     try {
       await window.DB.uploadPaymentQr(qrNewFile, "treasurer");
-      await logActivity("Treasurer updated the payment QR code");
+      await logActivity("Treasurer updated the payment QR code", { type: "admin" });
       clearQrSelection();
       qrUploadMsg = "Payment QR code updated successfully.";
       await reload();
@@ -2457,12 +2690,25 @@
     // of whichever view happens to be open.
     html += `<div class="header">
       <div class="header-titles">
-        <p class="title">⚡ Power Fund</p>
+        <p class="title">⚡ ${escapeHtml(
+          (state.settings && state.settings.fund_name) || "Power Fund"
+        )}</p>
         <p class="subtitle">${escapeHtml(
-          (window.APP_CONFIG && window.APP_CONFIG.SUBTITLE) ||
-            `${members.length}-member sinking fund · ${C.peso(
+          (function () {
+            const fundName = (state.settings && state.settings.fund_name) || "";
+            const configured = (window.APP_CONFIG && window.APP_CONFIG.SUBTITLE) || "";
+            // Before fund_name existed the group's name lived in the config
+            // subtitle, so once it is set in the database the two can hold the
+            // same string and the header prints it twice. Fall through to the
+            // structural summary in that case.
+            const duplicate =
+              fundName &&
+              configured.trim().toLowerCase() === fundName.trim().toLowerCase();
+            if (configured && !duplicate) return configured;
+            return `${members.length}-member sinking fund · ${C.peso(
               C.CONTRIBUTION_AMOUNT
-            )} on the 15th & end of every month`
+            )} on the 15th & end of every month`;
+          })()
         )}</p>
       </div>
       <button class="unlock-btn ${unlocked ? "unlocked" : ""}" onclick="PowerFund.toggleUnlock()">

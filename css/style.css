@@ -3329,3 +3329,121 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
   .member-row-chevron { transition: none; }
 }
+
+/* ===================================================================
+ * Activity — grouped by day, amount-forward like a transaction list
+ * =================================================================== */
+.activity-group { margin-bottom: 18px; }
+.activity-day {
+  margin: 0 0 8px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.activity-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.activity-row:last-child { border-bottom: none; }
+
+/* Icon + tone name the kind of event before the text is read. */
+.activity-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-muted);
+}
+.activity-mark.in { background: var(--success-soft); color: var(--success); }
+.activity-mark.out, .activity-mark.rejected { background: var(--danger-soft); color: var(--danger); }
+.activity-mark.pending { background: var(--pending-review-soft); color: var(--pending-review); }
+.activity-mark.payout { background: var(--accent-soft); color: var(--accent); }
+
+.activity-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.activity-row .activity-text {
+  font-size: 13.2px;
+  color: var(--text-primary);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.activity-meta { display: flex; align-items: center; gap: 7px; font-size: 11.3px; color: var(--text-muted); }
+
+.activity-chip-state {
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 20px;
+}
+.activity-chip-state.pending { background: var(--pending-review-soft); color: var(--pending-review); }
+.activity-chip-state.rejected { background: var(--danger-soft); color: var(--danger); }
+
+/* Amounts line up in their own column; tabular figures keep the digits aligned. */
+.activity-amt {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  padding-top: 1px;
+}
+.activity-amt.in { color: var(--success); }
+.activity-amt.out { color: var(--danger); }
+
+.activity-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 34px 20px;
+  text-align: center;
+  color: var(--text-muted);
+}
+.activity-empty-state p { margin: 0; font-size: 13.5px; }
+.activity-empty-state .activity-empty-note { font-size: 12.5px; max-width: 34ch; line-height: 1.5; }
+
+/* ===================================================================
+ * Insights — this round's status
+ * =================================================================== */
+.donut-card {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin-bottom: 18px;
+}
+.donut { flex-shrink: 0; }
+.donut-legend { list-style: none; margin: 0; padding: 0; flex: 1; min-width: 150px; }
+.donut-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 0;
+  font-size: 13px;
+}
+/* The swatch carries identity; the words stay in normal ink so the legend is
+   never colour-alone and never reads as coloured text. */
+.donut-swatch { width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0; }
+.donut-legend-label { flex: 1; color: var(--text-primary); }
+.donut-legend-n {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}

@@ -642,6 +642,105 @@ async function membersAndMenu(browser, errors) {
   await tre.close();
 }
 
+
+/** Phase 7: Activity grouped and amount-forward, Insights' status donut, and
+ *  the fund name reaching the header. */
+async function activityAndInsights(browser, errors) {
+  const named = {
+    ...M.TABLE_DATA,
+    app_settings: { ...M.SETTINGS, fund_name: "ViTAMiN Fund 2027" },
+  };
+  const page = await browser.newPage({ viewport: { width: 430, height: 1000 } });
+  page.on("pageerror", (e) => errors.push(`p7: ${e}`));
+  await serve(page, named);
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1500);
+
+  // --- fund name -------------------------------------------------------
+  const title = (await page.locator(".header .title").innerText()).trim();
+  const sub = (await page.locator(".header .subtitle").innerText()).trim();
+  check("p7/header shows the stored fund name", /ViTAMiN Fund 2027/.test(title), title);
+  // The group's name used to live in the config subtitle; with both set the
+  // header printed it twice.
+  check(
+    "p7/header does not repeat the name",
+    !/ViTAMiN Fund 2027/i.test(sub),
+    JSON.stringify(sub)
+  );
+
+  // --- activity --------------------------------------------------------
+  await page.locator(".tab-item", { hasText: "Activity" }).click();
+  await page.waitForTimeout(400);
+
+  const days = await page.locator(".activity-day").allInnerTexts();
+  check(
+    "p7/activity groups by day",
+    days.length >= 3 && days[0] === "Today" && days[1] === "Yesterday",
+    JSON.stringify(days)
+  );
+  check(
+    "p7/activity rows carry icons",
+    (await page.locator(".activity-row .activity-mark").count()) ===
+      (await page.locator(".activity-row").count())
+  );
+  const amounts = await page.locator(".activity-amt").allInnerTexts();
+  check(
+    "p7/amount column is signed by direction",
+    amounts.some((a) => a.startsWith("+")) && amounts.some((a) => a.startsWith("−")),
+    JSON.stringify(amounts)
+  );
+  const chips = (await page.locator(".activity-chip-state").allInnerTexts()).join("|");
+  check(
+    "p7/status chips shown",
+    /Pending review/i.test(chips) && /Rejected/i.test(chips),
+    chips
+  );
+  // Rows written before migration 006 have no typed data and must simply show
+  // no amount, rather than an empty column that looks like missing data.
+  const rows = await page.locator(".activity-row").count();
+  check(
+    "p7/untyped rows degrade to message only",
+    amounts.length > 0 && amounts.length < rows,
+    `rows=${rows} amounts=${amounts.length}`
+  );
+
+  // Filtering must collapse a day group that has nothing left in it.
+  await page.locator(".activity-chip", { hasText: "Payouts" }).click();
+  await page.waitForTimeout(300);
+  const payoutDays = await page.locator(".activity-day").allInnerTexts();
+  check(
+    "p7/filter collapses empty day groups",
+    payoutDays.length === 1 && payoutDays[0] === "Yesterday",
+    JSON.stringify(payoutDays)
+  );
+  await page.locator(".activity-chip", { hasText: "All" }).click();
+  await page.waitForTimeout(250);
+
+  // --- insights --------------------------------------------------------
+  await page.locator(".tab-item", { hasText: "Insights" }).click();
+  await page.waitForTimeout(400);
+
+  check("p7/status donut rendered", (await page.locator(".donut").count()) === 1);
+  const legend = await page.locator(".donut-legend-row").count();
+  const arcs = await page.locator(".donut g circle").count();
+  check(
+    "p7/every arc is named in the legend",
+    legend > 0 && legend === arcs,
+    `legend=${legend} arcs=${arcs}`
+  );
+  // Identity must not be colour-alone: the donut carries a text label for
+  // screen readers as well as the visible legend.
+  const label = await page.locator(".donut").getAttribute("aria-label");
+  check("p7/donut has a text alternative", !!label && /\d/.test(label), label);
+  check(
+    "p7/overdue tile names who is behind",
+    /nobody behind|,|\w/.test(
+      (await page.locator(".view-insights .stat-label").allInnerTexts()).join(" ")
+    )
+  );
+  await page.close();
+}
+
 (async () => {
   const browser = await chromium.launch({
     executablePath: process.env.PF_CHROMIUM || undefined,
@@ -665,6 +764,8 @@ async function membersAndMenu(browser, errors) {
   await homeComposition(browser, errors);
   console.log("\nMembers & Menu");
   await membersAndMenu(browser, errors);
+  console.log("\nActivity & Insights");
+  await activityAndInsights(browser, errors);
 
   await browser.close();
 

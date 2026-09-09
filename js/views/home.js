@@ -136,8 +136,14 @@ window.PFViews.home = function (ctx) {
     const remaining = C.remainingAmount(state.contributions);
     const overallPct = Math.round(C.progressPercentOverall(state.contributions));
     const pendingPesos = C.pendingTotal(state.contributions);
+    // Scope has to be on the label. The hero directly below shows the CURRENT
+    // ROUND's progress, and the design carries only that one hero — two
+    // unlabelled progress bars reading 20% and 0% within a single scroll look
+    // like a fault rather than two questions. Demoted to a strip in CSS so the
+    // hero stays the primary answer; the lifetime total is worth keeping, just
+    // not worth competing.
     return `<div class="fund-total">
-      <p class="fund-total-label">Fund balance</p>
+      <p class="fund-total-label">Whole fund · all ${C.TOTAL_ROUNDS} rounds</p>
       <div class="fund-total-amount">${C.peso(collected)} <span>/ ${C.peso(
       C.TARGET_AMOUNT
     )}</span></div>
@@ -185,13 +191,21 @@ window.PFViews.home = function (ctx) {
 
       // 1) pending review queue
       if (batches.length) {
-        const shown = attentionQueueExpanded ? batches : batches.slice(0, 6);
+        // The design's panel is a POINTER into the queue, not the queue itself:
+        // a title, one summary line and a count. Rendering every card here
+        // buried the hero, roster and round link below the fold on the screen
+        // the treasurer opens most — mid-round with five members that is the
+        // normal state, not an edge case. Collapsed by default; the cards are
+        // one tap away.
+        const shown = attentionQueueExpanded ? batches : [];
+        const waiting =
+          batches.length === 1 ? "1 payment" : batches.length + " payments";
         html += `<div class="attention-group">
           <p class="attention-group-label">${icon("bell", 14)}<span>${
-            batches.length === 1
-              ? "1 payment"
-              : batches.length + " payments"
-          } waiting for your review</span></p>
+            waiting
+          } waiting for your review</span><span class="attention-count">${
+            batches.length
+          }</span></p>
           <div class="queue-list">
             ${shown
               .map((b) => {
@@ -247,9 +261,11 @@ window.PFViews.home = function (ctx) {
           </div>
           ${
             batches.length > shown.length
-              ? `<button type="button" class="attention-more" onclick="PowerFund.expandAttentionQueue()">Show ${
-                  batches.length - shown.length
-                } more</button>`
+              ? `<button type="button" class="attention-more" onclick="PowerFund.expandAttentionQueue()">${
+                  attentionQueueExpanded
+                    ? `Show ${batches.length - shown.length} more`
+                    : `Review ${waiting} →`
+                }</button>`
               : ""
           }
         </div>`;
@@ -457,17 +473,21 @@ window.PFViews.home = function (ctx) {
 
   S.hero = section();
 
-  // Skip this generic "pick your name" action when the My-status card above
-  // already offers the same one for the same cycle — two buttons doing one
-  // thing. Still shown when unlocked (a treasurer acts on ANY member) or when
-  // this device isn't tied to a member yet, so a shared phone still works.
+  // Who this generic "pick your name" action is for:
+  //   treasurer — any member, so always offered while a cycle is open;
+  //   identified member — never, because either the My-status card above
+  //     already offers exactly this for exactly their cycle (two buttons, one
+  //     job) or they have nothing to pay, and the design is explicit that the
+  //     CTA is then "simply absent — just the tab bar". Prompting someone to
+  //     pay a cycle they have already submitted is the bug this closes;
+  //   unidentified device — offered, so a shared phone still works.
   hasFloatingCta =
-    payCycle &&
-    (unlocked || cyclePaidCount < members.length) &&
-    !(!unlocked && myMember && myStatus && myStatus.actionCycle);
+    !!payCycle && (unlocked ? true : !myMember && cyclePaidCount < members.length);
   if (hasFloatingCta) {
     html += `<div class="floating-cta"><button type="button" class="hero-cta" onclick="PowerFund.openContributePicker(${payCycle})">${
-      unlocked ? "＋ Record / review a payment" : "＋ Record a contribution"
+      unlocked
+        ? "＋ Record / review a payment"
+        : `＋ Pay this cycle · ${C.peso(C.CONTRIBUTION_AMOUNT)}`
     }</button></div>`;
   }
 

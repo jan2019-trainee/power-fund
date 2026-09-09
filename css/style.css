@@ -81,9 +81,12 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 16px;
+  gap: 12px;
   margin-bottom: 16px;
-  flex-wrap: wrap;
+  /* No wrap: the mode pill belongs ON this row (see .unlock-btn). Allowed to
+     wrap, it dropped to its own full-width line on every mobile screen —
+     the layout the design does not have. The titles shrink instead. */
+  flex-wrap: nowrap;
 }
 
 /* ---- "My status" — personalized card for this device's remembered member ---- */
@@ -209,6 +212,7 @@ body {
   flex-wrap: wrap;
   gap: 4px 10px;
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .title {
@@ -224,22 +228,33 @@ body {
   margin: 0;
 }
 
+/* A PILL in the header row, not a button on its own line. The design carries
+   treasurer mode as a small header pill and the designer removed Menu's
+   "Unlock treasurer mode" row precisely because that pill already says it on
+   every screen — so a full-width control above every view's content both
+   contradicts the design and costs ~44px above the fold everywhere. Kept as
+   the unlock entry point (it is the only one), just sized as the status
+   indicator it is. */
 .unlock-btn {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  color: var(--text-primary);
+  color: var(--text-muted);
   font-family: 'Inter', sans-serif;
-  font-size: 13px;
-  font-weight: 500;
-  padding: 9px 16px;
-  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 5px 11px;
+  border-radius: 999px;
   cursor: pointer;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 7px;
-  transition: border-color 0.15s ease;
+  gap: 5px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  align-self: center;
+  transition: border-color 0.15s ease, color 0.15s ease;
 }
-.unlock-btn:hover { border-color: var(--accent); }
+.unlock-btn:hover { border-color: var(--accent); color: var(--accent); }
 .unlock-btn.unlocked { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 
 /* Battery hero */
@@ -782,6 +797,15 @@ body {
 /* Nothing styled a disabled primary button, so every gated action in the app —
    "I've sent this" before a screenshot is attached, Release before a receipt —
    looked fully clickable and simply did nothing when tapped. */
+/* Confirming someone else's payment is a TREASURER action and is green, kept
+   deliberately distinct from the amber "pay" colour the member side uses, so
+   the two roles never look interchangeable (design: review-notes annotation).
+   The queue card that leads here is the same green-free, accent-outlined
+   Review button — the colours only diverge once real money is being approved. */
+.modal-btn-confirm {
+  background: var(--success);
+  color: #08130E;
+}
 .modal-btn-primary:disabled,
 .modal-btn-secondary:disabled {
   opacity: 0.4;
@@ -1150,11 +1174,16 @@ body {
 /* ==========================================================================
    Overall fund balance card (M5) — whole-fund total, above the round hero
    ========================================================================== */
+/* A strip, not a card. The round hero below is the screen's one primary
+   progress indicator (the design has no second one); this carries the
+   lifetime figure without competing for that job — no card chrome, smaller
+   numerals, scope stated in the label. */
 .fund-total {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px 18px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: 0 2px 12px;
   margin-bottom: 14px;
 }
 .fund-total-label {
@@ -1166,13 +1195,15 @@ body {
   color: var(--text-muted);
   margin: 0 0 6px;
 }
+/* Deliberately smaller than the hero's round figure — this is context, the
+   hero is the headline. */
 .fund-total-amount {
   font-family: 'Space Grotesk', sans-serif;
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--text-primary);
 }
-.fund-total-amount span { color: var(--text-muted); font-size: 14px; font-weight: 500; }
+.fund-total-amount span { color: var(--text-muted); font-size: 13px; font-weight: 500; }
 .fund-total-bar {
   height: 6px;
   border-radius: 4px;
@@ -1227,6 +1258,24 @@ body {
   line-height: 1.5;
 }
 .attention-group .contribute-btn { margin-top: 0; }
+/* Count badge on the collapsed summary line — the panel's job is to say HOW
+   MANY are waiting, not to list them (see the queue-list note in home.js). */
+.attention-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #14213D;
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1;
+}
+/* Collapsed: the list is empty, so it must not add its own gap. */
+.queue-list:empty { display: none; }
 
 .queue-list { display: flex; flex-direction: column; gap: 8px; }
 .queue-card {
@@ -1305,7 +1354,9 @@ body {
 .attention-more {
   margin-top: 8px;
   background: none;
-  border: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 100%;
   color: var(--accent);
   font-family: 'Inter', sans-serif;
   font-size: 12.5px;
@@ -1659,7 +1710,7 @@ body { padding-top: calc(28px + var(--pf-bar-h, 0px)); }
   stroke-linejoin: round;
   flex-shrink: 0;
 }
-.unlock-btn { display: inline-flex; align-items: center; gap: 7px; }
+.unlock-btn { display: inline-flex; align-items: center; gap: 5px; }
 .menu-row-main { display: flex; align-items: center; gap: 11px; }
 .menu-row-main .icon { color: var(--text-muted); }
 .reset-btn.danger { display: inline-flex; align-items: center; gap: 7px; }
@@ -3570,6 +3621,9 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
 .restore-untouched { font-size: 12.5px; color: var(--success); margin: 0; }
 
 /* Undo one confirmed payment, inline in the cycle row it belongs to. */
+/* The cash path's gate. Same shell as undo, but amber-edged rather than red:
+   it is adding money on trust, not destroying a record. */
+.mark-paid-panel { border-color: var(--accent); }
 .undo-paid-panel {
   grid-column: 1 / -1;
   margin-top: 8px;

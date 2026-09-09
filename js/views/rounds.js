@@ -13,7 +13,8 @@ window.PFViews.rounds = function (ctx) {
   const {
     members, rounds, curCycle, allDone, curRound, ROUND_PILL, state,
     unlocked, openRound, escapeHtml, inlineArg, icon, getPayout,
-    payoutRecipientName, payoutDateText, C, isWide, undoPaidTarget
+    payoutRecipientName, payoutDateText, C, isWide, undoPaidTarget, payCycle,
+    markPaidTarget
   } = ctx;
   let html = "";
   // Filled only on wide screens, where the list and detail render separately.
@@ -61,8 +62,15 @@ window.PFViews.rounds = function (ctx) {
             let rowsHtml = "";
             for (let c = startCycle; c <= endCycle; c++) {
               const due = C.dueDateOf(state.cycles, c);
-              const isCurrent = c === curCycle;
-              const rowTag = isCurrent
+              // curCycle is date-driven: it names the next cycle whose due
+              // date has not passed, which can be a cycle every member has
+              // already paid — that put an amber "next due" tag on settled
+              // history inside a Completed round, while Home pointed at a
+              // different cycle entirely. payCycle is Home's answer (earliest
+              // unsettled cycle of the active round), so both screens now
+              // agree, and nothing is tagged as owed once it is paid.
+              const isDue = payCycle != null && c === payCycle;
+              const rowTag = isDue
                 ? due && C.isSameDay(due, new Date())
                   ? "today"
                   : "next due"
@@ -144,12 +152,32 @@ window.PFViews.rounds = function (ctx) {
                    </div>`
                 : "";
 
-              rowsHtml += `<div class="cycle-row ${isCurrent ? "current-row" : ""}">
+              // Recording a payment with no proof — the treasurer's cash path.
+              // Same inline shape as undo above, because it writes money too.
+              const markHere =
+                markPaidTarget && markPaidTarget.cycleNumber === c
+                  ? members.find((m) => m.id === markPaidTarget.memberId)
+                  : null;
+              const markPanel = markHere
+                ? `<div class="undo-paid-panel mark-paid-panel">
+                     <p class="undo-paid-text">Record <b>${escapeHtml(
+                       markHere.name
+                     )}</b>'s ${C.peso(C.CONTRIBUTION_AMOUNT)} for ${
+                    due ? C.formatDate(due) : "cycle " + c
+                  } as paid? No screenshot is attached, so this is only for money you have already received another way — it counts toward the round immediately.</p>
+                     <div class="undo-paid-btns">
+                       <button type="button" class="modal-btn-secondary" onclick="PowerFund.cancelMarkPaid()">Cancel</button>
+                       <button type="button" class="modal-btn-primary modal-btn-confirm" onclick="PowerFund.confirmMarkPaid()">Record as paid</button>
+                     </div>
+                   </div>`
+                : "";
+
+              rowsHtml += `<div class="cycle-row ${isDue ? "current-row" : ""}">
                 <div class="cycle-date">${due ? C.formatDate(due) : `Cycle ${c}`}${
                 rowTag ? ` <span class="today-tag">${rowTag}</span>` : ""
               }</div>
                 <div class="cycle-chips">${chips}</div>
-                ${undoPanel}
+                ${undoPanel}${markPanel}
               </div>`;
             }
             return rowsHtml;

@@ -143,6 +143,22 @@ async function tabsRender(browser, label, viewport, errors, wide) {
   const attention = await page.locator(".attention-panel").count();
   check(`${label}/attention panel`, attention === 1, `panels=${attention}`);
 
+  // The panel opens collapsed to a summary line (the design's shape), so the
+  // queue cards — and the code under test below — are one tap in.
+  const collapsedText = (await page.locator(".attention-panel").innerText()).replace(/\s+/g, " ");
+  check(
+    `${label}/attention panel opens as a summary, not the whole queue`,
+    (await page.locator(".attention-panel .queue-card").count()) === 0 &&
+      (await page.locator(".attention-count").count()) === 1,
+    JSON.stringify(collapsedText.slice(0, 120))
+  );
+  await page.locator(".attention-more").click();
+  await page.waitForTimeout(250);
+  check(
+    `${label}/expanding reveals the queue cards`,
+    (await page.locator(".attention-panel .queue-card").count()) >= 1
+  );
+
   // The review queue formats a submission time. That call lived in app.js's
   // closure while the view could not see it, and the branch only runs when the
   // pending row carries a timestamp — so it rendered fine here and threw in
@@ -895,6 +911,69 @@ async function feedbackStates(browser, errors) {
   await un.close();
 }
 
+
+/** QA-gate fixes: the design's colour rule for confirming someone else's
+ *  payment, and the gate on the proof-less cash path. */
+async function designGates(browser, errors) {
+  const page = await browser.newPage({ viewport: { width: 430, height: 1000 } });
+  page.on("pageerror", (e) => errors.push(`gates: ${e}`));
+  await serve(page, { ...M.TABLE_DATA, app_settings: { ...M.SETTINGS, treasurer_pin: "1234" } });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1500);
+  await unlockTreasurer(page);
+
+  // Confirming a payment is a TREASURER action and must not wear the member's
+  // amber "pay" colour — the design says so in as many words.
+  await page.locator(".attention-more").click();
+  await page.waitForTimeout(250);
+  await page.locator(".queue-btn-review").first().click();
+  await page.waitForTimeout(350);
+  const confirm = page.locator(".modal-btn-confirm");
+  check("gates/review confirm exists", (await confirm.count()) === 1);
+  const [confirmBg, accent] = await page.evaluate(() => {
+    const b = document.querySelector(".modal-btn-confirm");
+    const cs = getComputedStyle(document.documentElement);
+    return [getComputedStyle(b).backgroundColor, cs.getPropertyValue("--accent").trim()];
+  });
+  check(
+    "gates/review confirm is not the member's pay colour",
+    !!confirmBg && confirmBg !== accent && !/245,\s*166,\s*35/.test(confirmBg),
+    `bg=${confirmBg} accent=${accent}`
+  );
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(250);
+
+  // The cash path writes money with no proof attached, so it confirms first.
+  await page.locator(".tab-item", { hasText: "Rounds" }).click();
+  await page.waitForTimeout(350);
+  // Find a round holding a chip that is neither paid nor pending — those two
+  // open undo and review respectively, not the cash path.
+  const unpaidSel = ".member-chip.editable:not(.paid):not(.pending):not(.rejected)";
+  const roundCount = await page.locator(".round").count();
+  for (let i = 0; i < roundCount; i++) {
+    await page.locator(".round").nth(i).click();
+    await page.waitForTimeout(250);
+    if ((await page.locator(unpaidSel).count()) > 0) break;
+  }
+  const unpaid = page.locator(unpaidSel).first();
+  if ((await unpaid.count()) === 0) {
+    check("gates/found an unpaid chip to tap", false, "no unpaid chip in any round");
+  } else {
+    await unpaid.click();
+    await page.waitForTimeout(300);
+    const panel = page.locator(".mark-paid-panel");
+    check("gates/cash path confirms before writing", (await panel.count()) === 1);
+    check(
+      "gates/cash panel says no screenshot is attached",
+      /no screenshot/i.test(await panel.innerText())
+    );
+    await page.locator(".mark-paid-panel button", { hasText: "Cancel" }).click();
+    await page.waitForTimeout(250);
+    check("gates/cash panel cancels cleanly", (await page.locator(".mark-paid-panel").count()) === 0);
+  }
+  await page.close();
+}
+
 (async () => {
   const browser = await chromium.launch({
     executablePath: process.env.PF_CHROMIUM || undefined,
@@ -922,6 +1001,8 @@ async function feedbackStates(browser, errors) {
   await activityAndInsights(browser, errors);
   console.log("\nFeedback states");
   await feedbackStates(browser, errors);
+  console.log("\nDesign gates");
+  await designGates(browser, errors);
 
   await browser.close();
 

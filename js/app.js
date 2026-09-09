@@ -88,6 +88,9 @@
   // rather than a dialog, "deliberately mirroring the existing inline 'Undo
   // Release' pattern already used elsewhere in this same screen".
   let undoPaidTarget = null;
+  // Recording a payment with no proof (the treasurer's cash path) writes money
+  // too, so it gets the same inline gate as undo rather than firing on one tap.
+  let markPaidTarget = null;
   let rejectConfirming = false;
   let rejectNoteValue = ""; // the treasurer's reason — shown to the member
   let rejectError = null;
@@ -584,10 +587,29 @@
     }
 
     // Unpaid or rejected → treasurer records it as paid directly (cash).
-    // Not destructive. Rejected lands here too, and should: a refused
-    // screenshot is often followed by the member simply handing over cash.
-    // The rejection note stays on the row as history; the member's banner
-    // clears because it only reads rows still in the rejected state.
+    // Rejected lands here too, and should: a refused screenshot is often
+    // followed by the member simply handing over cash. The rejection note
+    // stays on the row as history; the member's banner clears because it only
+    // reads rows still in the rejected state.
+    //
+    // This is a money write with no proof attached — the one payment path the
+    // design removed entirely and this project deliberately kept. Keeping it
+    // does not mean keeping it un-gated, so it confirms inline in the row,
+    // exactly like undo.
+    markPaidTarget = { memberId: memberId, cycleNumber: cycleNumber };
+    render();
+  }
+
+  function cancelMarkPaid() {
+    markPaidTarget = null;
+    render();
+  }
+
+  /** The actual direct (cash) record, after the inline confirmation. */
+  async function confirmMarkPaid() {
+    if (busy || !markPaidTarget) return;
+    const { memberId, cycleNumber } = markPaidTarget;
+    markPaidTarget = null;
     busy = true;
     render();
     try {
@@ -1819,6 +1841,7 @@
     // roster rather than whoever was open several taps ago.
     if (currentView === "members") selectedMemberId = null;
     undoPaidTarget = null;
+    markPaidTarget = null;
     currentView = view;
     render();
   }
@@ -2881,9 +2904,13 @@
           })()
         )}</p>
       </div>
-      <button class="unlock-btn ${unlocked ? "unlocked" : ""}" onclick="PowerFund.toggleUnlock()">
-        ${icon(unlocked ? "unlocked" : "lock", 15)}<span>${
-          unlocked ? "Treasurer mode on" : "Unlock treasurer mode"
+      <button class="unlock-btn ${
+        unlocked ? "unlocked" : ""
+      }" onclick="PowerFund.toggleUnlock()" aria-label="${
+        unlocked ? "Treasurer mode is on — tap to lock" : "Unlock treasurer mode"
+      }">
+        ${icon(unlocked ? "unlocked" : "lock", 13)}<span>${
+          unlocked ? "Treasurer" : "Unlock"
         }</span>
       </button>
     </div>`;
@@ -2919,7 +2946,7 @@
       // UI state, snapshotted so a view can't mutate it mid-render
       state, unlocked, busy, openRound, myMemberId, attentionQueueExpanded,
       overdueListOpen, startRoundConfirming, isWide, selectedMemberId,
-      undoPaidTarget,
+      undoPaidTarget, markPaidTarget,
       payoutQrMemberId,
       // Helpers the views render with.
       //
@@ -3119,7 +3146,7 @@
                      busy ? "disabled" : ""
                    }>Yes, reject</button>
                    <button class="modal-btn-secondary" onclick="PowerFund.cancelRejectConfirm()">Never mind</button>`
-                : `<button class="modal-btn-primary" onclick="PowerFund.confirmReview()" ${
+                : `<button class="modal-btn-primary modal-btn-confirm" onclick="PowerFund.confirmReview()" ${
                     busy ? "disabled" : ""
                   }>${
                     busy
@@ -3861,6 +3888,8 @@
     toggleOverdueList,
     cancelUndoPaid,
     confirmUndoPaid,
+    cancelMarkPaid,
+    confirmMarkPaid,
     rejectReview,
     setRejectNote: (v) => {
       rejectNoteValue = v;

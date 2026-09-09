@@ -396,3 +396,30 @@ PF_CHROMIUM=/opt/pw-browsers/chromium-1194/chrome-linux/chrome node tests/smoke.
 ```
 
 Bump `CACHE` in `sw.js` on every deploy that changes the shell.
+
+## UI/UX QA Gate
+
+Power Fund uses an independent UI/UX QA process.
+
+Claude Code must not consider a major UI/UX phase complete simply because the code compiles or the feature functions.
+
+After each major UI/UX implementation phase:
+
+1. Verify the implementation against the approved design.
+2. Run functional checks.
+3. Ensure mobile and desktop behavior are correct.
+4. Prepare the implementation for independent UI/UX QA.
+5. Do not declare the phase fully complete until P0/P1 QA findings have been addressed.
+
+The independent QA agent is responsible for visual and UX review.
+
+Claude Code must not modify the design merely to justify an implementation mismatch.
+
+If the implementation differs from the approved design, determine whether the difference is:
+- intentional
+- deferred
+- superseded
+- acceptable
+- or an implementation gap.
+
+When a QA finding conflicts with business logic, financial rules, security, or database integrity, do not blindly implement the visual recommendation. Investigate and report the conflict first.

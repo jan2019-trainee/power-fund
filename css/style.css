@@ -779,6 +779,17 @@ body {
   border-radius: 9px;
   cursor: pointer;
 }
+/* Nothing styled a disabled primary button, so every gated action in the app —
+   "I've sent this" before a screenshot is attached, Release before a receipt —
+   looked fully clickable and simply did nothing when tapped. */
+.modal-btn-primary:disabled,
+.modal-btn-secondary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  filter: grayscale(0.35);
+}
+.modal-btn-primary:not(:disabled):hover { filter: brightness(1.06); }
+
 .modal-btn-secondary {
   background: none;
   border: 1px solid var(--border);
@@ -3446,4 +3457,133 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   font-weight: 700;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+}
+
+/* ===================================================================
+ * Phase 6 — telling people what happened
+ * =================================================================== */
+
+/* Shared submit/upload state: progress and failure report where the action
+   was taken, so a retry doesn't mean re-entering anything. */
+.submit-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.submit-state.working { background: var(--bg-card-alt); color: var(--text-muted); }
+.submit-state.failed {
+  background: var(--danger-soft);
+  border: 1px solid rgba(225, 83, 83, 0.32);
+  color: var(--text-primary);
+  flex-wrap: wrap;
+}
+.submit-state-main { display: flex; align-items: flex-start; gap: 8px; flex: 1; min-width: 0; }
+.submit-state-main .icon { color: var(--danger); flex-shrink: 0; margin-top: 1px; }
+.submit-retry, .banner-retry {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--danger);
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.submit-retry:hover, .banner-retry:hover { background: rgba(225, 83, 83, 0.14); }
+.banner-retry { margin-left: 8px; }
+
+.submit-spinner {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-top-color: var(--accent);
+  animation: pfSpin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes pfSpin { to { transform: rotate(360deg); } }
+
+/* Releasing needs its receipt: the field says so, and the drop target reads as
+   waiting rather than optional. */
+.field-required {
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 700;
+  margin-left: 5px;
+}
+.proof-upload.needed { border-color: rgba(245, 166, 35, 0.45); }
+
+.copy-reminder-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 9px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card-alt);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.copy-reminder-btn:hover { background: rgba(255, 255, 255, 0.07); }
+
+/* Restore — the three states share one shell. */
+.restore-done, .restore-invalid {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 15px;
+  margin-bottom: 6px;
+}
+.restore-done { color: var(--success); }
+.restore-invalid { color: var(--danger); }
+.restore-summary { margin: 10px 0 0; padding-left: 20px; }
+.restore-summary li { font-size: 13px; color: var(--text-muted); margin-bottom: 4px; }
+.restore-summary b { color: var(--text-primary); }
+.restore-hint {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 10px 0;
+}
+.restore-hint .icon { color: var(--text-muted); flex-shrink: 0; margin-top: 2px; }
+.restore-hint code {
+  background: var(--bg-card-alt);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+.restore-untouched { font-size: 12.5px; color: var(--success); margin: 0; }
+
+/* Undo one confirmed payment, inline in the cycle row it belongs to. */
+.undo-paid-panel {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+  padding: 11px 13px;
+  border: 1px solid rgba(225, 83, 83, 0.32);
+  border-radius: 10px;
+  background: var(--danger-soft);
+}
+.undo-paid-text { margin: 0 0 10px; font-size: 12.5px; color: var(--text-primary); line-height: 1.5; }
+.undo-paid-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.undo-paid-btns button { flex: 1; min-width: 120px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .submit-spinner { animation: none; border-top-color: var(--text-muted); }
 }

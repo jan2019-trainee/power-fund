@@ -741,6 +741,145 @@ async function activityAndInsights(browser, errors) {
   await page.close();
 }
 
+
+/** Phase 6: telling people what happened — required receipt, retryable
+ *  uploads, restore's three states, and undoing one confirmed payment. */
+async function feedbackStates(browser, errors) {
+  // A funded round so the release sheet is reachable.
+  const paidR1 = [];
+  let id = 8000;
+  M.CYCLES.filter((c) => c.cycle_number <= 6).forEach((cy) =>
+    M.MEMBERS.forEach((m) =>
+      paidR1.push({
+        id: uuid(id++), cycle_id: cy.id, member_id: m.id, status: 2,
+        amount: 1000, proof_url: null, paid_at: new Date(cy.due_date).toISOString(),
+      })
+    )
+  );
+  const funded = {
+    ...M.TABLE_DATA,
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234" },
+    contributions: [...paidR1, ...M.CONTRIBUTIONS.filter((c) => c.status === 1)],
+    payouts: M.PAYOUTS.map((p) => (p.round_number === 1 ? { ...p, released: false } : p)),
+  };
+
+  // --- release needs its receipt (decision D4) ---------------------------
+  const page = await browser.newPage({ viewport: { width: 430, height: 1000 } });
+  page.on("pageerror", (e) => errors.push(`p6: ${e}`));
+  await serve(page, funded);
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1500);
+  await unlockTreasurer(page);
+  await page.locator(".release-card .payout-btn").click();
+  await page.waitForTimeout(400);
+
+  const release = page.locator(".modal-btn-primary").last();
+  check("p6/release blocked without a receipt", (await release.isDisabled()) === true);
+  // A gate the eye can't see is worse than none — it must also LOOK disabled.
+  const dim = await release.evaluate((b) => parseFloat(getComputedStyle(b).opacity));
+  check("p6/disabled button looks disabled", dim < 0.8, `opacity=${dim}`);
+  check(
+    "p6/receipt marked required",
+    /required/i.test(await page.locator(".modal").last().innerText())
+  );
+  check(
+    "p6/no-QR offers a reminder to copy",
+    (await page.locator(".copy-reminder-btn").count()) === 1
+  );
+
+  await page.locator(".modal input[type=file]").last().setInputFiles({
+    name: "receipt.png", mimeType: "image/png",
+    buffer: Buffer.from("89504e470d0a1a0a", "hex"),
+  });
+  await page.waitForTimeout(350);
+  check(
+    "p6/release enabled once attached",
+    (await page.locator(".modal-btn-primary").last().isDisabled()) === false
+  );
+  await page.close();
+
+  // --- a failed upload reports in place, with a retry --------------------
+  const up = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  up.on("pageerror", (e) => errors.push(`p6/upload: ${e}`));
+  await serve(up, M.TABLE_DATA);
+  await up.route("**/storage/v1/**", (r) => r.abort()); // the upload fails
+  await up.goto(BASE, { waitUntil: "domcontentloaded" });
+  await up.waitForTimeout(1500);
+  await up.evaluate((id) => PowerFund.openContributeModal(id, 7), M.MEMBERS[4].id);
+  await up.waitForTimeout(350);
+  await up.locator(".modal input[type=file]").first().setInputFiles({
+    name: "proof.png", mimeType: "image/png",
+    buffer: Buffer.from("89504e470d0a1a0a", "hex"),
+  });
+  await up.waitForTimeout(300);
+  await up.locator(".modal-btn-primary").first().click();
+  await up.waitForTimeout(1200);
+  check(
+    "p6/failed upload reports in the sheet",
+    (await up.locator(".submit-state.failed").count()) === 1 &&
+      (await up.locator(".submit-retry").count()) === 1
+  );
+  check(
+    "p6/sheet stays open so nothing is re-entered",
+    (await up.locator(".modal-overlay").count()) >= 1
+  );
+  await up.close();
+
+  // --- restore rejects a file that isn't a backup -----------------------
+  const res = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  res.on("pageerror", (e) => errors.push(`p6/restore: ${e}`));
+  await serve(res, M.TABLE_DATA);
+  await res.goto(BASE, { waitUntil: "domcontentloaded" });
+  await res.waitForTimeout(1500);
+  await res.evaluate(() =>
+    PowerFund.restoreBackup(
+      new File(['{"hello":"world"}'], "vacation-photos.json", { type: "application/json" })
+    )
+  );
+  await res.waitForTimeout(400);
+  const invalidText = (await res.locator(".modal").last().innerText()).replace(/\s+/g, " ");
+  check(
+    "p6/invalid backup names the file and reassures",
+    /isn't a Power Fund backup/i.test(invalidText) &&
+      /vacation-photos\.json/.test(invalidText) &&
+      /untouched/i.test(invalidText),
+    JSON.stringify(invalidText.slice(0, 130))
+  );
+  check(
+    "p6/invalid backup offers another file",
+    (await res.locator("button", { hasText: "Choose another file" }).count()) === 1
+  );
+  await res.close();
+
+  // --- undo one confirmed payment, inline ------------------------------
+  const un = await browser.newPage({ viewport: { width: 430, height: 1000 } });
+  un.on("pageerror", (e) => errors.push(`p6/undo: ${e}`));
+  await serve(un, funded);
+  await un.goto(BASE, { waitUntil: "domcontentloaded" });
+  await un.waitForTimeout(1500);
+  await unlockTreasurer(un);
+  await un.locator(".tab-item", { hasText: "Rounds" }).click();
+  await un.waitForTimeout(400);
+  await un.locator(".round").first().click();
+  await un.waitForTimeout(400);
+  await un.locator(".member-chip.paid").first().click();
+  await un.waitForTimeout(400);
+  const panel = un.locator(".undo-paid-panel");
+  check("p6/undo opens inline, not as a dialog", (await panel.count()) === 1);
+  check(
+    "p6/undo names the member and scope",
+    /for them only/i.test(await panel.innerText())
+  );
+  check(
+    "p6/undo stays inside the cycle row",
+    (await un.locator(".cycle-row .undo-paid-panel").count()) === 1
+  );
+  await un.locator(".undo-paid-panel button", { hasText: "Cancel" }).click();
+  await un.waitForTimeout(300);
+  check("p6/undo cancels cleanly", (await un.locator(".undo-paid-panel").count()) === 0);
+  await un.close();
+}
+
 (async () => {
   const browser = await chromium.launch({
     executablePath: process.env.PF_CHROMIUM || undefined,
@@ -766,6 +905,8 @@ async function activityAndInsights(browser, errors) {
   await membersAndMenu(browser, errors);
   console.log("\nActivity & Insights");
   await activityAndInsights(browser, errors);
+  console.log("\nFeedback states");
+  await feedbackStates(browser, errors);
 
   await browser.close();
 

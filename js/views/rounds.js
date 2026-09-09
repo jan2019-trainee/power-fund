@@ -13,7 +13,7 @@ window.PFViews.rounds = function (ctx) {
   const {
     members, rounds, curCycle, allDone, curRound, ROUND_PILL, state,
     unlocked, openRound, escapeHtml, inlineArg, icon, getPayout,
-    payoutRecipientName, payoutDateText, C, isWide
+    payoutRecipientName, payoutDateText, C, isWide, undoPaidTarget
   } = ctx;
   let html = "";
   // Filled only on wide screens, where the list and detail render separately.
@@ -124,11 +124,32 @@ window.PFViews.rounds = function (ctx) {
                   )}: ${tip}">${escapeHtml(m.name)}${icon ? ` ${icon}` : ""}</span>`;
                 })
                 .join("");
+              // Undoing one confirmed payment, inline under the row whose pill
+              // was tapped — the same shape as this screen's Undo Release.
+              const undoHere =
+                undoPaidTarget && undoPaidTarget.cycleNumber === c
+                  ? members.find((m) => m.id === undoPaidTarget.memberId)
+                  : null;
+              const undoPanel = undoHere
+                ? `<div class="undo-paid-panel">
+                     <p class="undo-paid-text">Undo <b>${escapeHtml(
+                       undoHere.name
+                     )}</b>'s confirmed ${C.peso(C.CONTRIBUTION_AMOUNT)} for ${
+                    due ? C.formatDate(due) : "cycle " + c
+                  }? It goes back to unpaid for them only — everyone else in this cycle is untouched, and the screenshot is kept.</p>
+                     <div class="undo-paid-btns">
+                       <button type="button" class="modal-btn-secondary" onclick="PowerFund.cancelUndoPaid()">Cancel</button>
+                       <button type="button" class="modal-btn-primary confirm-yes" onclick="PowerFund.confirmUndoPaid()">Undo confirmation</button>
+                     </div>
+                   </div>`
+                : "";
+
               rowsHtml += `<div class="cycle-row ${isCurrent ? "current-row" : ""}">
                 <div class="cycle-date">${due ? C.formatDate(due) : `Cycle ${c}`}${
                 rowTag ? ` <span class="today-tag">${rowTag}</span>` : ""
               }</div>
                 <div class="cycle-chips">${chips}</div>
+                ${undoPanel}
               </div>`;
             }
             return rowsHtml;

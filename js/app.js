@@ -54,7 +54,23 @@
   let isWide = wideQuery.matches;
   let unlocked = false; // treasurer mode
   let busy = false; // a write is in flight — block double clicks
+  /**
+   * Shared submit/upload state, so a long action can say what it is doing and
+   * offer a retry where it failed rather than only in a banner at the top.
+   *
+   * The design calls for this on the contribute sheet and says it "applies to
+   * any upload/submit action in the app, not just this one screen", so it is a
+   * helper rather than one screen's markup. Shape:
+   *   { phase: "working" | "failed", label, message, retry }
+   */
+  let submitState = null;
   let appError = null; // string shown in the red banner
+  // When the failed action can simply be tried again, the banner carries a
+  // Retry button that calls this. The design shows this as an error toast with
+  // an action; the app already has a persistent banner, which suits an error
+  // better than something that slides away, so the ACTION moves onto the banner
+  // rather than the app growing a second way to report failures.
+  let appErrorRetry = null;
   let appWarning = null; // amber banner: an action succeeded but a side effect didn't
   let appSuccess = null; // green banner: confirms an action fully succeeded (auto-dismisses)
   let successTimer = null;
@@ -67,6 +83,11 @@
   let modalProofPreview = null; // object URL for the local preview
 
   let reviewTarget = null; // { memberId, cycles: [n, ...] } — the whole advance batch
+  // Which confirmed contribution the treasurer is undoing, as an inline panel
+  // in the cycle grid: { memberId, cycleNumber }. The design asks for this
+  // rather than a dialog, "deliberately mirroring the existing inline 'Undo
+  // Release' pattern already used elsewhere in this same screen".
+  let undoPaidTarget = null;
   let rejectConfirming = false;
   let rejectNoteValue = ""; // the treasurer's reason — shown to the member
   let rejectError = null;
@@ -103,6 +124,15 @@
   let overdueListOpen = false; // overdue detail list in the attention panel
 
   let reorderModalOpen = false; // "Reorder payout order", from Menu → Group
+  /**
+   * Restore's own three states — invalid file, working, done.
+   *
+   * Replacing every contribution is the most destructive thing the app does,
+   * and it used to report nothing at all: the treasurer could not tell whether
+   * it had run, was still running, or had failed silently.
+   *   { phase: "invalid" | "working" | "done", fileName, reason, n, released, exportedAt }
+   */
+  let restoreState = null;
   let editNamesModalOpen = false;
   let editNamesValues = {};
   let editNamesError = null;
@@ -176,13 +206,78 @@
     return C.formatDate(C.parseDueDate(released_on));
   }
 
-  function showError(msg) {
+  /**
+   * Run a submit/upload, reporting progress and failure in place.
+   *
+   * Returns true on success, false on failure — the caller decides what to do
+   * next (close the sheet, reload, celebrate), because only it knows. On
+   * failure the state carries a retry that runs exactly the same work again,
+   * so the person does not have to re-enter anything.
+   */
+  async function runSubmit(label, fn) {
+    submitState = { phase: "working", label: label };
+    busy = true;
+    render();
+    try {
+      await fn();
+      submitState = null;
+      return true;
+    } catch (e) {
+      console.error(label + " failed:", e);
+      submitState = {
+        phase: "failed",
+        label: label,
+        message: (e && e.message) || "Something went wrong.",
+        retry: function () {
+          runSubmit(label, fn);
+        },
+      };
+      return false;
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+
+  function clearSubmitState() {
+    submitState = null;
+  }
+
+  /** The inline progress / failure block a sheet shows while submitting. */
+  function submitStateHtml() {
+    if (!submitState) return "";
+    if (submitState.phase === "working") {
+      return `<div class="submit-state working" role="status" aria-live="polite">
+        <span class="submit-spinner" aria-hidden="true"></span>
+        <span>${escapeHtml(submitState.label)}…</span>
+      </div>`;
+    }
+    return `<div class="submit-state failed" role="alert">
+      <span class="submit-state-main">${icon("alert", 15)}<span>${escapeHtml(
+      submitState.message
+    )}</span></span>
+      <button type="button" class="submit-retry" onclick="PowerFund.retrySubmit()">Retry</button>
+    </div>`;
+  }
+
+  function showError(msg, retry) {
     appError = msg || "Something went wrong. Please try again.";
+    appErrorRetry = typeof retry === "function" ? retry : null;
     appWarning = null; // a hard error supersedes a soft warning
     appSuccess = null; // ...and a stale success notice
     clearTimeout(successTimer);
     console.error("App error:", msg);
     render();
+  }
+
+  /** Run the failed action again, clearing the banner first so a second
+   *  failure reads as new rather than stale. */
+  function retryLastAction() {
+    const again = appErrorRetry;
+    appError = null;
+    appErrorRetry = null;
+    render();
+    if (again) again();
   }
 
   /** A softer banner: the main action worked, but something alongside it didn't. */
@@ -340,6 +435,7 @@
   function closeModal() {
     modalTarget = null;
     clearProofSelection();
+    clearSubmitState();
     render();
   }
 
@@ -397,9 +493,7 @@
       return showError("Please attach your proof of payment before submitting.");
     }
 
-    busy = true;
-    render();
-    try {
+    const ok = await runSubmit("Uploading proof", async () => {
       const proofUrl = await window.DB.uploadProof(
         modalProofFile,
         memberId,
@@ -429,19 +523,18 @@
         )}`,
         { type: "payment", amount: count * C.CONTRIBUTION_AMOUNT, refStatus: C.STATUS_PENDING }
       );
-      closeModal();
-      await reload();
-      showSuccess(
-        `Payment submitted — ${C.peso(
-          count * C.CONTRIBUTION_AMOUNT
-        )} is waiting for treasurer verification.`
-      );
-    } catch (e) {
-      showError(e.message);
-    } finally {
-      busy = false;
-      render();
-    }
+    });
+
+    // The sheet stays open on failure, holding the attachment and the cycle
+    // count, so Retry re-sends exactly what was already entered.
+    if (!ok) return;
+    closeModal();
+    await reload();
+    showSuccess(
+      `Payment submitted — ${C.peso(
+        count * C.CONTRIBUTION_AMOUNT
+      )} is waiting for treasurer verification.`
+    );
   }
 
   // ===================================================================
@@ -482,19 +575,11 @@
       // Reverting a confirmed contribution destroys a financial record — never
       // do it on the first tap.
       const due = C.dueDateOf(state.cycles, cycleNumber);
-      openConfirm({
-        kind: "revert",
-        title: "Mark this contribution as unpaid?",
-        bodyHtml:
-          `Move <b>${escapeHtml(memberName(memberId))}</b>'s ` +
-          `<b>${due ? escapeHtml(C.formatDate(due)) : "cycle " + cycleNumber}</b> ` +
-          `contribution back to unpaid?<br><br>` +
-          `This removes <b>${C.peso(C.CONTRIBUTION_AMOUNT)}</b> from Round ` +
-          `${C.roundOfCycle(cycleNumber)}'s total. Any payment screenshot is ` +
-          `kept in the archive, not deleted.`,
-        confirmLabel: "Yes, mark unpaid",
-        ctx: { memberId, cycleNumber },
-      });
+      // Undoing a confirmed payment removes money from a round, so it is never
+      // a single tap — but it stays in the grid, next to the pill that was
+      // tapped, instead of throwing a dialog over the whole screen.
+      undoPaidTarget = { memberId: memberId, cycleNumber: cycleNumber };
+      render();
       return;
     }
 
@@ -669,6 +754,17 @@
     rejectConfirming = true;
     render();
   }
+  function cancelUndoPaid() {
+    undoPaidTarget = null;
+    render();
+  }
+  async function confirmUndoPaid() {
+    if (!undoPaidTarget || busy) return;
+    const { memberId, cycleNumber } = undoPaidTarget;
+    undoPaidTarget = null;
+    await doRevertContribution(memberId, cycleNumber);
+  }
+
   function cancelRejectConfirm() {
     rejectConfirming = false;
     rejectNoteValue = "";
@@ -949,10 +1045,20 @@
     try {
       data = JSON.parse(await file.text());
     } catch (e) {
-      return showError("That file isn't valid JSON.");
+      restoreState = {
+        phase: "invalid",
+        fileName: file.name || "that file",
+        reason: "It isn't valid JSON, so it can't be read at all.",
+      };
+      return render();
     }
     if (!data || !Array.isArray(data.contributions)) {
-      return showError("That file doesn't look like a Power Fund backup.");
+      restoreState = {
+        phase: "invalid",
+        fileName: file.name || "that file",
+        reason: "It doesn't match the format this app exports.",
+      };
+      return render();
     }
     const n = data.contributions.length;
     const released = Array.isArray(data.payouts)
@@ -982,14 +1088,31 @@
   /** The actual restore, after the confirmation dialog. */
   async function doRestoreBackup(data) {
     if (busy) return;
+    const n = data.contributions.length;
+    const released = Array.isArray(data.payouts)
+      ? data.payouts.filter((p) => p && p.released).length
+      : 0;
+    restoreState = { phase: "working" };
     busy = true;
     render();
     try {
       await window.DB.restoreFromBackup(data);
       await logActivity("Fund data restored from a backup file", { type: "admin" });
       await reload();
+      // Positive proof it finished, and of exactly what is now on screen —
+      // after replacing everything, silence is the one thing that leaves the
+      // numbers untrustworthy.
+      restoreState = {
+        phase: "done",
+        n,
+        released,
+        exportedAt: data.exported_at || null,
+      };
     } catch (e) {
-      showError(e.message);
+      restoreState = null;
+      showError(e.message, function () {
+        doRestoreBackup(data);
+      });
     } finally {
       busy = false;
       render();
@@ -1215,6 +1338,16 @@
       );
     }
 
+    // The receipt is the only evidence the payout was actually sent, so it is
+    // required (decision D4, matching the design). The button is disabled
+    // without one; this makes the rule hold even if the handler is reached
+    // another way, the same way the funded check above does.
+    if (!payoutReceiptFile) {
+      return showError(
+        "Attach the receipt photo before releasing — it is the record that the payout was sent."
+      );
+    }
+
     const amount = parsePayoutAmount(payoutAmountValue);
     if (amount == null || amount < 0) {
       return showError("Enter a valid payout amount (₱0 or more).");
@@ -1395,6 +1528,17 @@
   // ===================================================================
   // Edit names
   // ===================================================================
+  function closeRestoreState() {
+    restoreState = null;
+    render();
+  }
+  /** Straight from the invalid-file state back to the picker. */
+  function chooseAnotherBackup() {
+    restoreState = null;
+    render();
+    pickRestoreFile();
+  }
+
   function openReorderModal() {
     reorderModalOpen = true;
     render();
@@ -1681,6 +1825,7 @@
     // Leaving Members drops the drill-down, so coming back lands on the
     // roster rather than whoever was open several taps ago.
     if (currentView === "members") selectedMemberId = null;
+    undoPaidTarget = null;
     currentView = view;
     render();
   }
@@ -2212,6 +2357,7 @@
     qrModalOpen = false;
     qrUploadMsg = null;
     clearQrSelection();
+    clearSubmitState();
     render();
   }
   function cancelQrSelection() {
@@ -2331,20 +2477,17 @@
 
   async function confirmQrUpload() {
     if (!unlocked || !qrNewFile || busy) return;
-    busy = true;
-    render();
-    try {
+    // Same submit pattern as the contribute sheet: progress and any failure
+    // report in place, with the chosen file still attached for a retry.
+    const ok = await runSubmit("Uploading QR code", async () => {
       await window.DB.uploadPaymentQr(qrNewFile, "treasurer");
       await logActivity("Treasurer updated the payment QR code", { type: "admin" });
-      clearQrSelection();
-      qrUploadMsg = "Payment QR code updated successfully.";
-      await reload();
-    } catch (e) {
-      showError(e.message);
-    } finally {
-      busy = false;
-      render();
-    }
+    });
+    if (!ok) return;
+    clearQrSelection();
+    qrUploadMsg = "Payment QR code updated successfully.";
+    await reload();
+    render();
   }
 
   // ===================================================================
@@ -2444,6 +2587,38 @@
     copyFeedback = null;
     render();
   }
+  /**
+   * A message the treasurer can paste into the group chat asking the recipient
+   * for their payout details. Same clipboard pattern as Share fund status,
+   * including its fallback: some browsers refuse writeText without a gesture
+   * they recognise, so the text is put on screen to copy by hand instead.
+   */
+  function copyPayoutReminder(round) {
+    const m = (state.members || []).find((x) => x.member_order === round);
+    const name = m ? m.name : "you";
+    const text =
+      `Hi ${name}! Round ${round} of the fund is ready to pay out ` +
+      `${C.peso(C.GOAL_PER_ROUND)} to you. Could you send your GCash/bank QR ` +
+      `(or account name + number) so I can transfer it? Thanks!`;
+    const done = () => {
+      copyFeedback = "Copied!";
+      render();
+      window.setTimeout(() => {
+        if (copyFeedback === "Copied!") {
+          copyFeedback = null;
+          render();
+        }
+      }, 2000);
+    };
+    try {
+      navigator.clipboard.writeText(text).then(done).catch(() => {
+        showWarning("Couldn't copy automatically. Message to send: " + text);
+      });
+    } catch (e) {
+      showWarning("Couldn't copy automatically. Message to send: " + text);
+    }
+  }
+
   function copyShareText() {
     const text = generateStatusText();
     const ta = document.getElementById("shareTextArea");
@@ -2477,6 +2652,7 @@
       shareModalOpen ||
       editNamesModalOpen ||
       reorderModalOpen ||
+      restoreState != null ||
       lightboxSrc ||
       startRoundConfirming ||
       qrModalOpen ||
@@ -2497,6 +2673,7 @@
     if (pinModalMode) return closePinModal();
     if (payoutModalRound) return closePayoutModal();
     if (qrModalOpen) return closeQrModal();
+    if (restoreState && restoreState.phase !== "working") return closeRestoreState();
     if (reorderModalOpen) return closeReorderModal();
     if (editNamesModalOpen) return closeEditNamesModal();
     if (shareModalOpen) return closeShareModal();
@@ -2721,7 +2898,11 @@
     if (appError) {
       html += `<div class="save-error-banner">${icon("alert", 15)}<span>${escapeHtml(
         appError
-      )}</span></div>`;
+      )}</span>${
+        appErrorRetry
+          ? ` <button type="button" class="banner-retry" onclick="PowerFund.retryLastAction()">Retry</button>`
+          : ""
+      }</div>`;
     }
     if (appWarning) {
       html += `<div class="save-warning-banner">${icon("alert", 15)}<span>${escapeHtml(
@@ -2745,6 +2926,7 @@
       // UI state, snapshotted so a view can't mutate it mid-render
       state, unlocked, busy, openRound, myMemberId, attentionQueueExpanded,
       overdueListOpen, startRoundConfirming, isWide, selectedMemberId,
+      undoPaidTarget,
       payoutQrMemberId,
       // Helpers the views render with.
       //
@@ -2873,6 +3055,7 @@
                 )}')">🔍 View proof larger</button>`
               : `<p class="proof-required-hint">Proof of payment is required to submit.</p>`
           }
+          ${submitStateHtml()}
           <div class="modal-actions">
             <button class="modal-btn-primary" onclick="PowerFund.markPending()" ${
               busy || !modalProofPreview ? "disabled" : ""
@@ -3037,6 +3220,10 @@
 
     if (payoutModalRound) {
       const recipient = members.find((m) => m.member_order === payoutModalRound);
+      // What the button will actually record: the typed amount when it parses,
+      // the round goal otherwise — the same fallback markPayoutReleased() uses.
+      const typedAmount = parsePayoutAmount(payoutAmountValue);
+      const releaseAmount = typedAmount == null ? C.GOAL_PER_ROUND : typedAmount;
       html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closePayoutModal()">
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
           <h3 id="dlg-title">Mark payout released</h3>
@@ -3061,9 +3248,13 @@
                       15
                     )}<span>No payout details on file for ${escapeHtml(
                       recipient.name
-                    )}. Add them from Members &rarr; ${escapeHtml(
-                      recipient.name
-                    )} so the destination is on record, or confirm it another way before sending.</span></div>`;
+                    )}. Releasing still works — arrange payment another way, or ask them for a QR.</span>
+                    <button type="button" class="copy-reminder-btn" onclick="PowerFund.copyPayoutReminder(${payoutModalRound})">${icon(
+                      "sheet",
+                      13
+                    )}<span>${
+                      copyFeedback ? escapeHtml(copyFeedback) : "Copy reminder message"
+                    }</span></button></div>`;
                   }
                   return `<div class="payout-dest payout-dest-inline">
                     <div class="payout-dest-main">
@@ -3123,14 +3314,23 @@
                       payoutNoteValue
                     )}</textarea>
 
-          <label class="proof-upload">
+          <label class="payout-field-label">Receipt photo <span class="field-required">required</span></label>
+          <label class="proof-upload ${payoutReceiptPreview ? "" : "needed"}">
             ${
               payoutReceiptPreview
                 ? `<img src="${payoutReceiptPreview}" class="proof-preview" alt="Receipt preview">`
-                : `<span class="proof-upload-label">${icon("sheet", 14)}<span>Attach a receipt (optional)</span></span>`
+                : `<span class="proof-upload-label">${icon(
+                    "sheet",
+                    14
+                  )}<span>Attach a receipt photo</span></span>`
             }
             <input type="file" accept="image/*" onchange="PowerFund.onPayoutReceiptSelected(this)" hidden>
           </label>
+          <p class="payout-field-hint">${
+            payoutReceiptPreview
+              ? "Kept on this round's record as proof the payout was sent."
+              : "A screenshot of the transfer. This is the only evidence the payout was actually sent, so it is required before releasing."
+          }</p>
           ${
             payoutReceiptPreview
               ? `<button type="button" class="zoom-link" onclick="PowerFund.removePayoutReceipt()">Remove receipt</button>`
@@ -3139,8 +3339,8 @@
 
           <div class="modal-actions">
             <button class="modal-btn-primary" onclick="PowerFund.markPayoutReleased()" ${
-              busy ? "disabled" : ""
-            }>${busy ? "Working…" : "Confirm released"}</button>
+              busy || !payoutReceiptFile ? "disabled" : ""
+            }>${busy ? "Working…" : "Release " + C.peso(releaseAmount)}</button>
             <button class="modal-btn-secondary" onclick="PowerFund.closePayoutModal()">Cancel</button>
           </div>
         </div>
@@ -3160,6 +3360,62 @@
             <button class="modal-btn-primary" onclick="PowerFund.copyShareText()">Copy</button>
             <button class="modal-btn-secondary" onclick="PowerFund.closeShareModal()">Close</button>
           </div>
+        </div>
+      </div>`;
+    }
+
+    if (restoreState) {
+      // One shell for all three states, as the design asks — the treasurer
+      // stays in the same place from picking a file to knowing it worked.
+      const body =
+        restoreState.phase === "working"
+          ? `<div class="submit-state working" role="status" aria-live="polite">
+               <span class="submit-spinner" aria-hidden="true"></span>
+               <span>Restoring your data…</span>
+             </div>
+             <p class="modal-sub">Replacing contributions and payout status. This only takes a moment.</p>`
+          : restoreState.phase === "done"
+          ? `<div class="restore-done">${icon("check", 18)}<span>Restore complete</span></div>
+             <p class="modal-sub">Your data now matches the backup${
+               restoreState.exportedAt
+                 ? ` exported ${escapeHtml(formatDateTime(restoreState.exportedAt))}`
+                 : ""
+             }.</p>
+             <ul class="restore-summary">
+               <li><b>${restoreState.n}</b> contribution${
+              restoreState.n === 1 ? "" : "s"
+            } restored</li>
+               <li><b>${restoreState.released}</b> released payout${
+              restoreState.released === 1 ? "" : "s"
+            }</li>
+             </ul>`
+          : `<div class="restore-invalid">${icon("alert", 18)}<span>This isn't a Power Fund backup</span></div>
+             <p class="modal-sub"><b>${escapeHtml(
+               restoreState.fileName
+             )}</b> couldn't be used. ${escapeHtml(restoreState.reason)}</p>
+             <p class="restore-hint">${icon(
+               "download",
+               13
+             )}<span>Look for a file named like <code>power-fund-backup-YYYY-MM-DD.json</code>, exported from Menu → Backup data.</span></p>
+             <p class="restore-untouched">Nothing was changed — your current data is untouched.</p>`;
+
+      const actions =
+        restoreState.phase === "working"
+          ? ""
+          : restoreState.phase === "done"
+          ? `<button class="modal-btn-primary" onclick="PowerFund.closeRestoreState()">Done</button>`
+          : `<button class="modal-btn-primary" onclick="PowerFund.chooseAnotherBackup()">Choose another file</button>
+             <button class="modal-btn-secondary" onclick="PowerFund.closeRestoreState()">Cancel</button>`;
+
+      html += `<div class="modal-overlay" onclick="${
+        restoreState.phase === "working"
+          ? ""
+          : "if(event.target===this) PowerFund.closeRestoreState()"
+      }">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <h3 id="dlg-title">Restore from backup</h3>
+          ${body}
+          ${actions ? `<div class="modal-actions">${actions}</div>` : ""}
         </div>
       </div>`;
     }
@@ -3256,6 +3512,7 @@
                  <div class="modal-meta">${escapeHtml(
                    qrNewFile ? qrNewFile.name : ""
                  )}</div>
+                 ${submitStateHtml()}
                  <div class="modal-actions">
                    <button class="modal-btn-primary" onclick="PowerFund.confirmQrUpload()" ${
                      busy ? "disabled" : ""
@@ -3566,6 +3823,7 @@
   window.PowerFund = {
     retry: () => {
       appError = null;
+      appErrorRetry = null;
       render();
       init();
     },
@@ -3609,6 +3867,8 @@
     confirmBatch,
     expandAttentionQueue,
     toggleOverdueList,
+    cancelUndoPaid,
+    confirmUndoPaid,
     rejectReview,
     setRejectNote: (v) => {
       rejectNoteValue = v;
@@ -3621,6 +3881,7 @@
     exportCsv,
     downloadBackup,
     pickRestoreFile,
+    restoreBackup,
     closeConfirm,
     setConfirmType,
     setConfirmPin,
@@ -3647,6 +3908,13 @@
     openShareModal,
     closeShareModal,
     copyShareText,
+    copyPayoutReminder,
+    retryLastAction,
+    retrySubmit: () => {
+      if (submitState && submitState.retry) submitState.retry();
+    },
+    closeRestoreState,
+    chooseAnotherBackup,
     openReorderModal,
     closeReorderModal,
     openEditNamesModal,

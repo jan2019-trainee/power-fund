@@ -432,6 +432,8 @@ window.PFViews.home = function (ctx) {
                    // freshly-opened cycle isn't an error, so it shouldn't
                    // read like one (matches the Rounds & cycles grid below,
                    // which also shows no icon for a not-yet-due unpaid cycle).
+                   // Mark trails the name, matching the Rounds grid. Leading it
+                   // ("… Regine") reads as truncated text rather than a state.
                    const mark = s === 2 ? "✓" : s === 1 ? "…" : "";
                    const word =
                      s === 2
@@ -458,7 +460,7 @@ window.PFViews.home = function (ctx) {
                      clickable ? "" : "disabled"
                    } onclick="PowerFund.cellClicked('${m.id}', ${payCycle})" aria-label="${escapeHtml(
                      m.name
-                   )}: ${word}${action}">${mark ? mark + " " : ""}${escapeHtml(m.name)}</button>`;
+                   )}: ${word}${action}">${escapeHtml(m.name)}${mark ? " " + mark : ""}</button>`;
                  })
                  .join("")}
              </div>

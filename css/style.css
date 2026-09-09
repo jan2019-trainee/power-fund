@@ -674,6 +674,46 @@ body {
   z-index: 50;
   padding: 20px;
 }
+/* ---- Bottom sheets (mobile) ----------------------------------------------
+   Contribute, Review Payment and Release Payout are drawn as bottom sheets in
+   the design — the annotation asks for the GCash/Cash App shape, where the
+   actions sit near the thumb rather than mid-screen. Only these three: the
+   rest of the app's dialogs are centered in the design too, and the desktop
+   artboards specify centered modals for all of them, so this is scoped to
+   narrow viewports. */
+@media (max-width: 640px) {
+  .modal-overlay.sheet {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .modal-overlay.sheet .modal {
+    max-width: 100%;
+    border-radius: 18px 18px 0 0;
+    border-bottom: none;
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+    max-height: 92vh;
+    animation: pfSheetUp 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  /* The grab handle says "this drags up from the bottom" before anything is
+     read — it is the affordance that makes a sheet a sheet. */
+  .modal-overlay.sheet .modal::before {
+    content: "";
+    display: block;
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border);
+    margin: -8px auto 14px;
+  }
+}
+@keyframes pfSheetUp {
+  from { transform: translateY(14px); opacity: 0.6; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .modal-overlay.sheet .modal { animation: none; }
+}
+
 .modal {
   background: var(--bg-card);
   border: 1px solid var(--border);
@@ -3489,6 +3529,10 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   margin-bottom: 18px;
 }
 .donut { flex-shrink: 0; }
+/* One status across the whole round: a sentence, not a chart. */
+.donut-card-single { align-items: center; gap: 10px; }
+.donut-single-text { margin: 0; font-size: 13.5px; color: var(--text-muted); line-height: 1.5; }
+.donut-single-text b { color: var(--text-primary); font-weight: 600; }
 .donut-legend { list-style: none; margin: 0; padding: 0; flex: 1; min-width: 150px; }
 .donut-legend-row {
   display: flex;

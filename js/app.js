@@ -2067,6 +2067,20 @@
     const total = slices.reduce((sum, x) => sum + x.n, 0);
     if (!total) return "";
 
+    // A donut of ONE slice is a full ring and a single legend row: it carries
+    // nothing the number alone doesn't, and an unbroken circle reads as a
+    // loading spinner. Say it in a line instead.
+    if (slices.length === 1) {
+      const only = slices[0];
+      return `<p class="section-label">This round's status</p>
+      <div class="donut-card donut-card-single">
+        <span class="donut-swatch" style="background:${only.color}"></span>
+        <p class="donut-single-text">All <b>${total}</b> ${
+        total === 1 ? "member is" : "members are"
+      } <b>${only.label.toLowerCase()}</b> for Round ${round}.</p>
+      </div>`;
+    }
+
     // One ring, drawn with stroke-dasharray so each arc is a plain circle.
     const R = 42;
     const CIRC = 2 * Math.PI * R;
@@ -2164,8 +2178,17 @@
         (overdueNames.length > 2 ? ` +${overdueNames.length - 2}` : "")
       : "nobody behind";
 
+    // FOUR tiles, as the design draws them. A fifth ("awaiting review") made
+    // the grid odd, leaving a visible hole in the last row that read as a
+    // layout fault — and pending money belongs beside the collected figure
+    // anyway, since it is the part of it not yet counted.
     html += `<div class="stat-grid">
-      ${tile(C.peso(collected), `collected of ${C.peso(C.TARGET_AMOUNT)}`)}
+      ${tile(
+        C.peso(collected),
+        `collected of ${C.peso(C.TARGET_AMOUNT)}${
+          pending ? ` · ${pending} awaiting review` : ""
+        }`
+      )}
       ${tile(
         `${roundsDone} / ${C.TOTAL_ROUNDS}`,
         allDoneLabel(contributions, state.payouts, curRound)
@@ -2176,7 +2199,6 @@
         overallOnTime === null ? "" : overallOnTime >= 80 ? "success" : "danger"
       )}
       ${tile(String(overdue), overdueSub, overdue ? "danger" : "success")}
-      ${tile(String(pending), "awaiting review", pending ? "pending" : "")}
     </div>`;
 
     html += renderRoundStatusDonut(members, curRound);
@@ -3007,7 +3029,7 @@
       );
       const total = C.CONTRIBUTION_AMOUNT * modalCount;
       const qrUrl = qrImageUrl();
-      html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeModal()">
+      html += `<div class="modal-overlay sheet" onclick="if(event.target===this) PowerFund.closeModal()">
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
           <h3 id="dlg-title">Contribute — ${member ? escapeHtml(member.name) : ""}</h3>
           <p class="modal-sub">${
@@ -3094,7 +3116,7 @@
       const total = C.CONTRIBUTION_AMOUNT * rc.length;
       const proof = C.proofOf(state.contributions, reviewTarget.memberId, rc[0]);
       const multi = rc.length > 1;
-      html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeReviewModal()">
+      html += `<div class="modal-overlay sheet" onclick="if(event.target===this) PowerFund.closeReviewModal()">
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
           <h3 id="dlg-title">Review payment — ${member ? escapeHtml(member.name) : ""}</h3>
           <p class="modal-sub">${
@@ -3244,7 +3266,7 @@
       // the round goal otherwise — the same fallback markPayoutReleased() uses.
       const typedAmount = parsePayoutAmount(payoutAmountValue);
       const releaseAmount = typedAmount == null ? C.GOAL_PER_ROUND : typedAmount;
-      html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closePayoutModal()">
+      html += `<div class="modal-overlay sheet" onclick="if(event.target===this) PowerFund.closePayoutModal()">
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
           <h3 id="dlg-title">Mark payout released</h3>
           <p class="modal-sub">Round ${payoutModalRound} — ${

@@ -160,15 +160,33 @@ body {
 .my-status-overdue { border-left-color: var(--danger); }
 .my-status-rejected { border-left-color: var(--danger); }
 
+/* PINNED, and above the modal layer. This sat in normal document flow with no
+   z-index, so any error raised while a sheet was open — a failed release, a
+   rejected receipt, a member's oversized screenshot — was drawn BEHIND the
+   overlay (z-index 50, opaque) where nobody could read it, and the
+   scrollIntoView added for the last round could not help because the target
+   was occluded. On the two screens where real money moves, that is the same
+   silent-failure bug in a worse place. */
 .save-error-banner {
-  margin-bottom: 16px;
-  padding: 10px 14px;
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60; /* over .modal-overlay (50), under the lightbox (100) */
+  width: min(calc(100% - 24px), 560px);
+  margin-bottom: 0;
+  padding: 11px 14px;
   border-radius: 9px;
-  background: rgba(225,83,83,0.14);
+  background: #2A1416;
   border: 1px solid #E15353;
-  color: #E15353;
+  color: #F0A9A9;
   font-size: 12.5px;
-  text-align: center;
+  text-align: left;
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.7);
+}
+@media (min-width: 900px) {
+  /* Clear of the sidebar, so it centres over the content column. */
+  .save-error-banner { left: calc(50% + 116px); }
 }
 
 .save-warning-banner {
@@ -224,6 +242,12 @@ body {
   min-width: 0;
 }
 
+/* Above the 480px breakpoint the long form is the only one shown; the media
+   query below flips them. Declared HERE, before that query — after it, equal
+   specificity plus source order meant this won at every width and the short
+   subtitle never rendered at all. */
+.subtitle-short { display: none; }
+
 .subtitle {
   color: var(--text-muted);
   font-size: 14px;
@@ -240,19 +264,37 @@ body {
    works"), so nothing is lost, only folded. */
 @media (max-width: 480px) {
   .header { align-items: center; margin-bottom: 12px; }
-  .header-titles { flex-wrap: nowrap; align-items: baseline; gap: 0 8px; }
+  /* Stacked, as the design draws it ("Power Fund" over "Group of 5 ·
+     Paluwagan") — not side by side. Sharing one row made the two compete and
+     truncated the fund's own name to "⚡ ViTAMi…". Two short lines still cost
+     far less than the 26px title + wrapping long subtitle this replaced. */
+  .header-titles {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    gap: 1px;
+  }
   .title {
     font-size: 20px;
+    line-height: 1.2;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    flex: 1 1 auto;
+    max-width: 100%;
   }
-  /* The subtitle goes rather than competing. Sharing the row truncated BOTH —
-     "⚡ ViTA…" next to "5-member sinking fund · ₱1…" — which loses the fund's
-     identity to describe it. The full text stays in Menu's "How this works"
-     and in the element's title attribute. */
-  .subtitle { display: none; }
+  /* The long subtitle gives up the row; the short one takes its place. Sharing
+     the row with the long form truncated BOTH — "⚡ ViTA…" beside "5-member
+     sinking fund · ₱1…" — which loses the fund's identity in order to describe
+     it. */
+  .subtitle-long { display: none; }
+  .subtitle-short {
+    display: block;
+    font-size: 11.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
 }
 
 /* A PILL in the header row, not a button on its own line. The design carries
@@ -2349,7 +2391,10 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
 .avatar-current { box-shadow: 0 0 0 2.5px var(--success), 0 0 14px 1px rgba(76, 175, 131, 0.35); }
 .avatar-overdue { box-shadow: 0 0 0 2.5px var(--danger); }
 .avatar-pending { box-shadow: 0 0 0 2.5px var(--pending-review); }
-.avatar-paid-out { box-shadow: 0 0 0 2.5px var(--accent); }
+/* "Already received their payout" is a settled, positive state — the accent is
+   the colour the rest of the app uses for "needs action", so on a completed
+   fund every member was ringed as if something were owed. */
+.avatar-paid-out { box-shadow: 0 0 0 2.5px var(--success); }
 .avatar-idle { box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.14); color: var(--text-muted); }
 
 .member-ident { display: flex; align-items: center; gap: 11px; margin: 10px 0 2px; }
@@ -3013,7 +3058,9 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
 .rejected-cta:active { transform: scale(0.985); }
 
 /* Roster ring + detail pill for a member with a refused claim. */
-.avatar-rejected { box-shadow: 0 0 0 2.5px var(--danger); }
+/* Dashed, so it reads apart from the solid overdue ring — the roster strip
+   has no other cue, and "sent and refused" is not "never sent". */
+.avatar-rejected { box-shadow: 0 0 0 2.5px var(--danger); outline: 2px dashed var(--danger); outline-offset: 3px; }
 .detail-standing.standing-rejected { background: var(--danger-soft); color: var(--danger); }
 
 /* Treasurer's reason, inside the review sheet's reject confirmation. */
@@ -3954,3 +4001,34 @@ body.modal-open {
 }
 body.modal-open .modal-overlay,
 body.modal-open .lightbox-overlay { touch-action: auto; }
+
+/* The no-receipt fallback. Deliberately visually secondary and only rendered
+   after an upload has actually failed — it exists so a real transfer is never
+   unrepresentable, not as an easier route past the receipt requirement. */
+.release-noreceipt {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+.release-noreceipt-text {
+  margin: 0 0 8px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  text-align: left;
+}
+
+/* The one editable money field in the app; every other amount is formatted, so
+   a bare "30000" here beside a button reading "Release ₱30,000.00" invites a
+   mistyped payout. */
+.payout-amount-wrap { position: relative; display: block; }
+.payout-amount-prefix {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  font-size: 14px;
+  pointer-events: none;
+}
+.payout-amount-wrap .payout-amount-input { padding-left: 26px; }

@@ -101,28 +101,44 @@ window.PFViews.rounds = function (ctx) {
                     status === 2
                       ? "✓"
                       : status === 1
-                      ? "…"
+                      ? "⋯"
                       : status === 3
                       ? "✕"
                       : overdue
                       ? "!"
                       : "";
                   const clickable = unlocked || status === 0 || status === 3;
-                  const tip =
-                    status === 1
-                      ? "Pending treasurer review"
+                  // This string is now the chip's accessible NAME, so it has
+                  // to describe what tapping does for THIS viewer. It said
+                  // "tap to resubmit" to everyone, but a treasurer tapping a
+                  // rejected chip gets the direct cash-record confirmation.
+                  const tip = unlocked
+                    ? status === 1
+                      ? "Pending review — tap to review"
                       : status === 2
-                      ? "Confirmed paid"
+                      ? "Confirmed paid — tap to undo"
                       : status === 3
-                      ? "Rejected — tap to resubmit"
+                      ? "Rejected — tap to record as paid"
                       : overdue
-                      ? "Overdue — tap to contribute"
-                      : "Tap to contribute";
+                      ? "Overdue — tap to record as paid"
+                      : "Not paid — tap to record as paid"
+                    : status === 1
+                    ? "Pending treasurer review"
+                    : status === 2
+                    ? "Confirmed paid"
+                    : status === 3
+                    ? "Rejected — tap to resubmit"
+                    : overdue
+                    ? "Overdue — tap to contribute"
+                    : "Tap to contribute";
                   // Treasurer mode makes every chip clickable, including
                   // paid/pending ones that would otherwise look like plain
                   // status badges — a dashed border marks those as also
                   // being buttons (tap to revert / review), not just info.
-                  const treasurerTap = unlocked && status !== 0 && status !== 3;
+                  // Home marks a rejected chip as tappable for a treasurer
+                  // (home.js), so this must too — the same chip carried the
+                  // affordance on one screen and not the other.
+                  const treasurerTap = unlocked && status !== 0;
                   // A real <button>, not a <span onclick>. Every per-cycle
                   // money action on this screen — confirm, revert, record,
                   // resubmit — is driven from these chips, and as spans they

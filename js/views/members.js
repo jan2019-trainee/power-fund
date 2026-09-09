@@ -100,7 +100,10 @@ function memberRow(m, ctx, cyclesDueSoFar, isWide) {
     ? { cls: "overdue", word: "Overdue" }
     : standing === "pending"
     ? { cls: "pending", word: "In review" }
-    : { cls: "upcoming", word: "Upcoming" };
+    // No tag at all for "nothing notable". Members.dc.html tags only "Paid out"
+    // and "This round"; three identical "Upcoming" chips diluted the two that
+    // actually mean something.
+    : null;
 
   // What this member is doing in the round that is actually running — the
   // earliest cycle of THAT round they haven't settled. currentCycle() answers a
@@ -147,7 +150,7 @@ function memberRow(m, ctx, cyclesDueSoFar, isWide) {
       <span class="member-row-main">
         <span class="member-row-top">
           <span class="member-row-name">${escapeHtml(m.name)}</span>
-          <span class="member-tag ${tag.cls}">${tag.word}</span>
+          ${tag ? `<span class="member-tag ${tag.cls}">${tag.word}</span>` : ""}
         </span>
         <span class="member-row-sub">Payout order #${m.member_order} · Round ${
     curRound

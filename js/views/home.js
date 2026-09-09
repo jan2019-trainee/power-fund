@@ -87,9 +87,6 @@ window.PFViews.home = function (ctx) {
       <p class="rejected-hint">${
         cyc.length > 1 ? "These cycles are" : "This cycle is"
       } still due. Send the payment again and attach a clearer screenshot.</p>
-      <button type="button" class="rejected-cta" onclick="PowerFund.openContributeModal('${inlineArg(
-        myMember.id
-      )}', ${cyc[0]})">${icon("upload", 15)}<span>Resubmit payment</span></button>
     </div>`;
   }
 
@@ -468,7 +465,7 @@ window.PFViews.home = function (ctx) {
                    // Mark trails the name, matching the Rounds grid. Leading it
                    // ("… Regine") reads as truncated text rather than a state.
                    const mark =
-                     s === 2 ? "✓" : s === 1 ? "…" : s === 3 ? "✕" : overdue ? "!" : "";
+                     s === 2 ? "✓" : s === 1 ? "⋯" : s === 3 ? "✕" : overdue ? "!" : "";
                    const word =
                      s === 2
                        ? "paid"
@@ -525,12 +522,21 @@ window.PFViews.home = function (ctx) {
   //     CTA is then "simply absent — just the tab bar". Prompting someone to
   //     pay a cycle they have already submitted is the bug this closes;
   //   unidentified device — offered, so a shared phone still works.
+  // A rejected member's action is pinned, as the design has it — it used to
+  // live only inside the rejection card, so scrolling past that card left them
+  // with no action anywhere on screen.
+  if (myRejection && !unlocked) {
+    hasFloatingCta = true;
+    html += `<div class="floating-cta"><button type="button" class="hero-cta rejected-cta" onclick="PowerFund.openContributeModal('${inlineArg(
+      myMember.id
+    )}', ${myRejection.cycles[0]})">${icon("upload", 15)}<span>Resubmit payment</span></button></div>`;
+  } else {
   hasFloatingCta =
     !!payCycle && (unlocked ? true : !myMember && cyclePaidCount < members.length);
   if (hasFloatingCta) {
     html += `<div class="floating-cta"><button type="button" class="hero-cta" onclick="PowerFund.openContributePicker(${payCycle})">${
       unlocked
-        ? "＋ Record / review a payment"
+        ? "＋ Record a contribution"
         : `＋ Pay this cycle · ${C.peso(C.CONTRIBUTION_AMOUNT)}`
     }</button></div>`;
   } else if (allDone && unlocked) {
@@ -541,6 +547,7 @@ window.PFViews.home = function (ctx) {
       "sheet",
       15
     )}<span>Export final report</span></button></div>`;
+  }
   }
 
   S.cta = section();
@@ -588,11 +595,20 @@ window.PFViews.home = function (ctx) {
   // summarises the round, Rounds is where you work through it.
   html += `<button type="button" class="rounds-link" onclick="PowerFund.setView('rounds')">
     <span class="rounds-link-main">
-      <span class="rounds-link-title">Round ${allDone ? C.TOTAL_ROUNDS : curRound}</span>
-      ${allDone ? "" : ROUND_PILL[curStatus]}
-      <span class="rounds-link-meta">${C.peso(curCollected)} / ${C.peso(
-    C.GOAL_PER_ROUND
-  )}</span>
+      ${
+        // Once every round is done this link is about the whole fund, not a
+        // round in progress — it read "Round 5 · ₱30,000/₱30,000" with the
+        // status pill stripped, which says less than either alternative.
+        allDone
+          ? `<span class="rounds-link-title">All ${C.TOTAL_ROUNDS} rounds</span>
+             ${ROUND_PILL.completed || ""}
+             <span class="rounds-link-meta">${C.peso(C.TARGET_AMOUNT)} paid out</span>`
+          : `<span class="rounds-link-title">Round ${curRound}</span>
+             ${ROUND_PILL[curStatus]}
+             <span class="rounds-link-meta">${C.peso(curCollected)} / ${C.peso(
+              C.GOAL_PER_ROUND
+            )}</span>`
+      }
     </span>
     ${icon("chevron", 15)}
   </button>`;
@@ -628,7 +644,13 @@ window.PFViews.home = function (ctx) {
    * ===================================================================== */
   if (!isWide) {
     return (
-      S.dayOne + S.rejected + S.myStatus + S.complete + S.release + S.attention +
+      // Annotation 1: "Needs your attention" leads the screen, right under the
+      // header, ahead of the balance card. For a treasurer the queue and a
+      // ready payout outrank the personal card; for a member there is no queue
+      // and their own status IS the lead.
+      S.dayOne +
+      S.rejected +
+      (unlocked ? S.complete + S.release + S.attention + S.myStatus : S.myStatus + S.complete) +
       S.fundTotal + S.hero + S.cta + S.roster + S.roundsLink + S.prevRounds +
       S.spacer
     );
@@ -657,21 +679,24 @@ window.PFViews.home = function (ctx) {
     allDone ? "Fund complete" : `Round ${curRound} of ${C.TOTAL_ROUNDS}`
   }</p>
     </div>
-    ${
-      // Same predicate as the mobile floating CTA (hasFloatingCta above). This
-      // used to key off payCycle alone, so an identified member who had
-      // already submitted was still shown a primary "Pay this cycle" beside a
-      // rail reading "awaiting treasurer verification" — the duplicate-payment
-      // invitation the mobile fix closed, left open on desktop.
-      hasFloatingCta
-        ? `<button type="button" class="home-greet-cta" onclick="PowerFund.openContributePicker(${payCycle})">${icon(
-            "plus",
-            15
-          )}<span>${
-            unlocked ? "Record contribution" : "Pay this cycle"
-          }</span></button>`
-        : ""
-    }
+    ${(function () {
+      // Desktop hides .floating-cta entirely, so this greeting button is the
+      // ONLY CTA on this shell — it cannot simply borrow hasFloatingCta.
+      // Borrowing it emitted openContributePicker(null) once the fund was
+      // complete (payCycle is null then), producing a primary button that did
+      // nothing, while the design's terminal action never rendered at all.
+      if (allDone && unlocked) {
+        return `<button type="button" class="home-greet-cta" onclick="PowerFund.exportCsv()">${icon(
+          "sheet",
+          15
+        )}<span>Export final report</span></button>`;
+      }
+      if (!hasFloatingCta || !payCycle) return "";
+      return `<button type="button" class="home-greet-cta" onclick="PowerFund.openContributePicker(${payCycle})">${icon(
+        "plus",
+        15
+      )}<span>${unlocked ? "Record a contribution" : "Pay this cycle"}</span></button>`;
+    })()}
   </div>`;
 
   // Recent activity — the three latest entries, with "View all" into the tab.
@@ -756,7 +781,11 @@ window.PFViews.home = function (ctx) {
         ${S.fundTotal}${S.hero}${S.roster}${S.roundsLink}${recentPanel}${S.prevRounds}
       </div>
       <aside class="home-rail">
-        ${S.rejected}${S.myStatus}${S.complete}${S.release}${S.attention}${overview}${quick}
+        ${S.rejected}${
+          unlocked
+            ? `${S.complete}${S.release}${S.attention}${S.myStatus}`
+            : `${S.myStatus}${S.complete}`
+        }${overview}${quick}
       </aside>
     </div>` +
     S.cta +

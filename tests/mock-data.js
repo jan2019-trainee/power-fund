@@ -83,8 +83,10 @@ const ACTIVITY_LOG = [
     event_type: 'payment', amount: 1000, ref_status: 1, member_id: uuid(3), round_number: 2 },
   { id: uuid(202), message: "Treasurer confirmed Sarah's cycle 7 as paid — ₱1,000", created_at: _day(0, 9, 15),
     event_type: 'payment', amount: 1000, ref_status: 2, member_id: uuid(2), round_number: 2 },
+  // Negative: money leaving the fund. The app now stores direction in the sign
+  // rather than making each renderer infer it from the event type.
   { id: uuid(203), message: 'Payout released — Round 1 (Regine) · ₱30,000', created_at: _day(1, 16, 2),
-    event_type: 'payout', amount: 30000, ref_status: null, member_id: uuid(1), round_number: 1 },
+    event_type: 'payout', amount: -30000, ref_status: null, member_id: uuid(1), round_number: 1 },
   { id: uuid(204), message: "Treasurer reverted Clara's cycle 6 to unpaid", created_at: _day(1, 11, 20),
     event_type: 'payment', amount: -1000, ref_status: 0, member_id: uuid(4), round_number: 1 },
   { id: uuid(205), message: "Treasurer rejected Verdz's cycle 5 claim — \"Blurry screenshot\"", created_at: _day(1, 14, 30),

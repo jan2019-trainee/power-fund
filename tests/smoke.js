@@ -703,7 +703,10 @@ async function activityAndInsights(browser, errors) {
 
   // --- fund name -------------------------------------------------------
   const title = (await page.locator(".header .title").innerText()).trim();
-  const sub = (await page.locator(".header .subtitle").innerText()).trim();
+  // Two subtitles exist (long for desktop, short for phones); neither may
+  // repeat the fund name.
+  const subs = await page.locator(".header .subtitle").allInnerTexts();
+  const sub = subs.join(" · ").trim();
   check("p7/header shows the stored fund name", /ViTAMiN Fund 2027/.test(title), title);
   // The group's name used to live in the config subtitle; with both set the
   // header printed it twice.
@@ -1140,10 +1143,22 @@ async function qaFixes(browser, errors) {
     released === false,
     `released=${released}`
   );
+  // The failure is reported INSIDE the sheet now — a page banner would render
+  // behind the sheet's own opaque overlay where nobody could read it.
   check(
-    "qa/and it says so, retryably",
-    (await page.locator(".save-error-banner").count()) === 1 &&
-      /NOT released/i.test(await page.locator(".save-error-banner").innerText())
+    "qa/the failure is reported inside the sheet, retryably",
+    (await page.locator(".modal .submit-state.failed").count()) === 1 &&
+      /NOT released/i.test(await page.locator(".submit-state.failed").innerText()) &&
+      (await page.locator(".submit-retry").count()) === 1,
+    JSON.stringify(
+      (await page.locator(".modal").last().innerText()).replace(/\s+/g, " ").slice(0, 160)
+    )
+  );
+  // And a break-glass exists, so a real transfer is never unrepresentable.
+  check(
+    "qa/a no-receipt fallback is offered only after the upload fails",
+    (await page.locator(".release-noreceipt").count()) === 1 &&
+      /without the receipt/i.test(await page.locator(".release-noreceipt").innerText())
   );
   await page.close();
 

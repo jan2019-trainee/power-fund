@@ -91,6 +91,9 @@
   // Recording a payment with no proof (the treasurer's cash path) writes money
   // too, so it gets the same inline gate as undo rather than firing on one tap.
   let markPaidTarget = null;
+  // Set when a receipt upload fails, so the release sheet can offer the
+  // explicit no-receipt fallback instead of trapping a real transfer.
+  let receiptUploadFailed = false;
   let rejectConfirming = false;
   let rejectNoteValue = ""; // the treasurer's reason — shown to the member
   let rejectError = null;
@@ -321,6 +324,12 @@
     if (msg) console.warn("App warning:", msg);
     render();
   }
+  function dismissError() {
+    appError = null;
+    appErrorRetry = null;
+    render();
+  }
+
   function dismissWarning() {
     appWarning = null;
     render();
@@ -1275,6 +1284,13 @@
    *  one-off SQL statement, so a fund deployed without running it had no
    *  recovery path and nothing in the app said so. */
   function openMasterPin() {
+    // Treasurer-only, checked here and again in submitPin(). The Menu row that
+    // opens this already sits behind `unlocked`, but the function is on the
+    // PowerFund global — a UI-only gate on the recovery credential is not a
+    // gate, it is decoration.
+    if (!unlocked) {
+      return showError("Unlock treasurer mode before changing the master PIN.");
+    }
     pinInputValue = "";
     pinError = null;
     pinModalMode = "master";
@@ -1290,6 +1306,10 @@
 
   async function submitPin() {
     if (pinModalMode === "master") {
+      if (!unlocked) {
+        pinError = "Treasurer mode must be unlocked to change the master PIN.";
+        return render();
+      }
       if (!pinInputValue || pinInputValue.length < 4) {
         pinError = "The master PIN must be at least 4 digits.";
         return render();
@@ -1391,6 +1411,7 @@
   // Payout release
   // ===================================================================
   function openPayoutModal(round) {
+    receiptUploadFailed = false;
     payoutModalRound = round;
     const existing = getPayout(round);
     payoutNoteValue = existing.note || "";
@@ -1400,6 +1421,7 @@
     render();
   }
   function closePayoutModal() {
+    receiptUploadFailed = false;
     payoutModalRound = null;
     payoutNoteValue = "";
     payoutAmountValue = "";
@@ -1438,8 +1460,21 @@
     return isFinite(n) ? n : null;
   }
 
-  async function markPayoutReleased() {
+  /** Release, but explicitly WITHOUT a receipt, after an upload has failed.
+   *  The break-glass: refusing outright is right for a transient failure, but
+   *  if the storage bucket is missing the treasurer can never record a payout
+   *  at all — money has moved in the real world and the app would be unable to
+   *  represent it, leaving the round Payout Pending forever. So this exists,
+   *  behind a second deliberate tap, and is loud about what it is: the log
+   *  says the receipt is missing and why, and a warning stays on screen. */
+  async function releaseWithoutReceipt() {
     if (!payoutModalRound || busy) return;
+    await markPayoutReleased({ skipReceipt: true });
+  }
+
+  async function markPayoutReleased(opts) {
+    if (!payoutModalRound || busy) return;
+    const skipReceipt = !!(opts && opts.skipReceipt === true);
     const round = payoutModalRound;
     // Guard at the action level: a payout can only be released once the round
     // has actually reached its ₱30,000 target in confirmed contributions. The
@@ -1459,7 +1494,7 @@
     // required (decision D4, matching the design). The button is disabled
     // without one; this makes the rule hold even if the handler is reached
     // another way, the same way the funded check above does.
-    if (!payoutReceiptFile) {
+    if (!payoutReceiptFile && !skipReceipt) {
       return showError(
         "Attach the receipt photo before releasing — it is the record that the payout was sent."
       );
@@ -1484,18 +1519,26 @@
       // it. Abort instead: the round stays Payout Pending, which is the honest
       // state when the app holds no proof, and the treasurer can retry.
       let receiptUrl = null;
-      try {
-        receiptUrl = await window.DB.uploadPayoutReceipt(payoutReceiptFile, round);
-      } catch (e) {
-        console.warn("Payout receipt upload failed:", e.message);
-        busy = false;
-        showError(
-          "The receipt photo could not be uploaded, so the payout was NOT " +
-            "released — nothing was recorded. Check your connection and try " +
-            "again. If this keeps happening the storage bucket may not be set up.",
-          () => markPayoutReleased(round)
-        );
-        return render();
+      if (!skipReceipt) {
+        try {
+          receiptUrl = await window.DB.uploadPayoutReceipt(payoutReceiptFile, round);
+        } catch (e) {
+          console.warn("Payout receipt upload failed:", e.message);
+          busy = false;
+          receiptUploadFailed = true;
+          // Report the REAL reason. The generic string this used to substitute
+          // threw away database.js's actionable one ("run migration 003"),
+          // making the abort less useful than the failure it wrapped. Shown
+          // inside the sheet, where the treasurer is looking.
+          submitState = {
+            phase: "failed",
+            message:
+              (e && e.message ? e.message : "The receipt photo could not be uploaded.") +
+              " The payout was NOT released — nothing has been recorded.",
+            retry: () => markPayoutReleased(),
+          };
+          return render();
+        }
       }
 
       // The release itself uses only pre-existing columns, so it always works.
@@ -1525,10 +1568,15 @@
         `Payout released — Round ${round} (${
           recipient ? recipient.name : "—"
         }) · ${C.peso(amount)}` +
-          (payoutNoteValue ? ": " + payoutNoteValue : ""),
+          (payoutNoteValue ? ": " + payoutNoteValue : "") +
+          (skipReceipt ? " — NO RECEIPT ON FILE (upload failed)" : ""),
         {
           type: "payout",
-          amount: amount,
+          // NEGATIVE: a released payout is money leaving the fund. Storing it
+          // positive forced the renderers to infer direction from the event
+          // type, which is how a ₱30,000 outflow ended up unsigned on mobile
+          // and a reversal ended up indistinguishable from a release.
+          amount: -Math.abs(amount),
           memberId: recipient ? recipient.id : null,
           round: round,
         }
@@ -1539,6 +1587,13 @@
       // A failed receipt upload no longer reaches this point — it aborts the
       // release above rather than recording an unevidenced payout.
       const problems = [];
+      if (skipReceipt) {
+        problems.push(
+          "this payout has NO receipt on file — the upload failed, so there is " +
+            "no image proving it was sent. Attach one to the round's record " +
+            "later if you can"
+        );
+      }
       if (accWarning) {
         problems.push(
           "the recipient / amount record could not be saved (run " +
@@ -1581,6 +1636,11 @@
     // destroys the evidence for money that actually moved.
     const prior = getPayout(round) || {};
     const priorReceipt = prior.receipt_url || null;
+    // The amount that was actually released, not the round goal. Logging
+    // -GOAL_PER_ROUND meant undoing an edited ₱32,000 release recorded
+    // -₱30,000, so the release and its reversal never netted out.
+    const priorAmount =
+      prior.amount != null ? Number(prior.amount) : C.GOAL_PER_ROUND;
     busy = true;
     render();
     try {
@@ -1606,7 +1666,11 @@
           (priorReceipt ? ` — receipt kept on record: ${priorReceipt}` : ""),
         {
           type: "payout",
-          amount: -C.GOAL_PER_ROUND,
+          // POSITIVE: an undo returns the money to the fund. Logging it
+          // negative made the reversal render identically to the release it
+          // reverses — red, "−₱30,000.00" — so a release-then-undo read as
+          // ₱60,000 leaving the fund.
+          amount: priorAmount,
           memberId: recipient ? recipient.id : null,
           round: round,
         }
@@ -1622,7 +1686,7 @@
 
   // ===================================================================
   // Start next round (while the previous round's payout is still pending).
-  // This is a SEPARATE action from "Mark payout released" — starting round
+  // This is a SEPARATE action from "Release payout" — starting round
   // N+1 never releases round N's payout.
   // ===================================================================
   function askStartNextRound() {
@@ -2092,16 +2156,7 @@
             : { icon: "check", tone: "admin" };
       }
 
-      // Signed only where money actually moved: confirmed in, reverted out.
-      // A pending or rejected claim shows its amount plainly — nothing has
-      // changed hands yet.
-      let amountHtml = "";
-      if (amt != null && amt !== 0) {
-        const abs = C.peso(Math.abs(amt));
-        const cls = amt < 0 ? "out" : st === C.STATUS_PAID ? "in" : "flat";
-        const sign = amt < 0 ? "−" : st === C.STATUS_PAID ? "+" : "";
-        amountHtml = `<span class="activity-amt ${cls}">${sign}${escapeHtml(abs)}</span>`;
-      }
+      const amountHtml = activityAmountHtml(amt, st);
 
       const chip =
         st === C.STATUS_PENDING
@@ -2125,11 +2180,7 @@
     // Title and filter chips are shared; the body below differs per shell.
     const head = `<div class="view-head">
       <h2 class="view-title">Activity</h2>
-      <p class="view-sub">${
-        isWide
-          ? "Full transaction history"
-          : "Every contribution, payout &amp; admin action"
-      } · ${
+      <p class="view-sub">${"Every contribution, payout &amp; admin action"} · ${
         // Don't print a total the table isn't showing: with the round filter
         // defaulting to the current round, "8 entries loaded" above 3 rows
         // reads as a fault.
@@ -2251,21 +2302,7 @@
                   : type === "payment"
                   ? "Contribution"
                   : "Admin";
-              // Sign means DIRECTION of cash, consistently: money into the
-              // fund is +, money out is −, and anything not yet settled is
-              // unsigned. A released payout is the fund's largest outflow and
-              // used to render unsigned, identical to an unconfirmed claim.
-              let amountHtml = "—";
-              if (amt != null && amt !== 0) {
-                const abs = C.peso(Math.abs(amt));
-                const outward = amt < 0 || (type === "payout" && st == null);
-                const settled = st === C.STATUS_PAID || type === "payout";
-                const cls = outward ? "out" : settled ? "in" : "flat";
-                const sign = outward ? "−" : settled ? "+" : "";
-                amountHtml = `<span class="activity-amt ${cls}">${sign}${escapeHtml(
-                  abs
-                )}</span>`;
-              }
+              const amountHtml = activityAmountHtml(amt, st) || "—";
               const statusHtml =
                 st === C.STATUS_PAID
                   ? `<span class="activity-chip-state confirmed">Confirmed</span>`
@@ -2344,6 +2381,23 @@
     }`;
 
     return head + (isWide ? tableHtml : listHtml);
+  }
+
+  /** One signing rule for both shells. The mobile list and the desktop table
+   *  had drifted apart: the same released payout rendered flat and unsigned in
+   *  one and red "−₱30,000.00" in the other. Sign is DIRECTION of cash, taken
+   *  from the stored amount, so nothing has to infer it from the event type.
+   *  Unsettled money (a claim in review, a rejected claim) is deliberately
+   *  unsigned — nothing has changed hands. */
+  function activityAmountHtml(amt, st) {
+    if (amt == null || amt === 0) return "";
+    const settled = st == null || Number(st) === C.STATUS_PAID;
+    const abs = C.peso(Math.abs(amt));
+    if (!settled) return `<span class="activity-amt flat">${escapeHtml(abs)}</span>`;
+    const out = amt < 0;
+    return `<span class="activity-amt ${out ? "out" : "in"}">${
+      out ? "−" : "+"
+    }${escapeHtml(abs)}</span>`;
   }
 
   /** Calendar-day identity, so entries group by the day they happened. */
@@ -3283,11 +3337,15 @@
               C.CONTRIBUTION_AMOUNT
             )} on the 15th & end of every month`;
           })();
-          // The subtitle is clipped to one line on narrow screens, so carry the
-          // full text in `title` — nothing is lost, only folded.
-          return `<p class="subtitle" title="${escapeHtml(sub)}">${escapeHtml(
-            sub
-          )}</p>`;
+          // Two subtitles, not one hidden. The long form describes the fund's
+          // schedule and only fits on desktop; the short form is what the
+          // design actually shows at 390px ("Group of 5 · Paluwagan"). Hiding
+          // it outright lost the schedule from every phone, and a `title`
+          // tooltip on a display:none element is unreachable — and never fires
+          // on touch anyway.
+          const short = `Group of ${members.length} · Paluwagan`;
+          return `<p class="subtitle subtitle-long">${escapeHtml(sub)}</p>
+        <p class="subtitle subtitle-short">${escapeHtml(short)}</p>`;
         })()}
       </div>
       <button class="unlock-btn ${
@@ -3313,10 +3371,13 @@
         appErrorRetry
           ? ` <button type="button" class="banner-retry" onclick="PowerFund.retryLastAction()">Retry</button>`
           : ""
-      }</div>`;
+      }<button type="button" class="warn-dismiss" onclick="PowerFund.dismissError()" aria-label="Dismiss">✕</button></div>`;
     }
     if (appWarning) {
-      html += `<div class="save-warning-banner">${icon("alert", 15)}<span>${escapeHtml(
+      html += `<div class="save-warning-banner" role="status" aria-live="polite">${icon(
+        "alert",
+        15
+      )}<span>${escapeHtml(
         appWarning
       )}</span> <button type="button" class="warn-dismiss" onclick="PowerFund.dismissWarning()" aria-label="Dismiss">✕</button></div>`;
     }
@@ -3649,7 +3710,7 @@
       const releaseAmount = typedAmount == null ? C.GOAL_PER_ROUND : typedAmount;
       html += `<div class="modal-overlay sheet" onclick="if(event.target===this) PowerFund.closePayoutModal()">
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
-          <h3 id="dlg-title">Mark payout released</h3>
+          <h3 id="dlg-title">Release payout</h3>
           <p class="modal-sub">Round ${payoutModalRound} — ${
         recipient ? escapeHtml(recipient.name) : "—"
       } · recorded now so it stays correct if the order changes later</p>
@@ -3723,10 +3784,13 @@
           }
 
           <label class="payout-field-label" for="payout-amount">Amount paid out</label>
-          <input id="payout-amount" class="pin-input payout-amount-input" type="text"
-                 inputmode="decimal" value="${escapeHtml(payoutAmountValue)}"
-                 oninput="PowerFund.setPayoutAmount(this.value)"
-                 placeholder="${C.GOAL_PER_ROUND}">
+          <div class="payout-amount-wrap">
+            <span class="payout-amount-prefix" aria-hidden="true">₱</span>
+            <input id="payout-amount" class="pin-input payout-amount-input" type="text"
+                   inputmode="decimal" value="${escapeHtml(payoutAmountValue)}"
+                   oninput="PowerFund.setPayoutAmount(this.value)"
+                   placeholder="${C.GOAL_PER_ROUND.toLocaleString("en-PH")}">
+          </div>
           <p class="payout-field-hint">Defaults to ${C.peso(
             C.GOAL_PER_ROUND
           )} (the round target). This is a record only — it never changes funding.</p>
@@ -3760,6 +3824,19 @@
               : ""
           }
 
+          ${submitStateHtml()}
+          ${
+            // Only after an upload has actually failed. Never a first-choice
+            // path — the receipt requirement stands until storage refuses.
+            receiptUploadFailed
+              ? `<div class="release-noreceipt">
+                   <p class="release-noreceipt-text">If the money really was sent and the photo still won't upload, you can record the payout without it. The round's record will say the receipt is missing, and so will the activity log.</p>
+                   <button type="button" class="modal-btn-secondary reject" onclick="PowerFund.releaseWithoutReceipt()" ${
+                     busy ? "disabled" : ""
+                   }>Record ${C.peso(releaseAmount)} without the receipt</button>
+                 </div>`
+              : ""
+          }
           <div class="modal-actions">
             <button class="modal-btn-primary" onclick="PowerFund.markPayoutReleased()" ${
               busy || !payoutReceiptFile ? "disabled" : ""
@@ -4255,6 +4332,7 @@
       render();
       init();
     },
+    dismissError,
     dismissWarning,
     dismissSuccess,
     toggleUnlock,
@@ -4330,6 +4408,7 @@
     openPayoutModal,
     closePayoutModal,
     markPayoutReleased,
+    releaseWithoutReceipt,
     unmarkPayoutReleased,
     onPayoutReceiptSelected,
     removePayoutReceipt,

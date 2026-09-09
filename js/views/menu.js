@@ -147,7 +147,7 @@ window.PFViews.menu = function (ctx) {
   )} overall). Pay via the QR shown when you tap <b>Pay this cycle</b> — every payment needs a screenshot as proof</li>
       <li><b>Members:</b> tap <b>＋ Pay this cycle</b> → scan the QR → attach your payment screenshot (required) → <b>I've sent this</b></li>
       <li><b>Treasurer:</b> reviews the screenshot, then <b>Confirm</b> or <b>Reject</b>. A rejected payment keeps its record and says why, so it can be sent again. Paying several cycles in one transfer is reviewed together</li>
-      <li><b>Cycle status:</b> ✓ paid · … waiting for treasurer review · ✕ rejected, send again · not paid (overdue is still fine to pay late)</li>
+      <li><b>Cycle status:</b> ✓ paid · ⋯ waiting for treasurer review · ✕ rejected, send again · ! overdue (still fine to pay late) · no mark, not due yet</li>
       <li><b>Round status:</b> each round targets ${C.peso(
         C.GOAL_PER_ROUND
       )} — Collecting → Payout Pending → Completed. "Release payout" and "Start next round" are separate steps, so a previous round can stay Payout Pending while a new one collects</li>

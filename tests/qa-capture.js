@@ -219,10 +219,15 @@ async function unlock(page) {
    isn't there. A viewport shot shows the screen as a person actually sees it.
    Where content continues below the fold, a second "-btm" shot is taken after
    scrolling, so nothing goes unreviewed. */
-async function shot(page, name, note) {
+async function shot(page, name, note, keepScroll) {
   const file = `${name}.png`;
-  await page.evaluate(() => window.scrollTo(0, 0));
-  await page.waitForTimeout(120);
+  // keepScroll: the caller has already scrolled something into view (an inline
+  // panel that opens below the fold), so resetting here would photograph the
+  // wrong part of the page and prove nothing.
+  if (!keepScroll) {
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(120);
+  }
   await page.screenshot({ path: path.join(OUT, file) });
   shots.push({ file, note });
   process.stdout.write(`  ${file}\n`);
@@ -274,8 +279,14 @@ async function tabs(page, prefix, list) {
   await p.evaluate(() => window.PowerFund.setView("members"));
   await p.waitForTimeout(500);
   await shot(p, "m-mobile-members", "Members, reached from Home's See all");
-  await p.locator(".member-row-head").nth(1).click().catch(() => {});
-  await p.waitForTimeout(500);
+  // .member-row is the real class (js/views/members.js:133). A wrong selector
+  // here previously produced a screenshot of the COLLAPSED state labelled as
+  // the expanded one — so this asserts instead of swallowing the miss.
+  await p.locator(".member-row").nth(1).click();
+  await p.waitForTimeout(600);
+  if ((await p.locator(".member-row-panel").count()) === 0) {
+    throw new Error("Members accordion did not open — capture would be misleading");
+  }
   await shot(p, "m-mobile-members-open", "Members accordion expanded");
   await p.close();
 
@@ -362,7 +373,11 @@ async function tabs(page, prefix, list) {
   if (await chip.count()) {
     await chip.click();
     await p.waitForTimeout(500);
-    await shot(p, "t-mobile-cash-gate", "Recording a payment with no proof — confirmation");
+    // The panel opens inline, often below the fold — scroll to it or the shot
+    // shows an unremarkable list and proves nothing.
+    await p.locator(".mark-paid-panel").scrollIntoViewIfNeeded();
+    await p.waitForTimeout(250);
+    await shot(p, "t-mobile-cash-gate", "Recording a payment with no proof — confirmation", true);
     await p.locator(".mark-paid-panel button", { hasText: "Cancel" }).click();
     await p.waitForTimeout(300);
   }
@@ -370,7 +385,9 @@ async function tabs(page, prefix, list) {
   if (await paidChip.count()) {
     await paidChip.click();
     await p.waitForTimeout(500);
-    await shot(p, "t-mobile-undo-paid", "Undo one confirmed payment, inline");
+    await p.locator(".undo-paid-panel").scrollIntoViewIfNeeded();
+    await p.waitForTimeout(250);
+    await shot(p, "t-mobile-undo-paid", "Undo one confirmed payment, inline", true);
   }
   await p.close();
 

@@ -1552,6 +1552,27 @@ async function paymentSheets(browser, errors) {
   await unlockTreasurer(rel);
   await rel.locator(".release-card .payout-btn").click();
   await rel.waitForTimeout(600);
+  // A ready payout renders as its own card ABOVE the panel, so it must not
+  // also count as panel content — that produced a "Needs your attention"
+  // heading with nothing under it, and "All caught up" would contradict the
+  // release card sitting right above.
+  const attention = await rel.locator(".attention-panel");
+  if ((await attention.count()) > 0) {
+    const body = (await attention.innerText()).replace(/\s+/g, " ").trim();
+    check(
+      "home/attention panel is never an empty heading",
+      body.replace(/needs your attention/i, "").trim().length > 0,
+      JSON.stringify(body)
+    );
+    check(
+      "home/no 'all caught up' while a payout is waiting",
+      !/all caught up/i.test(body),
+      JSON.stringify(body)
+    );
+  } else {
+    check("home/attention panel absent when only a payout waits", true);
+  }
+
   check(
     "sheet/release states why it is releasable first",
     (await rel.locator(".ready-banner").count()) === 1 &&
@@ -1570,6 +1591,25 @@ async function paymentSheets(browser, errors) {
       /09XX XXX XXX2/.test(sendTo),
     JSON.stringify(sendTo)
   );
+  // The payout amount is FIXED at the round goal — no field, nothing to
+  // mistype, and the button can only offer that figure.
+  check(
+    "sheet/payout amount is stated, not editable",
+    (await rel.locator(".payout-amount-fixed").count()) === 1 &&
+      (await rel.locator("#payout-amount").count()) === 0 &&
+      (await rel.locator(".modal input[type=text], .modal input[inputmode=decimal]").count()) === 0
+  );
+  check(
+    "sheet/the fixed amount is the round goal",
+    /₱30,000\.00/.test(await rel.locator(".payout-amount-value").innerText()),
+    await rel.locator(".payout-amount-value").innerText()
+  );
+  check(
+    "sheet/release button offers only that figure",
+    /Release ₱30,000\.00/.test(await rel.locator(".modal-btn-primary").first().innerText()),
+    await rel.locator(".modal-btn-primary").first().innerText()
+  );
+
   // Zoom: white mat, and Close BELOW the image as the mockup draws it.
   await rel.locator(".send-to-qr").click();
   await rel.waitForTimeout(400);

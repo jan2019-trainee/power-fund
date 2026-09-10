@@ -117,7 +117,6 @@
 
   let payoutModalRound = null;
   let payoutNoteValue = "";
-  let payoutAmountValue = ""; // string in the release modal; blank => the ₱30,000 default
   let payoutReceiptFile = null; // optional receipt image the treasurer attaches
   let payoutReceiptPreview = null; // object URL for its preview
 
@@ -1422,8 +1421,6 @@
     payoutModalRound = round;
     const existing = getPayout(round);
     payoutNoteValue = existing.note || "";
-    payoutAmountValue =
-      existing.amount != null ? String(existing.amount) : String(C.GOAL_PER_ROUND);
     clearPayoutReceipt();
     render();
   }
@@ -1431,7 +1428,6 @@
     receiptUploadFailed = false;
     payoutModalRound = null;
     payoutNoteValue = "";
-    payoutAmountValue = "";
     clearPayoutReceipt();
     render();
   }
@@ -1461,11 +1457,6 @@
 
   /** Parse the release-modal amount field. Blank => the ₱30,000 default.
    *  This is a historical record only — it never touches round funding. */
-  function parsePayoutAmount(v) {
-    if (v == null || String(v).trim() === "") return C.GOAL_PER_ROUND;
-    const n = Number(String(v).replace(/[₱,\s]/g, ""));
-    return isFinite(n) ? n : null;
-  }
 
   /** Release, but explicitly WITHOUT a receipt, after an upload has failed.
    *  The break-glass: refusing outright is right for a transient failure, but
@@ -1507,10 +1498,12 @@
       );
     }
 
-    const amount = parsePayoutAmount(payoutAmountValue);
-    if (amount == null || amount < 0) {
-      return showError("Enter a valid payout amount (₱0 or more).");
-    }
+    // FIXED at the round goal. Every round collects exactly
+    // CYCLES_PER_ROUND × members × CONTRIBUTION_AMOUNT and pays out exactly
+    // that, so there is no amount to choose — the field is a read-only figure
+    // in the sheet and this is the single source of the number. Nothing here
+    // reads a typed value any more, so a stale one cannot be recorded.
+    const amount = C.GOAL_PER_ROUND;
 
     // Snapshot the recipient NOW so the history stays correct even if members
     // are later renamed, reordered, or removed.
@@ -3901,8 +3894,7 @@
       const recipient = members.find((m) => m.member_order === payoutModalRound);
       // What the button will actually record: the typed amount when it parses,
       // the round goal otherwise — the same fallback markPayoutReleased() uses.
-      const typedAmount = parsePayoutAmount(payoutAmountValue);
-      const releaseAmount = typedAmount == null ? C.GOAL_PER_ROUND : typedAmount;
+      const releaseAmount = C.GOAL_PER_ROUND;
       html += `<div class="modal-overlay sheet" onclick="if(event.target===this) PowerFund.closePayoutModal()">
         <div class="modal sheet-pay" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
           <div class="sheet-head">
@@ -4017,20 +4009,16 @@
               : ""
           }
 
-          <label class="sheet-section-label" for="payout-amount">Amount</label>
-          <div class="payout-amount-wrap">
-            <span class="payout-amount-prefix" aria-hidden="true">₱</span>
-            <input id="payout-amount" class="pin-input payout-amount-input" type="text"
-                   inputmode="decimal" value="${escapeHtml(payoutAmountValue)}"
-                   oninput="PowerFund.setPayoutAmount(this.value)"
-                   placeholder="${String(C.GOAL_PER_ROUND).replace(
-                     /\B(?=(\d{3})+(?!\d))/g,
-                     ","
-                   )}">
+          <p class="sheet-section-label">Amount</p>
+          <div class="payout-amount-fixed">
+            <span class="payout-amount-value">${C.peso(C.GOAL_PER_ROUND)}</span>
+            <span class="payout-amount-tag">${icon("lock", 12)}<span>Fixed</span></span>
           </div>
-          <p class="payout-field-hint">Defaults to ${C.peso(
+          <p class="payout-field-hint">Every round pays out exactly ${C.peso(
             C.GOAL_PER_ROUND
-          )} (the round target). This is a record only — it never changes funding.</p>
+          )} — ${C.CYCLES_PER_ROUND} cycles × ${
+        members.length
+      } members × ${C.peso(C.CONTRIBUTION_AMOUNT)} — so this is not editable.</p>
 
           <label class="sheet-section-label" for="payout-note">Note (optional)</label>
           <textarea id="payout-note" class="payout-note-input" placeholder="What did they buy? (e.g. BLUETTI AC70P, ₱32,000)"
@@ -4663,9 +4651,6 @@
     confirmStartRound,
     setPayoutNote: (v) => {
       payoutNoteValue = v;
-    },
-    setPayoutAmount: (v) => {
-      payoutAmountValue = v;
     },
     openShareModal,
     closeShareModal,

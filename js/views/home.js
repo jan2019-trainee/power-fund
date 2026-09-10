@@ -185,6 +185,19 @@ window.PFViews.home = function (ctx) {
     </div>`;
   })();
 
+  // Rounds whose payout is funded and unreleased. Computed once, up here,
+  // because BOTH the attention panel (which must not claim "all caught up"
+  // over one) and the release card below it need the answer — and the panel
+  // renders first.
+  const releaseReady = [];
+  if (unlocked && !allDone) {
+    for (let r = 1; r <= C.TOTAL_ROUNDS; r++) {
+      if (C.roundStatus(state.contributions, rounds, r) === "payout_pending") {
+        releaseReady.push(r);
+      }
+    }
+  }
+
   // ---- Fund complete: the terminal state, for everyone --------------
   // Every fund reaches this and the screen used to just fall silent — the
   // attention panel and the release card are both gated on !allDone, and the
@@ -203,15 +216,20 @@ window.PFViews.home = function (ctx) {
   // Only actionable items. Hidden entirely when there is nothing to do.
   if (unlocked && !allDone) {
     const batches = C.pendingBatches(state.contributions);
-    const releaseRounds = [];
-    for (let r = 1; r <= C.TOTAL_ROUNDS; r++) {
-      if (C.roundStatus(state.contributions, rounds, r) === "payout_pending") {
-        releaseRounds.push(r);
-      }
-    }
     const nextRound = curRound + 1;
 
-    if (!(batches.length || releaseRounds.length || canStartNext || overdueCount)) {
+    // What this panel can actually SHOW. Payouts ready to release are
+    // deliberately not part of it — they render as their own card above (see
+    // the release-card note) — so counting them here produced a panel with a
+    // heading and nothing under it whenever a ready payout was the only
+    // outstanding thing. An empty "Needs your attention" is worse than none:
+    // it says something is wrong and then declines to say what.
+    const nothingWaiting = !(batches.length || canStartNext || overdueCount);
+    if (nothingWaiting && releaseReady.length) {
+      // A payout is sitting there ready to send. "All caught up" immediately
+      // under that card would contradict it, so the release card speaks for
+      // itself and this panel stays out of the way.
+    } else if (nothingWaiting) {
       // Nothing waiting. Say so explicitly — an absent panel is ambiguous
       // (is it clear, or did it fail to load?), and a caught-up queue is
       // the normal state most days.
@@ -364,8 +382,7 @@ window.PFViews.home = function (ctx) {
    * outranks the review queue rather than sitting as one more group inside it.
    */
   if (unlocked && !allDone) {
-    for (let r = 1; r <= C.TOTAL_ROUNDS; r++) {
-      if (C.roundStatus(state.contributions, rounds, r) !== "payout_pending") continue;
+    for (const r of releaseReady) {
       const recip = members.find((m) => m.member_order === r);
       html += `<div class="release-card">
         <p class="release-card-title">${icon("party", 16)}<span>Round ${r}${

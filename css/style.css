@@ -1158,12 +1158,6 @@ body {
   color: var(--text-muted);
   margin: 4px 0 6px;
 }
-.payout-amount-input {
-  letter-spacing: normal;
-  font-size: 16px;
-  text-align: left;
-  margin-bottom: 4px;
-}
 .payout-field-hint {
   text-align: left;
   font-size: 11px;
@@ -4208,20 +4202,41 @@ body.modal-open .lightbox-overlay { touch-action: auto; }
   text-align: left;
 }
 
-/* The one editable money field in the app; every other amount is formatted, so
-   a bare "30000" here beside a button reading "Release ₱30,000.00" invites a
-   mistyped payout. */
-.payout-amount-wrap { position: relative; display: block; }
-.payout-amount-prefix {
-  position: absolute;
-  left: 12px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--text-muted);
-  font-size: 14px;
-  pointer-events: none;
+/* Not a field. Every round pays out exactly the round goal, so the amount is
+   a stated figure rather than something to type — which also removes the last
+   way to mistype a payout. */
+.payout-amount-fixed {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 15px;
+  margin-bottom: 8px;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: 12px;
 }
-.payout-amount-wrap .payout-amount-input { padding-left: 26px; }
+.payout-amount-value {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.payout-amount-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.payout-amount-tag .icon { display: block; flex: 0 0 auto; }
 
 /* ==========================================================================
    Payment sheets — Contribute / Review / Release

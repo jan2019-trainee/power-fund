@@ -18,7 +18,7 @@ window.PFViews.home = function (ctx) {
     attentionQueueExpanded, overdueListOpen, startRoundConfirming,
     escapeHtml, inlineArg, icon, batteryCell, memberAvatar, getPayout,
     sparkline, C,
-    formatDateTime, overdueRows, activityTimeLabel, isWide
+    formatDateTime, overdueRows, activityTimeLabel, isWide, identityLocked
   } = ctx;
   // Cycles due so far — the denominator behind each member's standing ring.
   // Set when the pinned action renders, so the view can reserve room for it.
@@ -77,7 +77,11 @@ window.PFViews.home = function (ctx) {
     html += `<div class="rejected-card" role="alert">
       <div class="rejected-ident">
         <span class="rejected-who">${escapeHtml(myMember.name)} · <b>Rejected</b></span>
-        <button type="button" class="my-status-change" onclick="PowerFund.openWhoAmIPicker()">Change</button>
+        ${
+          identityLocked
+            ? ""
+            : `<button type="button" class="my-status-change" onclick="PowerFund.openWhoAmIPicker()">Change</button>`
+        }
       </div>
       <div class="rejected-head">
         ${icon("alert", 16)}
@@ -128,7 +132,11 @@ window.PFViews.home = function (ctx) {
                 : ""
             }
           </span>
-          <button type="button" class="my-status-change" onclick="PowerFund.openWhoAmIPicker()">Change</button>
+          ${
+            identityLocked
+              ? ""
+              : `<button type="button" class="my-status-change" onclick="PowerFund.openWhoAmIPicker()">Change</button>`
+          }
         </div>
         ${
           // Suppressed while a rejection is showing: the rejected card directly

@@ -54,9 +54,28 @@
   function authRequired() {
     return AUTH_MODE === "required";
   }
+  /** Is a full-screen auth screen (the gate, or an account dead-end) showing?
+   *  Both replace the whole shell, so both need the sidebar gutter cancelled. */
+  function isAuthScreenUp() {
+    if (!authRequired()) return false;
+    if (!session) return true;
+    return (
+      accountState === "unknown" || accountState === "taken" || accountState === "no-email"
+    );
+  }
   let session = null; // the Supabase session, or null when signed out
   let authReady = false; // has the first getSession() settled yet?
   let signingIn = false; // the redirect is being started
+  // How the signed-in account relates to the roster, decided by resolveAccount()
+  // once both a session and the member list exist:
+  //   null        not applicable — auth off, or signed out
+  //   "linked"    this login owns a member row; that row IS the identity
+  //   "unknown"   signed in with an address nobody on the roster carries
+  //   "taken"     the matching row already belongs to a different login
+  //   "no-email"  the roster carries no addresses at all yet
+  let accountState = null;
+  let accountMemberId = null; // the linked member's id, when accountState === "linked"
+  let linking = false; // a first-login claim is being written
 
   // ---- Data cache (filled by loadAll) ---------------------------------
   let state = null; // { members, cycles, contributions, payouts, activityLog, settings }
@@ -426,6 +445,7 @@
     if (authRequired() && !session) return;
     try {
       await loadAll();
+      await resolveAccount();
       render();
     } catch (e) {
       showError(e.message);
@@ -455,8 +475,89 @@
   }
 
   // ===================================================================
-  // Sign in / sign out (migration 008)
+  // Sign in / sign out / claim (migration 008)
   // ===================================================================
+
+  /** Work out how the signed-in account relates to the roster, linking it on a
+   *  first login. Runs after every load, because it needs both a session and
+   *  the member list, and either can arrive first.
+   *
+   *  Matching is by email because that is the only thing Google gives us that
+   *  the treasurer can know in advance — it means nobody can claim a row that
+   *  is not theirs, and there is no picker to get wrong. */
+  async function resolveAccount() {
+    if (!authEnabled() || !session || !state || !Array.isArray(state.members)) {
+      accountState = null;
+      accountMemberId = null;
+      return;
+    }
+    const user = session.user || {};
+    const email = String(user.email || "").trim().toLowerCase();
+
+    // Already linked? That wins over any email match — the link is the record,
+    // and an address can be changed on the roster after the fact.
+    const mine = state.members.find((m) => m.auth_user_id && m.auth_user_id === user.id);
+    if (mine) {
+      accountState = "linked";
+      accountMemberId = mine.id;
+      return;
+    }
+
+    // A roster with no addresses at all is a setup step that was skipped, not
+    // a rejection of this person — say which, because the fix is different.
+    const anyEmail = state.members.some((m) => m.email);
+    if (!anyEmail) {
+      accountState = "no-email";
+      accountMemberId = null;
+      return;
+    }
+
+    const match = email
+      ? state.members.find((m) => String(m.email || "").trim().toLowerCase() === email)
+      : null;
+    if (!match) {
+      accountState = "unknown";
+      accountMemberId = null;
+      return;
+    }
+    if (match.auth_user_id && match.auth_user_id !== user.id) {
+      accountState = "taken";
+      accountMemberId = null;
+      return;
+    }
+
+    // First login for this member: claim the row.
+    if (linking) return;
+    linking = true;
+    try {
+      const linked = await window.DB.linkMemberAccount(match.id, user.id);
+      if (!linked) {
+        // The `is null` guard matched nothing, so somebody else claimed it
+        // between the load and this write.
+        accountState = "taken";
+        accountMemberId = null;
+        return;
+      }
+      accountState = "linked";
+      accountMemberId = linked.id;
+      await logActivity(`${linked.name} signed in for the first time`, {
+        type: "admin",
+        memberId: linked.id,
+      });
+      await loadAll(); // pick up auth_user_id so a re-resolve short-circuits
+    } catch (e) {
+      // Don't strand them on a blank screen: they are signed in and the fund
+      // is loaded, so fall back to "unknown", which explains itself and
+      // offers a way out.
+      console.error("Linking failed:", e);
+      accountState = "unknown";
+      accountMemberId = null;
+      showError(e.message);
+    } finally {
+      linking = false;
+    }
+  }
+
   async function signIn() {
     if (signingIn) return;
     signingIn = true;
@@ -480,6 +581,8 @@
       unlocked = false;
       unlockedViaMaster = false;
       session = null;
+      accountState = null;
+      accountMemberId = null;
       // When auth is only optional the app stays usable, so the data has to
       // stay loaded; when it is required the gate takes over on the next
       // render and state is no longer reachable.
@@ -526,6 +629,13 @@
   // "Which member are you?" — this device's remembered member (display only)
   // ===================================================================
   function openWhoAmIPicker() {
+    // Hidden in the UI when linked, but this is an exported handler, so it
+    // refuses here too rather than trusting the caller.
+    if (accountState === "linked") {
+      return showError(
+        "You're signed in, so your member profile is already set. Sign out from Menu to switch accounts."
+      );
+    }
     whoAmIPickerOpen = true;
     render();
   }
@@ -3426,7 +3536,7 @@
     // screen this class exists for. The gate has no sidebar and no tab bar,
     // so the desktop shell's sidebar gutter (body padding-left) has to go or
     // the card sits off-centre.
-    document.body.classList.toggle("auth-gate", authRequired() && !session);
+    document.body.classList.toggle("auth-gate", isAuthScreenUp());
     try {
       renderView(app);
     } catch (e) {
@@ -3545,6 +3655,50 @@
     </div>`;
   }
 
+  /** Signed in, but this account cannot act as anyone on the roster.
+   *
+   *  Shown only when auth is REQUIRED. In "optional" mode an unrecognised
+   *  account is no worse off than not signing in at all, so it gets a warning
+   *  and keeps the app — blocking there would punish the person testing it.
+   *
+   *  Every branch offers a way out. A dead-end you cannot leave is how someone
+   *  ends up reinstalling the app to escape a screen. */
+  function accountProblemHtml() {
+    const email = (session && session.user && session.user.email) || "";
+    const COPY = {
+      unknown: {
+        title: "You're not on this fund's roster",
+        body: `You're signed in as ${email}, but nobody on this fund carries that
+               address. Ask the treasurer to add it, or sign in with the account
+               they have on file for you.`,
+      },
+      taken: {
+        title: "That member is already claimed",
+        body: `The member with the address ${email} is already linked to a
+               different account. If that wasn't you, ask the treasurer to
+               unlink it before you try again.`,
+      },
+      "no-email": {
+        title: "This fund isn't ready for sign-ins yet",
+        body: `No member on this fund has an email address recorded, so there is
+               nothing to match ${email} against. The treasurer needs to add the
+               addresses first.`,
+      },
+    };
+    const c = COPY[accountState] || COPY.unknown;
+    return `<div class="signin">
+      <div class="signin-glow" aria-hidden="true"></div>
+      <div class="signin-card">
+        <div class="signin-emblem signin-emblem-warn" aria-hidden="true">${icon("alert", 34)}</div>
+        <h1 class="signin-title">${escapeHtml(c.title)}</h1>
+        <p class="signin-sub">${escapeHtml(c.body.replace(/\s+/g, " ").trim())}</p>
+        <button type="button" class="signin-btn signin-btn-quiet" onclick="PowerFund.signOut()" ${
+          busy ? "disabled" : ""
+        }>${busy ? "Signing out…" : "Sign out"}</button>
+      </div>
+    </div>`;
+  }
+
   function renderView(app) {
     // The auth gate. Placed before the !state check because when auth is
     // required there is deliberately no data load until there is a session —
@@ -3560,6 +3714,19 @@
       app.innerHTML = appError
         ? bootErrorHtml(appError)
         : `<div class="loading"><div class="loading-spinner" aria-hidden="true"></div><p>Loading fund data…</p></div>`;
+      return;
+    }
+
+    // Signed in as somebody this fund does not recognise. Required-auth only —
+    // see accountProblemHtml.
+    if (
+      authRequired() &&
+      session &&
+      (accountState === "unknown" ||
+        accountState === "taken" ||
+        accountState === "no-email")
+    ) {
+      app.innerHTML = accountProblemHtml();
       return;
     }
 
@@ -3610,10 +3777,15 @@
         ).length
       : members.length;
 
-    // ---- "My status" — personalized status for this device's remembered
-    // member (if any). Display only: derived entirely from data already
-    // computed above, never gates any action. ---------------------------
-    const myMember = myMemberId ? members.find((m) => m.id === myMemberId) : null;
+    // ---- "My status" — who this viewer is.
+    //
+    // Once accounts are on, the linked member IS the identity: it comes from
+    // the database, not from a per-device preference, and it cannot be
+    // switched. localStorage's pf_my_member_id stays the answer only while
+    // AUTH_MODE is "off" or nobody is linked, so a fund that has not switched
+    // accounts on behaves exactly as before. ---------------------------
+    const identityId = accountMemberId || myMemberId;
+    const myMember = identityId ? members.find((m) => m.id === identityId) : null;
     let myStatus = null;
     if (myMember) {
       if (allDone) {
@@ -3816,6 +3988,26 @@
       </button>
     </div>`;
 
+    // Optional mode with an account this fund does not recognise. Not a wall
+    // (see accountProblemHtml) but it must not be silent either, or someone
+    // signs in, sees no change, and assumes it worked.
+    if (
+      authEnabled() &&
+      !authRequired() &&
+      session &&
+      (accountState === "unknown" || accountState === "taken" || accountState === "no-email")
+    ) {
+      html += `<div class="save-warning-banner" role="status" aria-live="polite">${icon(
+        "alert",
+        15
+      )}<span>${
+        accountState === "taken"
+          ? "You're signed in, but that member is already linked to another account."
+          : accountState === "no-email"
+          ? "You're signed in, but this fund has no member email addresses recorded yet."
+          : "You're signed in, but that address isn't on this fund's roster yet."
+      } Your personal status still comes from the member you picked on this device.</span></div>`;
+    }
     if (appWarning) {
       html += `<div class="save-warning-banner" role="status" aria-live="polite">${icon(
         "alert",
@@ -3847,6 +4039,11 @@
       // Account group at all; the email is what "Signed in as ..." prints.
       authMode: AUTH_MODE,
       sessionEmail: (session && session.user && session.user.email) || null,
+      // When a login owns a member row, that row IS the identity: it comes
+      // from the database and cannot be switched, so every "Change" / "Not
+      // you?" control has to go. Leaving them would offer a choice the app
+      // then ignores.
+      identityLocked: accountState === "linked",
       payoutQrMemberId,
       // Helpers the views render with.
       //
@@ -5080,6 +5277,8 @@
           // Signed out. Treasurer mode must not survive it.
           unlocked = false;
           unlockedViaMaster = false;
+          accountState = null;
+          accountMemberId = null;
           if (authRequired()) state = null;
           render();
           return;
@@ -5101,6 +5300,7 @@
     if (!gated) {
       try {
         await loadAll();
+        await resolveAccount();
         render();
       } catch (e) {
         showError(e.message);

@@ -443,9 +443,33 @@ without gating the other four members. An unset or unrecognised value falls
 back to `off`.
 
 Done: migration 008, sign-in/sign-out, the session gate, the Menu → Account
-group. **Not done:** the claim/link step (so a session does not yet decide
-`myMember` — that is still `localStorage.pf_my_member_id`), self-service name
-and photo, and the RLS rewrite.
+group, and the claim/link step. **Not done:** self-service name and photo, and
+the RLS rewrite.
+
+`resolveAccount()` runs after every load and puts the account in one of five
+states, which drive everything else: `linked` (this login owns a member row),
+`unknown` (signed in with an address nobody carries), `taken` (the matching row
+belongs to another login), `no-email` (the roster has no addresses at all yet),
+or null (auth off / signed out). The last three are a full-screen dead-end when
+auth is `required`, and only a warning banner when it is `optional` — blocking
+there would punish the person testing sign-in.
+
+Two details worth not undoing:
+
+- **The claim is guarded in the database, not in JS.** `linkMemberAccount()`
+  updates `... .eq("id", …).is("auth_user_id", null)`, so two devices racing the
+  same first login cannot both win: the loser's update matches no row and comes
+  back empty, which resolves to `taken`.
+- **`no-email` is its own state on purpose.** Reporting it as "you're not on the
+  roster" would send someone chasing the wrong fix; the real cause is that
+  migration 008's one-off was never run.
+
+When a login owns a member row, **that row is the identity** — `identityId =
+accountMemberId || myMemberId`, so `localStorage.pf_my_member_id` still answers
+while `AUTH_MODE` is `off` or nobody is linked. Every "Change" / "Not you?"
+control is hidden for a linked member (`identityLocked` on ctx) AND
+`openWhoAmIPicker()` refuses, because it is an exported handler that anyone can
+still reach.
 
 Two things to keep in view:
 

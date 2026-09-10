@@ -1714,6 +1714,155 @@ function supabaseUrl() {
   return _cfgUrl;
 }
 
+const FAKE_USER_ID = "11111111-1111-1111-1111-111111111111";
+
+/** The roster with email addresses, as it looks after the treasurer has run
+ *  migration 008's one-off. `overrides` patches the member at index 0. */
+function rosterWithEmails(overrides) {
+  return M.MEMBERS.map((m, i) => ({
+    ...m,
+    email: `${m.name.toLowerCase()}@example.com`,
+    auth_user_id: null,
+    is_treasurer: i === 0,
+    ...(i === 0 ? overrides || {} : {}),
+  }));
+}
+
+/** Claiming is a real write; capture it and answer as the database would. */
+async function captureLinkWrites(page, data) {
+  const writes = [];
+  // Registered AFTER serve()'s catch-all, so this more specific route wins.
+  await page.route("**/rest/v1/members**", async (route) => {
+    const req = route.request();
+    if (req.method() === "GET") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(data.members),
+      });
+    }
+    let body = {};
+    try {
+      body = JSON.parse(req.postData() || "{}");
+    } catch (e) {}
+    writes.push({ url: req.url(), method: req.method(), body });
+    // PATCH ... ?id=eq.X&auth_user_id=is.null — echo the row back linked, and
+    // mutate the served roster so the next GET reflects it, exactly as a real
+    // round-trip would.
+    const target = data.members.find((m) => req.url().includes(m.id));
+    if (target && body.auth_user_id) {
+      target.auth_user_id = body.auth_user_id;
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([target]),
+      });
+    }
+    return route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  return writes;
+}
+
+/** Claim / link on first sign-in (phase 3). */
+async function accountLinking(browser, errors) {
+  // 1. A matching address that nobody has claimed: link it, silently.
+  const link = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  link.on("pageerror", (e) => errors.push(`link: ${e}`));
+  const data = { ...M.TABLE_DATA, members: rosterWithEmails() };
+  await serve(link, data);
+  const writes = await captureLinkWrites(link, data);
+  await withAuthMode(link, "required", { signedIn: true, email: "regine@example.com" });
+  await link.goto(BASE, { waitUntil: "domcontentloaded" });
+  await link.waitForTimeout(2500);
+  check("link/a matching first login gets into the app", (await link.locator(".tab-bar").count()) === 1);
+  const claim = writes.find((w) => w.body && w.body.auth_user_id === FAKE_USER_ID);
+  check("link/the claim is actually written", !!claim, JSON.stringify(writes.map((w) => w.method)));
+  check(
+    "link/the claim is guarded by auth_user_id is null",
+    !!claim && /auth_user_id=is\.null/.test(claim.url),
+    claim ? claim.url.split("?")[1] : "no write"
+  );
+  // Identity now comes from the link, so it cannot be switched.
+  check(
+    "link/the identity switcher is gone",
+    (await link.locator(".my-status-change").count()) === 0
+  );
+  await link.locator(".tab-item", { hasText: "Menu" }).click();
+  await link.waitForTimeout(400);
+  check(
+    "link/Menu says signed in instead of \"Not you?\"",
+    (await link.locator(".profile-card-locked").count()) === 1 &&
+      (await link.locator(".profile-card-change").count()) === 0
+  );
+  await link.close();
+
+  // 2. An address nobody on the roster carries: a dead-end with a way out.
+  const unknown = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  unknown.on("pageerror", (e) => errors.push(`link: ${e}`));
+  await serve(unknown, { ...M.TABLE_DATA, members: rosterWithEmails() });
+  await withAuthMode(unknown, "required", { signedIn: true, email: "stranger@example.com" });
+  await unknown.goto(BASE, { waitUntil: "domcontentloaded" });
+  await unknown.waitForTimeout(2500);
+  check("link/an unknown address is refused", (await unknown.locator(".signin").count()) === 1);
+  check(
+    "link/it says which address it refused",
+    (await unknown.locator(".signin-sub").innerText()).includes("stranger@example.com")
+  );
+  check("link/no fund data leaks to a stranger", (await unknown.locator(".tab-bar").count()) === 0);
+  check(
+    "link/the dead-end offers a way out",
+    /sign out/i.test(await unknown.locator(".signin-btn").innerText())
+  );
+  await unknown.close();
+
+  // 3. The matching row already belongs to a different login.
+  const taken = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  taken.on("pageerror", (e) => errors.push(`link: ${e}`));
+  await serve(taken, {
+    ...M.TABLE_DATA,
+    members: rosterWithEmails({ auth_user_id: "99999999-9999-9999-9999-999999999999" }),
+  });
+  await withAuthMode(taken, "required", { signedIn: true, email: "regine@example.com" });
+  await taken.goto(BASE, { waitUntil: "domcontentloaded" });
+  await taken.waitForTimeout(2500);
+  check("link/an already-claimed member is refused", (await taken.locator(".signin").count()) === 1);
+  check(
+    "link/it explains the row is taken",
+    /already linked/i.test(await taken.locator(".signin-sub").innerText()),
+    await taken.locator(".signin-title").innerText()
+  );
+  await taken.close();
+
+  // 4. The treasurer never ran the one-off, so no address exists to match.
+  const noEmail = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  noEmail.on("pageerror", (e) => errors.push(`link: ${e}`));
+  await serve(noEmail, M.TABLE_DATA); // fixtures carry no email column at all
+  await withAuthMode(noEmail, "required", { signedIn: true, email: "regine@example.com" });
+  await noEmail.goto(BASE, { waitUntil: "domcontentloaded" });
+  await noEmail.waitForTimeout(2500);
+  check(
+    "link/a roster with no addresses says so, not \"not on the roster\"",
+    /isn't ready/i.test(await noEmail.locator(".signin-title").innerText()),
+    await noEmail.locator(".signin-title").innerText()
+  );
+  await noEmail.close();
+
+  // 5. Optional mode must NOT wall off an unrecognised account.
+  const soft = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  soft.on("pageerror", (e) => errors.push(`link: ${e}`));
+  await serve(soft, { ...M.TABLE_DATA, members: rosterWithEmails() });
+  await withAuthMode(soft, "optional", { signedIn: true, email: "stranger@example.com" });
+  await soft.goto(BASE, { waitUntil: "domcontentloaded" });
+  await soft.waitForTimeout(2500);
+  check("link/optional keeps the app for a stranger", (await soft.locator(".tab-bar").count()) === 1);
+  check(
+    "link/optional still says the account is unrecognised",
+    (await soft.locator(".save-warning-banner").count()) >= 1 &&
+      /roster/i.test(await soft.locator(".save-warning-banner").first().innerText())
+  );
+  await soft.close();
+}
+
 async function memberAccounts(browser, errors) {
   // 1. Required, signed out: the gate, and NOT a single data request.
   const out = await browser.newPage({ viewport: { width: 430, height: 950 } });
@@ -1757,11 +1906,17 @@ async function memberAccounts(browser, errors) {
   );
   await wide.close();
 
-  // 2. Required, signed in: the app behaves exactly as it always did.
+  // 2. Required, signed in AND already linked: the app behaves as it always
+  //    did. The roster must carry the link — a session against a roster with
+  //    no addresses is a dead-end by design (see accountLinking case 4), so
+  //    plain fixtures would land on that screen instead of the app.
   const inp = await browser.newPage({ viewport: { width: 430, height: 950 } });
   inp.on("pageerror", (e) => errors.push(`auth: ${e}`));
-  await serve(inp, M.TABLE_DATA);
-  await withAuthMode(inp, "required", { signedIn: true });
+  await serve(inp, {
+    ...M.TABLE_DATA,
+    members: rosterWithEmails({ auth_user_id: FAKE_USER_ID }),
+  });
+  await withAuthMode(inp, "required", { signedIn: true, email: "regine@example.com" });
   await inp.goto(BASE, { waitUntil: "domcontentloaded" });
   await inp.waitForTimeout(2000);
   check("auth/a session gets you the app", (await inp.locator(".signin").count()) === 0);
@@ -1772,7 +1927,7 @@ async function memberAccounts(browser, errors) {
   check("auth/Menu offers sign out", (await acct.count()) === 1);
   check(
     "auth/Menu names the signed-in account",
-    (await acct.innerText()).includes(FAKE_USER_EMAIL),
+    (await acct.innerText()).includes("regine@example.com"),
     await acct.innerText()
   );
   await inp.close();
@@ -2015,6 +2170,8 @@ async function bootFailure(browser) {
   await paymentSheets(browser, errors);
   console.log("\nMember accounts");
   await memberAccounts(browser, errors);
+  console.log("\nAccount linking");
+  await accountLinking(browser, errors);
   console.log("\nContribute picker");
   await contributePickerFromHome(browser, errors);
   console.log("\nDesktop header actions");

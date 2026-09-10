@@ -892,6 +892,32 @@ window.DB = (function () {
   // the redirect, so nothing here has to parse the URL.
   // ===================================================================
 
+  /** Attach a login to a roster row. The `is null` guard is the important
+   *  part: it makes the claim atomic in the database rather than in JS, so two
+   *  devices racing the same first login cannot both think they won — the
+   *  second update matches no row and comes back empty.
+   *
+   *  Returns the linked member row, or null when the row was already claimed. */
+  async function linkMemberAccount(memberId, authUserId) {
+    const res = await client
+      .from("members")
+      .update({ auth_user_id: authUserId })
+      .eq("id", memberId)
+      .is("auth_user_id", null)
+      .select();
+    if (res.error) {
+      console.error("Couldn't link this account:", res.error);
+      // 42703 = undefined_column: migration 008 has not been run.
+      if (res.error.code === "42703" || /auth_user_id/.test(res.error.message || "")) {
+        throw new Error(
+          "This fund's database is missing the accounts columns. Run migration 008."
+        );
+      }
+      throw new Error("Couldn't link your account to your member profile.");
+    }
+    return (res.data && res.data[0]) || null;
+  }
+
   /** The current session, or null. Never throws — a boot must not die here. */
   async function getSession() {
     try {
@@ -984,6 +1010,7 @@ window.DB = (function () {
     resetAll,
     restoreFromBackup,
     subscribeToChanges,
+    linkMemberAccount,
     getSession,
     onAuthChange,
     signInWithGoogle,

@@ -18,7 +18,7 @@ window.PFViews = window.PFViews || {};
 window.PFViews.menu = function (ctx) {
   const {
     members, unlocked, myMember, escapeHtml, icon, memberAvatar, C, hasMasterPin,
-    authMode, sessionEmail
+    authMode, sessionEmail, identityLocked
   } = ctx;
 
   /** One tappable settings row. `note` is the quiet second line. */
@@ -110,7 +110,13 @@ window.PFViews.menu = function (ctx) {
              <div class="profile-card-name">${escapeHtml(myMember.name)}</div>
              <div class="profile-card-note">Payout order #${myMember.member_order}</div>
            </div>
-           <button type="button" class="profile-card-change" onclick="PowerFund.openWhoAmIPicker()">Not you?</button>
+           ${
+             // Signed in? Then this is not a preference to change — the member
+             // row belongs to the account. Sign out to be somebody else.
+             identityLocked
+               ? `<span class="profile-card-locked">${icon("lock", 12)}<span>Signed in</span></span>`
+               : `<button type="button" class="profile-card-change" onclick="PowerFund.openWhoAmIPicker()">Not you?</button>`
+           }
          </div>`
       : `<button type="button" class="my-status-setup" onclick="PowerFund.openWhoAmIPicker()">👋 Which member are you? Tap to personalise this app.</button>`;
 

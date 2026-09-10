@@ -3854,6 +3854,16 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   cursor: pointer;
   flex-shrink: 0;
 }
+/* Not a button: when a login owns this member row there is nothing to change. */
+.profile-card-locked {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  flex: none;
+}
 .profile-card-change:hover { color: var(--accent); }
 
 /* Rows can carry a second line now, so the label stacks rather than centring. */
@@ -5057,6 +5067,20 @@ body.auth-gate {
   font-weight: 700;
   font-size: 14.5px;
   cursor: pointer;
+}
+/* A dead-end is a warning, not an invitation — the emblem drops the gold. */
+.signin-emblem-warn {
+  background: linear-gradient(160deg, rgba(225, 83, 83, 0.18), rgba(225, 83, 83, 0.06));
+  border-color: rgba(225, 83, 83, 0.3);
+  box-shadow: 0 0 46px -12px rgba(225, 83, 83, 0.35);
+  color: var(--danger);
+}
+/* Sign-out is the way out of a dead-end, not the happy path, so it does not
+   wear the gold gradient the real CTA uses. */
+.signin-btn-quiet {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: var(--text-primary);
 }
 .signin-btn:active { transform: scale(0.97); }
 .signin-btn:disabled { opacity: 0.6; cursor: default; transform: none; }

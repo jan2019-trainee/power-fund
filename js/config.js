@@ -42,5 +42,5 @@ window.APP_CONFIG = {
   // Providers) AND this site's URL is listed under Authentication -> URL
   // Configuration -> Redirect URLs. Turning it to "required" before both are
   // true locks every member out, including the treasurer.
-  AUTH_MODE: "off",
+  AUTH_MODE: "optional",
 };

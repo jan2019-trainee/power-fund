@@ -2676,6 +2676,10 @@ async function memberAccounts(browser, errors) {
   const off = await browser.newPage({ viewport: { width: 430, height: 950 } });
   off.on("pageerror", (e) => errors.push(`auth: ${e}`));
   await serve(off, M.TABLE_DATA);
+  // Set explicitly rather than leaning on whatever js/config.js currently
+  // ships. AUTH_MODE is a deploy-time setting the treasurer changes; a test
+  // that reads it is really testing the deployment, not the code.
+  await withAuthMode(off, "off");
   await off.goto(BASE, { waitUntil: "domcontentloaded" });
   await off.waitForTimeout(1500);
   await off.locator(".tab-item", { hasText: "Menu" }).click();

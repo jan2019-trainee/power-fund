@@ -3287,11 +3287,35 @@
             actionCycle: null,
           };
         } else {
-          myStatus = {
-            kind: "due",
-            label: `Payment due${payCycleDue ? " " + C.formatDate(payCycleDue) : ""}`,
-            actionCycle: payCycle,
-          };
+          // "Payment due" only inside a 7-day window before the due date.
+          // The cycle the fund is collecting can be months out — the card was
+          // announcing "Payment due Dec 15, 2026" in September and offering to
+          // take the money, which reads as an outstanding bill rather than a
+          // future one. Outside that window nothing is owed, so say so.
+          //
+          // This changes only what the card SAYS and whether it offers the
+          // shortcut. It moves no due date and blocks no payment: the cycle,
+          // its due date and paying ahead all work exactly as before, from the
+          // Rounds grid or the floating CTA.
+          const DUE_SOON_DAYS = 7;
+          const msPerDay = 24 * 60 * 60 * 1000;
+          const daysToDue = payCycleDue
+            ? Math.ceil((C.startOfDay(payCycleDue) - C.startOfDay(new Date())) / msPerDay)
+            : 0;
+          const dueSoon = !payCycleDue || daysToDue <= DUE_SOON_DAYS;
+          myStatus = dueSoon
+            ? {
+                kind: "due",
+                label: `Payment due${payCycleDue ? " " + C.formatDate(payCycleDue) : ""}`,
+                actionCycle: payCycle,
+              }
+            : {
+                kind: "paid",
+                label: `You're all caught up — next payment ${C.formatDate(
+                  payCycleDue
+                )}`,
+                actionCycle: null,
+              };
         }
       }
     }

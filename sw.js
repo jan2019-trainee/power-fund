@@ -21,7 +21,7 @@
  * ------------------------------------------------------------------------- */
 
 /* Bump this string on every deploy that should invalidate the shell cache. */
-const CACHE = "pf-v15";
+const CACHE = "pf-v16";
 
 const PRECACHE = [
   "/",

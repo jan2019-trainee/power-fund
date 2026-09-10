@@ -16,12 +16,11 @@ window.PFViews.home = function (ctx) {
     overdueCount, remainingToGo, payCycle, payCycleDue, cyclePaidCount,
     myMember, myStatus, ROUND_PILL, state, unlocked, busy,
     attentionQueueExpanded, overdueListOpen, startRoundConfirming,
-    escapeHtml, inlineArg, icon, batteryCell, memberAvatar, memberStanding,
+    escapeHtml, inlineArg, icon, batteryCell, memberAvatar,
     sparkline, C,
     formatDateTime, overdueRows, activityTimeLabel, isWide
   } = ctx;
   // Cycles due so far — the denominator behind each member's standing ring.
-  const cyclesDueSoFar = C.completedCyclesCount(state.cycles);
   // Set when the pinned action renders, so the view can reserve room for it.
   let hasFloatingCta = false;
   let html = "";
@@ -429,80 +428,16 @@ window.PFViews.home = function (ctx) {
         : ""
     }
     ${
+      // Just the count line. The per-member badges that used to sit here were
+      // a second row of the same information the Members strip below already
+      // carries — that strip is now colour-coded by this cycle's payment
+      // status, so one row of circles answers "who still owes" instead of a
+      // row of name pills and a row of avatars saying the same thing.
       payCycle
         ? `<div class="cycle-status">
              <div class="cycle-status-head">${
                payCycleDue ? C.formatDate(payCycleDue) : `Cycle ${payCycle}`
              } · <b>${cyclePaidCount} / ${members.length} paid</b> this cycle</div>
-             <div class="cycle-status-chips">
-               ${members
-                 .map((m) => {
-                   const s = C.statusOf(state.contributions, m.id, payCycle);
-                   const overdue = C.isOverdue(
-                     state.contributions,
-                     state.cycles,
-                     m.id,
-                     payCycle
-                   );
-                   // All FIVE states the app actually has, matching the Rounds
-                   // grid and the legend in Menu. These chips used to collapse
-                   // to paid / pending / unpaid, which made a REJECTED claim
-                   // and an OVERDUE member pixel-identical to someone who
-                   // simply hasn't paid yet — on the screen both roles open
-                   // first, and for the two states that most need acting on.
-                   // Still no mark for a not-yet-due unpaid cycle: that isn't
-                   // an error and shouldn't read like one.
-                   const cls =
-                     s === 2
-                       ? "paid"
-                       : s === 1
-                       ? "pending"
-                       : s === 3
-                       ? "rejected"
-                       : overdue
-                       ? "overdue"
-                       : "unpaid";
-                   // Mark trails the name, matching the Rounds grid. Leading it
-                   // ("… Regine") reads as truncated text rather than a state.
-                   const mark =
-                     s === 2 ? "✓" : s === 1 ? "⋯" : s === 3 ? "✕" : overdue ? "!" : "";
-                   const word =
-                     s === 2
-                       ? "paid"
-                       : s === 1
-                       ? "sent, awaiting review"
-                       : s === 3
-                       ? "rejected — needs sending again"
-                       : overdue
-                       ? "overdue"
-                       : "not paid";
-                   // Same rule as the Rounds & cycles grid: treasurer can act
-                   // on any chip, members only on their own unpaid one.
-                   // Rejected still owes the cycle (C.isOwed), so a member can
-                   // act on their own rejected chip exactly as on an unpaid one.
-                   const clickable = unlocked || s === 0 || s === 3;
-                   const action = !clickable
-                     ? ""
-                     : unlocked
-                     ? s === 1
-                       ? " — tap to review"
-                       : s === 2
-                       ? " — tap to mark unpaid"
-                       : " — tap to record as paid"
-                     : " — tap to record your payment";
-                   const treasurerTap = unlocked && s !== 0;
-                   return `<button type="button" class="mini-chip ${cls} ${
-                     treasurerTap ? "treasurer-tap" : ""
-                   }" ${
-                     clickable ? "" : "disabled"
-                   } onclick="PowerFund.cellClicked('${inlineArg(
-                     m.id
-                   )}', ${payCycle})" aria-label="${escapeHtml(
-                     m.name
-                   )}: ${word}${action}">${escapeHtml(m.name)}${mark ? " " + mark : ""}</button>`;
-                 })
-                 .join("")}
-             </div>
            </div>`
         : ""
     }
@@ -566,23 +501,48 @@ window.PFViews.home = function (ctx) {
     <div class="roster-strip">
       ${members
         .map((m) => {
-          const paidOut = C.roundStatus(state.contributions, rounds, m.member_order) === "completed";
-          const standing = memberStanding(m.id, cyclesDueSoFar, paidOut);
+          // The ring answers ONE question: has this member paid the cycle
+          // being collected? It used to show memberStanding(), which ranks
+          // "paid-out" (their round is finished) above everything — so the
+          // member whose round had already completed was ringed green while
+          // owing the current cycle, and green meant two different things.
+          // Colour is now the only cue; no glyph beside the name.
           const cycleStatus = payCycle
             ? C.statusOf(state.contributions, m.id, payCycle)
             : null;
-          const mark =
-            cycleStatus === 2 ? "check" : cycleStatus === 1 ? "clock" : null;
+          const overdue =
+            payCycle != null &&
+            C.isOverdue(state.contributions, state.cycles, m.id, payCycle);
+          const ring =
+            cycleStatus === 2
+              ? "paid"
+              : cycleStatus === 1
+              ? "pending"
+              : cycleStatus === 3
+              ? "rejected"
+              : overdue
+              ? "overdue"
+              : "idle";
+          const said =
+            cycleStatus === 2
+              ? "paid this cycle"
+              : cycleStatus === 1
+              ? "sent, awaiting review"
+              : cycleStatus === 3
+              ? "rejected — needs sending again"
+              : overdue
+              ? "overdue"
+              : payCycle == null
+              ? "nothing due"
+              : "not paid yet";
           return `<button type="button" class="roster-chip" onclick="PowerFund.setView('members')" aria-label="${escapeHtml(
             m.name
-          )} — ${standing.replace("-", " ")}">
+          )} — ${said}">
             <span class="roster-avatar-wrap">
-              ${memberAvatar(m.name, standing, 52)}
+              ${memberAvatar(m.name, ring, 52)}
               <span class="roster-order">${m.member_order}</span>
             </span>
-            <span class="roster-name">${
-              mark ? `<span class="roster-mark ${mark}">${icon(mark, 10)}</span>` : ""
-            }${escapeHtml(m.name)}</span>
+            <span class="roster-name">${escapeHtml(m.name)}</span>
           </button>`;
         })
         .join("")}

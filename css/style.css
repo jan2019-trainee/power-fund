@@ -1137,6 +1137,9 @@ body {
 }
 .payout-note-input:focus { border-color: var(--accent); }
 
+/* The icon and the label were two inline children of a plain block button, so
+   the SVG sat on the text baseline at the far left while the text centred
+   itself — they never lined up. Flex centres them as one unit. */
 .share-btn {
   margin-top: 14px;
   width: 100%;
@@ -1146,10 +1149,16 @@ body {
   font-family: 'Inter', sans-serif;
   font-size: 13px;
   font-weight: 600;
-  padding: 10px;
+  padding: 11px 12px;
   border-radius: 8px;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
 }
+.share-btn .icon { flex-shrink: 0; }
 .share-btn:hover { border-color: var(--accent); color: var(--accent); }
 
 .share-text-area {
@@ -2391,6 +2400,11 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
 .avatar-current { box-shadow: 0 0 0 2.5px var(--success), 0 0 14px 1px rgba(76, 175, 131, 0.35); }
 .avatar-overdue { box-shadow: 0 0 0 2.5px var(--danger); }
 .avatar-pending { box-shadow: 0 0 0 2.5px var(--pending-review); }
+/* Paid THIS cycle. Home's roster ring means only this now — it used to show
+   overall standing, where "paid-out" (their round is finished) outranked
+   everything, so green could mean either "has paid" or "already received
+   their payout". One question, one colour. */
+.avatar-paid { box-shadow: 0 0 0 2.5px var(--success); }
 /* "Already received their payout" is a settled, positive state — the accent is
    the colour the rest of the app uses for "needs action", so on a completed
    fund every member was ringed as if something were owed. */

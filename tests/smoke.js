@@ -1215,10 +1215,21 @@ async function qaFixes(browser, errors) {
   await serve(chips, rejectedData);
   await chips.goto(BASE, { waitUntil: "domcontentloaded" });
   await chips.waitForTimeout(1500);
+  // The per-member name badges below the jar are gone; the roster ring is now
+  // the single place Home encodes each member's status for the open cycle, by
+  // colour alone. A rejected claim must still be visible there.
   check(
-    "qa/a rejected member is visible on Home",
-    (await chips.locator(".mini-chip.rejected").count()) >= 1,
-    `rejected=${await chips.locator(".mini-chip.rejected").count()}`
+    "qa/a rejected member is visible on Home's roster",
+    (await chips.locator(".roster-strip .avatar-rejected").count()) >= 1,
+    `rejected=${await chips.locator(".roster-strip .avatar-rejected").count()}`
+  );
+  check(
+    "qa/roster carries no status glyph beside the name",
+    (await chips.locator(".roster-name .roster-mark").count()) === 0
+  );
+  check(
+    "qa/the duplicate badge row is gone",
+    (await chips.locator(".cycle-status-chips").count()) === 0
   );
   await chips.close();
 
@@ -1298,6 +1309,48 @@ async function qaFixes(browser, errors) {
     /different digits/i.test(await mp.locator(".pin-error").innerText())
   );
   await mp.close();
+
+  // --- "Payment due" only inside 7 days of the due date -------------------
+  // The cycle being collected can be months out; the card was announcing a
+  // December bill in September and offering to take the money.
+  const dueWindow = async (daysOut, expectDue) => {
+    const page2 = await browser.newPage({ viewport: { width: 430, height: 900 } });
+    page2.on("pageerror", (e) => errors.push(`qa/due${daysOut}: ${e}`));
+    const target = new Date();
+    target.setDate(target.getDate() + daysOut);
+    const iso = target.toISOString().slice(0, 10);
+    // One open cycle, due `daysOut` from today, nobody paid.
+    const cycles = M.CYCLES.map((c, i) =>
+      i === 0 ? { ...c, due_date: iso } : { ...c, due_date: iso }
+    );
+    await serve(page2, {
+      ...M.TABLE_DATA,
+      cycles,
+      contributions: [],
+      activity_log: [],
+      payouts: M.PAYOUTS.map((p) => ({
+        ...p,
+        released: false,
+        started_at: p.round_number === 1 ? new Date().toISOString() : null,
+      })),
+    });
+    await page2.addInitScript((id) => {
+      window.localStorage.setItem("pf_my_member_id", id);
+    }, M.MEMBERS[0].id);
+    await page2.goto(BASE, { waitUntil: "domcontentloaded" });
+    await page2.waitForTimeout(1500);
+    const card = (await page2.locator(".my-status-card").innerText()).replace(/\s+/g, " ");
+    check(
+      `qa/due ${daysOut} days out → ${expectDue ? "payment due" : "caught up"}`,
+      expectDue
+        ? /payment due/i.test(card)
+        : /all caught up/i.test(card) && !/payment due/i.test(card),
+      JSON.stringify(card.slice(0, 110))
+    );
+    await page2.close();
+  };
+  await dueWindow(3, true);   // inside the window
+  await dueWindow(30, false); // months out — nothing is owed yet
 
   // --- Undo Release names the receipt it removes ---------------------------
   const undo = await browser.newPage({ viewport: { width: 430, height: 900 } });

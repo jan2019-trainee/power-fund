@@ -18,7 +18,7 @@ window.PFViews = window.PFViews || {};
 window.PFViews.menu = function (ctx) {
   const {
     members, unlocked, myMember, escapeHtml, icon, memberAvatar, C, hasMasterPin,
-    authMode, sessionEmail, identityLocked
+    authMode, sessionEmail, identityLocked, signInStatus
   } = ctx;
 
   /** One tappable settings row. `note` is the quiet second line. */
@@ -162,6 +162,23 @@ window.PFViews.menu = function (ctx) {
           "Edit my profile",
           "PowerFund.openProfileModal()",
           "Your display name and photo"
+        )
+      );
+    }
+    // Treasurer: the addresses a Google login is matched against. Before this
+    // they could only be set with a hand-written SQL update, so the person
+    // rolling accounts out had to be whoever held the Supabase password — and
+    // every member's address had to travel to them.
+    if (unlocked) {
+      const st = signInStatus || { total: 0, withEmail: 0, linked: 0 };
+      account.push(
+        row(
+          "users",
+          "Member sign-in",
+          "PowerFund.openMemberAccountsModal()",
+          st.withEmail < st.total
+            ? `${st.withEmail} of ${st.total} addresses on file`
+            : `${st.linked} of ${st.total} have signed in`
         )
       );
     }

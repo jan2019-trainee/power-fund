@@ -211,6 +211,15 @@
   let editNamesValues = {};
   let editNamesError = null;
 
+  /* Treasurer -> Account -> "Member sign-in". The addresses a Google login is
+   * matched against (migration 008) had no UI at all: they could only be set
+   * with a hand-written SQL update, which meant the one person who could roll
+   * accounts out was whoever had the Supabase password open. Same shape as the
+   * edit-names modal — a draft map, a live-validated error, one save. */
+  let memberAccountsModalOpen = false;
+  let memberEmailValues = {};
+  let memberAccountsError = null;
+
   let lightboxSrc = null; // image URL shown full-screen in the zoom lightbox
 
   let qrModalOpen = false; // treasurer "Payment QR code" panel
@@ -2001,6 +2010,7 @@
     if (kind === "undoRelease") return doUnmarkPayoutReleased(ctx.round);
     if (kind === "reset") return doReset();
     if (kind === "restore") return doRestoreBackup(ctx.data);
+    if (kind === "unlink") return doUnlinkMember(ctx.memberId);
   }
 
   // ===================================================================
@@ -2678,6 +2688,191 @@
     }
     busy = false;
     render();
+  }
+
+  // ===================================================================
+  // Member sign-in (treasurer)
+  //
+  // Migration 008 links a Google login to a member row BY EMAIL: the treasurer
+  // records the address, and a first login carrying it claims that row. The
+  // addresses had no UI, so rolling accounts out meant a hand-written SQL
+  // update per member — and every address had to travel to whoever held the
+  // Supabase password. This panel is the treasurer typing them in on their own
+  // phone instead.
+  //
+  // NOT a new permission. The database has always decided this: 010's
+  // members_guard lets the treasurer "reorder, flag and re-address anyone" and
+  // refuses a member `Only the treasurer can change a member's email`. This is
+  // the missing presentation, not a new capability.
+  // ===================================================================
+
+  /** Where the group stands on accounts — the same three things migration 011's
+   *  preflight refuses to lock down without, computed from rows we already
+   *  hold so the treasurer can see it without opening the SQL editor. */
+  function signInReadiness() {
+    const ms = (state && state.members) || [];
+    const withEmail = ms.filter((m) => String(m.email || "").trim()).length;
+    const linked = ms.filter((m) => m.auth_user_id).length;
+    const treasurerFlagged = ms.some((m) => m.is_treasurer);
+    return {
+      total: ms.length,
+      withEmail,
+      linked,
+      treasurerFlagged,
+      ready: ms.length > 0 && withEmail === ms.length && linked === ms.length && treasurerFlagged,
+    };
+  }
+
+  function openMemberAccountsModal() {
+    memberEmailValues = {};
+    state.members.forEach((m) => (memberEmailValues[m.id] = m.email || ""));
+    memberAccountsError = null;
+    memberAccountsModalOpen = true;
+    render();
+  }
+  function closeMemberAccountsModal() {
+    memberAccountsModalOpen = false;
+    memberEmailValues = {};
+    memberAccountsError = null;
+    render();
+  }
+  function setMemberEmail(id, v) {
+    memberEmailValues[id] = v;
+    refreshMemberEmailsValidity();
+  }
+
+  /** Deliberately loose: something@something.something, no TLD list, no length
+   *  games. A typo'd address cannot be detected here anyway — it simply never
+   *  matches a login, which the panel then shows as "hasn't signed in yet".
+   *  What this does catch is the paste that lost its @ or arrived with a name
+   *  attached. */
+  function emailLooksValid(v) {
+    return /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]{2,}$/.test(v);
+  }
+
+  /** One rule set, shared by the live check and the save. Returns a message, or
+   *  null when the draft is savable. Blank is allowed — that clears an address. */
+  function memberEmailsProblem() {
+    if (!state || !state.members) return null;
+    const vals = state.members.map((m) => String(memberEmailValues[m.id] || "").trim());
+    const filled = vals.filter((v) => v);
+    const bad = filled.find((v) => !emailLooksValid(v));
+    if (bad) return `"${bad}" doesn't look like an email address.`;
+    // Uniqueness is not cosmetic: resolveAccount() matches with .find(), so two
+    // members sharing an address would silently hand the row to whichever came
+    // first in payout order.
+    const lower = filled.map((v) => v.toLowerCase());
+    if (new Set(lower).size !== lower.length) {
+      return "Two members can't share an email address.";
+    }
+    return null;
+  }
+
+  /** Patches the two affected nodes by hand instead of re-rendering — render()
+   *  reassigns innerHTML, which would destroy the input being typed into and
+   *  lose the caret. Same reason as refreshEditNamesValidity(). */
+  function refreshMemberEmailsValidity() {
+    memberAccountsError = memberEmailsProblem();
+    const box = document.getElementById("memberEmailsError");
+    if (box) {
+      box.textContent = memberAccountsError || "";
+      box.hidden = !memberAccountsError;
+    }
+    const save = document.getElementById("memberEmailsSave");
+    if (save) save.disabled = busy || !!memberAccountsError;
+    const seen = {};
+    state.members.forEach((m) => {
+      const v = String(memberEmailValues[m.id] || "").trim().toLowerCase();
+      if (v) seen[v] = (seen[v] || 0) + 1;
+    });
+    document.querySelectorAll(".member-accounts-modal .email-input").forEach((el) => {
+      const v = String(el.value || "").trim().toLowerCase();
+      el.classList.toggle("invalid", !!v && (!emailLooksValid(v) || seen[v] > 1));
+    });
+  }
+
+  async function saveMemberEmails() {
+    if (busy) return;
+    const problem = memberEmailsProblem();
+    if (problem) {
+      memberAccountsError = problem;
+      return render();
+    }
+    // Stored lowercased because that is how resolveAccount() compares them; a
+    // Google address that arrives capitalised would otherwise never match.
+    const next = {};
+    for (const m of state.members) {
+      const v = String(memberEmailValues[m.id] || "").trim().toLowerCase();
+      next[m.id] = v || null;
+    }
+    const changed = state.members.filter(
+      (m) => (m.email || null) !== next[m.id]
+    );
+    if (!changed.length) return closeMemberAccountsModal();
+
+    busy = true;
+    render();
+    try {
+      for (const m of changed) {
+        await window.DB.updateMember(m.id, { email: next[m.id] });
+      }
+      // The addresses themselves are NOT logged. The activity log is readable
+      // by every member and goes into the CSV export and the backup file, so
+      // writing five personal addresses into it would spread them further than
+      // the roster row that actually needs them. Names only.
+      const added = changed.filter((m) => next[m.id]).map((m) => m.name);
+      const cleared = changed.filter((m) => !next[m.id]).map((m) => m.name);
+      const parts = [];
+      if (added.length) parts.push(`set for ${added.join(", ")}`);
+      if (cleared.length) parts.push(`removed for ${cleared.join(", ")}`);
+      await logActivity(`Sign-in email ${parts.join("; ")}`, { type: "admin" });
+      closeMemberAccountsModal();
+      await reload();
+    } catch (e) {
+      memberAccountsError = e.message;
+      busy = false;
+      return render();
+    }
+    busy = false;
+    render();
+  }
+
+  /** Unlinking frees the row for the next matching login — the recovery path
+   *  when somebody claimed the wrong member, or signed in with the wrong
+   *  Google account. It removes no contribution and no history. */
+  function unlinkMember(memberId) {
+    const m = (state.members || []).find((x) => String(x.id) === String(memberId));
+    if (!m) return;
+    openConfirm({
+      kind: "unlink",
+      ctx: { memberId: m.id },
+      title: `Unlink ${m.name}'s account?`,
+      bodyHtml:
+        `${escapeHtml(m.name)} will be signed out of this fund's data on their next load, ` +
+        `and the next Google login using the address on file will claim this member again.` +
+        `<br><br>Nothing else changes: their payments, proofs and history all stay.`,
+      confirmLabel: "Unlink",
+    });
+  }
+  async function doUnlinkMember(memberId) {
+    if (busy) return;
+    busy = true;
+    render();
+    try {
+      const m = (state.members || []).find((x) => String(x.id) === String(memberId));
+      await window.DB.unlinkMemberAccount(memberId);
+      await logActivity(`Account unlinked for ${(m && m.name) || "a member"}`, {
+        type: "admin",
+        memberId: memberId,
+      });
+      await reload();
+      showSuccess("Account unlinked.");
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      busy = false;
+      render();
+    }
   }
 
   // ===================================================================
@@ -4061,6 +4256,7 @@
       payoutModalRound ||
       shareModalOpen ||
       editNamesModalOpen ||
+      memberAccountsModalOpen ||
       reorderModalOpen ||
       restoreState != null ||
       lightboxSrc ||
@@ -4091,6 +4287,7 @@
     if (restoreState && restoreState.phase !== "working") return closeRestoreState();
     if (reorderModalOpen) return closeReorderModal();
     if (editNamesModalOpen) return closeEditNamesModal();
+    if (memberAccountsModalOpen) return closeMemberAccountsModal();
     if (shareModalOpen) return closeShareModal();
     if (startRoundConfirming) return cancelStartRound();
   }
@@ -4656,6 +4853,9 @@
       // you?" control has to go. Leaving them would offer a choice the app
       // then ignores.
       identityLocked: accountState === "linked",
+      // Counts for the treasurer's "Member sign-in" row, so the menu can say
+      // how far the rollout has got without opening the panel.
+      signInStatus: signInReadiness(),
       payoutQrMemberId,
       // Helpers the views render with.
       //
@@ -5636,6 +5836,88 @@
       </div>`;
     }
 
+    // Treasurer: the addresses a Google login is matched against, and who has
+    // actually signed in. Gated on `unlocked` here as well as in the menu row —
+    // the open* handlers are exported on PowerFund, so anyone can reach them
+    // from a console and the render must not take the caller's word for it.
+    if (memberAccountsModalOpen && unlocked) {
+      const ordered = sortedMembers();
+      const r = signInReadiness();
+      const rows = ordered
+        .map((m) => {
+          const linked = !!m.auth_user_id;
+          const hasEmail = !!String(m.email || "").trim();
+          const pill = linked
+            ? `<span class="acct-pill ok">${icon("check", 12)} Signed in</span>`
+            : hasEmail
+            ? `<span class="acct-pill wait">Hasn't signed in yet</span>`
+            : `<span class="acct-pill none">No address yet</span>`;
+          return `<div class="acct-row">
+            <div class="acct-row-head">
+              ${memberAvatar(m.name, "idle", 30, m.avatar_url)}
+              <div class="acct-row-who">
+                <span class="acct-row-name">${escapeHtml(m.name)}${
+            m.is_treasurer ? ` <span class="acct-tag">Treasurer</span>` : ""
+          }</span>
+                ${pill}
+              </div>
+              ${
+                linked
+                  ? `<button type="button" class="acct-unlink" onclick="PowerFund.unlinkMember('${String(
+                      m.id
+                    ).replace(/'/g, "\\'")}')" ${busy ? "disabled" : ""}>Unlink</button>`
+                  : ""
+              }
+            </div>
+            <input type="email" class="pin-input email-input" inputmode="email"
+                   autocomplete="off" autocapitalize="none" spellcheck="false"
+                   data-member="${escapeHtml(m.id)}"
+                   value="${escapeHtml(memberEmailValues[m.id] || "")}"
+                   oninput="PowerFund.setMemberEmail('${String(m.id).replace(
+                     /'/g,
+                     "\\'"
+                   )}', this.value)"
+                   placeholder="name@gmail.com">
+          </div>`;
+        })
+        .join("");
+
+      // Says plainly where the group is, because the alternative is running
+      // 011_preflight.sql to find out. Deliberately not a promise that the
+      // lockdown will succeed — it names the same three conditions the
+      // migration checks, and the migration remains the authority.
+      const readyNote = r.ready
+        ? `<p class="acct-ready ok">${icon(
+            "check",
+            13
+          )} All ${r.total} members have an address and have signed in once, and a treasurer is flagged.</p>`
+        : `<p class="acct-ready">Addresses on file: <b>${r.withEmail}/${
+            r.total
+          }</b> · signed in at least once: <b>${r.linked}/${r.total}</b>${
+            r.treasurerFlagged ? "" : " · <b>no treasurer is flagged yet</b>"
+          }</p>`;
+
+      html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeMemberAccountsModal()">
+        <div class="modal member-accounts-modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <h3 id="dlg-title">Member sign-in</h3>
+          <p class="modal-sub">A member signs in with Google, and the address you
+            record here is what links their login to their row. Leave one blank
+            until you have it — that member simply can't sign in yet.</p>
+          ${rows}
+          ${readyNote}
+          <p class="pin-error" id="memberEmailsError" role="alert"${
+            memberAccountsError ? "" : " hidden"
+          }>${escapeHtml(memberAccountsError || "")}</p>
+          <div class="modal-actions">
+            <button class="modal-btn-primary" id="memberEmailsSave" onclick="PowerFund.saveMemberEmails()" ${
+              busy || memberEmailsProblem() ? "disabled" : ""
+            }>Save addresses</button>
+            <button class="modal-btn-secondary" onclick="PowerFund.closeMemberAccountsModal()">Cancel</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
     // Treasurer: payment QR code panel
     if (qrModalOpen && unlocked) {
       const current = qrImageUrl();
@@ -6227,6 +6509,12 @@
     openReorderModal,
     closeReorderModal,
     openEditNamesModal,
+    openMemberAccountsModal,
+    closeMemberAccountsModal,
+    setMemberEmail,
+    saveMemberEmails,
+    memberEmailsProblem,
+    unlinkMember,
     closeEditNamesModal,
     saveEditNames,
     setEditName: (id, v) => {

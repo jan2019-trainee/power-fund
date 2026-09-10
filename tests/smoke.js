@@ -1801,6 +1801,168 @@ async function captureLinkWrites(page, data) {
   return writes;
 }
 
+/** Treasurer -> Account -> Member sign-in: the addresses a Google login is
+ *  matched against, and who has actually signed in. Before this panel the
+ *  addresses could only be set with hand-written SQL. */
+async function signInAdmin(browser, errors) {
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`signin-admin: ${e}`));
+
+  // A half-rolled-out fund: three of five have an address, one has signed in.
+  const members = rosterWithEmails();
+  members[3].email = null;
+  members[4].email = null;
+  members[0].auth_user_id = FAKE_USER_ID;
+  const data = { ...M.TABLE_DATA, members };
+
+  await serve(page, data);
+  const writes = [];
+  await page.route("**/rest/v1/members**", async (route) => {
+    const req = route.request();
+    if (req.method() === "GET") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(data.members),
+      });
+    }
+    let body = {};
+    try {
+      body = JSON.parse(req.postData() || "{}");
+    } catch (e) {}
+    writes.push({ url: req.url(), body });
+    const target = data.members.find((m) => req.url().includes(m.id));
+    Object.assign(target || {}, body);
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([target || {}]),
+    });
+  });
+  const logs = [];
+  await page.route("**/rest/v1/activity_log**", async (route) => {
+    const req = route.request();
+    if (req.method() !== "GET") {
+      try {
+        logs.push(JSON.parse(req.postData() || "{}"));
+      } catch (e) {}
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(req.method() === "GET" ? data.activity_log || [] : []),
+    });
+  });
+  await withAuthMode(page, "optional");
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2000);
+  await unlockTreasurer(page);
+  await page.locator(".tab-item", { hasText: "Menu" }).click();
+  await page.waitForTimeout(400);
+
+  const menuRow = page.locator(".menu-row", { hasText: "Member sign-in" });
+  check("signin-admin/the treasurer gets a Member sign-in row", (await menuRow.count()) === 1);
+  check(
+    "signin-admin/the row says how far the rollout has got",
+    /3 of 5 addresses on file/.test(await menuRow.first().innerText())
+  );
+
+  await menuRow.first().click();
+  await page.waitForTimeout(400);
+  check(
+    "signin-admin/the panel lists every member",
+    (await page.locator(".member-accounts-modal .acct-row").count()) === 5
+  );
+  check(
+    "signin-admin/a linked member reads as signed in",
+    (await page.locator(".member-accounts-modal .acct-pill.ok").count()) === 1
+  );
+  check(
+    "signin-admin/an address on file but no login yet says so",
+    (await page.locator(".member-accounts-modal .acct-pill.wait").count()) === 2
+  );
+  check(
+    "signin-admin/a member with no address is called out separately",
+    (await page.locator(".member-accounts-modal .acct-pill.none").count()) === 2
+  );
+  check(
+    "signin-admin/only a linked member offers Unlink",
+    (await page.locator(".member-accounts-modal .acct-unlink").count()) === 1
+  );
+  check(
+    "signin-admin/the readiness line names both outstanding counts",
+    /3\/5/.test(await page.locator(".acct-ready").innerText()) &&
+      /1\/5/.test(await page.locator(".acct-ready").innerText())
+  );
+
+  // Validation, live and without losing the caret (same rule as names).
+  const inputs = page.locator(".member-accounts-modal .email-input");
+  await inputs.nth(3).fill("not-an-email");
+  await page.waitForTimeout(250);
+  check(
+    "signin-admin/a malformed address is called out as you type",
+    /doesn't look like an email/i.test(await page.locator("#memberEmailsError").innerText()) &&
+      (await page.locator("#memberEmailsSave").isDisabled())
+  );
+  await inputs.nth(3).fill(await inputs.nth(0).inputValue());
+  await page.waitForTimeout(250);
+  check(
+    "signin-admin/two members can't share an address",
+    /can't share/i.test(await page.locator("#memberEmailsError").innerText())
+  );
+  // Blank is legitimate — it is the state of every member not yet collected.
+  await inputs.nth(3).fill("");
+  await page.waitForTimeout(250);
+  check(
+    "signin-admin/a blank address is allowed",
+    (await page.locator("#memberEmailsError").isHidden()) &&
+      !(await page.locator("#memberEmailsSave").isDisabled())
+  );
+
+  // Saved lowercased, because resolveAccount() compares lowercased — a
+  // capitalised paste would otherwise never match its login.
+  await inputs.nth(3).fill("  Verdz.Test@Gmail.com  ");
+  await page.waitForTimeout(250);
+  await page.locator("#memberEmailsSave").click();
+  await page.waitForTimeout(900);
+  const emailWrite = writes.find((w) => "email" in w.body);
+  check(
+    "signin-admin/the address is stored trimmed and lowercased",
+    !!emailWrite && emailWrite.body.email === "verdz.test@gmail.com"
+  );
+  check(
+    "signin-admin/only the one changed row is written",
+    writes.filter((w) => "email" in w.body).length === 1
+  );
+  // The addresses are five people's personal accounts; the activity log is
+  // read by all of them and lands in the CSV export and the backup file, so
+  // the entry names the member and never the address.
+  const logged = logs.map((b) => JSON.stringify(b)).join(" ");
+  check(
+    "signin-admin/the activity entry names the member, not the address",
+    /Sign-in email/.test(logged) && !/verdz\.test@gmail\.com/.test(logged)
+  );
+
+  // Unlinking is confirmed first, and clears auth_user_id — nothing else.
+  await page.locator(".menu-row", { hasText: "Member sign-in" }).first().click();
+  await page.waitForTimeout(400);
+  await page.locator(".member-accounts-modal .acct-unlink").first().click();
+  await page.waitForTimeout(400);
+  check(
+    "signin-admin/Unlink confirms before it acts",
+    /unlink/i.test(await page.locator(".modal[role=dialog]").last().innerText())
+  );
+  await page.locator(".modal-btn-primary", { hasText: /Unlink/i }).first().click();
+  await page.waitForTimeout(900);
+  const unlink = writes.find((w) => "auth_user_id" in w.body);
+  check(
+    "signin-admin/Unlink clears the link and touches nothing else",
+    !!unlink && unlink.body.auth_user_id === null && Object.keys(unlink.body).length === 1
+  );
+
+  await page.close();
+}
+
 /** Claim / link on first sign-in (phase 3). */
 async function accountLinking(browser, errors) {
   // 1. A matching address that nobody has claimed: link it, silently.
@@ -2897,6 +3059,7 @@ async function bootFailure(browser) {
   console.log("\nMember accounts");
   await memberAccounts(browser, errors);
   console.log("\nAccount linking");
+  await signInAdmin(browser, errors);
   await accountLinking(browser, errors);
   console.log("\nOnboarding");
   await onboarding(browser, errors);

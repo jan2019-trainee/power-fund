@@ -233,7 +233,28 @@ Set `AUTH_MODE` in `js/config.js` and redeploy:
   migration's own header: it revokes `anon`, so either half alone leaves the
   app broken.
 
-**4. When it goes wrong**
+**4. The addresses**
+
+A member's Google login is matched to their row **by email** (migration 008).
+Record the addresses in the app rather than by hand: with treasurer mode
+unlocked, **Menu → Account → Member sign-in**. It lists every member with
+
+- the address their login is matched against, editable in place,
+- whether they have signed in yet, or whether no address is on file,
+- **Unlink**, on a member who has signed in — the way back if the wrong Google
+  account claimed the row (nothing else changes: payments, proofs and history
+  all stay), and
+- how far the rollout has got: how many addresses are on file, how many people
+  have signed in, and whether a treasurer is flagged. Those are the same three
+  things `011_preflight.sql` refuses to lock down without — the migration
+  stays the authority, this just saves you running it to find out.
+
+Blank is a legitimate state: a member with no address simply cannot sign in
+yet. Addresses are stored lowercased, because that is how they are compared.
+The **activity log records the member's name and never the address** — it is
+read by the whole group and lands in the CSV export and the backup file.
+
+**5. When it goes wrong**
 
 | Symptom | Cause |
 | --- | --- |
@@ -242,6 +263,7 @@ Set `AUTH_MODE` in `js/config.js` and redeploy:
 | Returns to the app still signed out | The opened URL is missing from Redirect URLs |
 | "You're not on this fund's roster" | That address is on no `members` row |
 | "This fund isn't ready for sign-ins yet" | No member has an email recorded at all |
+| "Someone else has already linked this member" | That row is claimed — **Unlink** it in Menu → Account → Member sign-in |
 
 To check what a deploy is actually serving without trusting a dashboard, open
 `/js/config.js` on the deployed URL and read the `AUTH_MODE` line. It is

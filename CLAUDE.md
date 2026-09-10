@@ -475,8 +475,37 @@ without gating the other four members. An unset or unrecognised value falls
 back to `off`.
 
 Done: migration 008, sign-in/sign-out, the session gate, the Menu → Account
-group, the claim/link step, and self-service name + photo (migration 009).
-**Not done:** the RLS rewrite.
+group, the claim/link step, self-service name + photo (migration 009), and
+**the treasurer's Member sign-in panel** (below). **Not done:** the RLS rewrite.
+
+**Menu → Account → Member sign-in** (treasurer, and only while `AUTH_MODE` is
+not `off`) is where the addresses a login is matched against are actually
+recorded. They had **no UI at all** — only a hand-written SQL update — which
+meant whoever rolled accounts out had to be whoever held the Supabase
+password, and every member's personal address had to travel to them. Category:
+**UI Only**. 010's guard has always said the treasurer "may reorder, flag and
+re-address anyone" and refuses a member `Only the treasurer can change a
+member's email`; this is the missing presentation, not a new permission.
+
+Four things in it worth not undoing:
+
+- **Uniqueness is enforced, not cosmetic.** `resolveAccount()` matches with
+  `.find()`, so two members sharing an address would silently hand the row to
+  whichever came first in payout order.
+- **Stored lowercased**, because that is how `resolveAccount()` compares. A
+  capitalised paste would otherwise never match its own login.
+- **The activity log gets the member's name, never the address.** The log is
+  read by all five, and goes into the CSV export and the backup file; writing
+  five personal addresses there would spread them past the one roster row that
+  needs them.
+- **Unlink** is the recovery path for a wrong claim (010 permits it to the
+  treasurer only). It writes `auth_user_id: null` and nothing else — a test
+  asserts the payload has exactly that one key.
+
+It also prints the rollout state: addresses on file, who has signed in, and
+whether a treasurer is flagged — the same three conditions `011_preflight.sql`
+refuses to lock down without. Deliberately **not** a promise that the lockdown
+will succeed; the migration stays the authority.
 
 `resolveAccount()` runs after every load and puts the account in one of five
 states, which drive everything else: `linked` (this login owns a member row),

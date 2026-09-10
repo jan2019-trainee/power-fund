@@ -1281,6 +1281,25 @@ window.DB = (function () {
     return (res.data && res.data[0]) || null;
   }
 
+  /** Treasurer-only: detach whichever Google login owns this member row, so the
+   *  next login carrying the address on file can claim it again. The recovery
+   *  path for a wrong claim; 010's members_guard refuses it to anyone else
+   *  (`Only the treasurer can unlink an account`).
+   *
+   *  Goes through updateMember's sibling rather than updateMember itself so the
+   *  refusal message names the treasurer account, which is the only thing that
+   *  can ever have been missing here. */
+  async function unlinkMemberAccount(memberId) {
+    const res = await client
+      .from("members")
+      .update({ auth_user_id: null })
+      .eq("id", memberId)
+      .select();
+    unwrap(res, "Couldn't unlink this account");
+    requireRows(res, "Couldn't unlink this account");
+    return (res.data && res.data[0]) || null;
+  }
+
   /** The current session, or null. Never throws — a boot must not die here. */
   async function getSession() {
     try {
@@ -1342,6 +1361,7 @@ window.DB = (function () {
     getMembers,
     addMember,
     updateMember,
+    unlinkMemberAccount,
     deleteMember,
     updateMemberOrder,
     getCycles,

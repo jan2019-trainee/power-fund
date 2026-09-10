@@ -421,7 +421,40 @@ Run in the Supabase SQL editor, in order. `006` also needs a one-off
 `update app_settings set master_pin = '<digits>' where id = 1;`
 
 `001`–`005` (earlier work) · `006_redesign_foundation.sql` — rejected payments,
-master PIN, fund name, treasurer QR fields, typed activity, reserved avatar.
+master PIN, fund name, treasurer QR fields, typed activity, reserved avatar ·
+`007_activity_attribution.sql` — `activity_log.member_id` / `.round_number` ·
+`008_member_auth.sql` — `members.auth_user_id` / `.email` / `.is_treasurer`,
+plus a documented one-off for the five addresses and the treasurer flag.
+
+## Member accounts (in progress)
+
+A **new feature beyond the design** — the mockups have no auth and say so
+(`canvas.json`, `forgot-pin-notes`). Decisions taken: **Google only** (the one
+provider needing no SMTP, so a forgotten password is Google's problem and not a
+recovery flow we have to build), **the treasurer PIN stays** as a second gate
+on top of the `is_treasurer` role, and **linking is by email** — the treasurer
+stores the five addresses and a first login with a matching address links
+itself.
+
+Everything is behind **`AUTH_MODE` in `js/config.js`** (`off` | `optional` |
+`required`, default `off`), so switching auth on is a decision rather than a
+side effect of a deploy. `optional` exists to test Google on a real phone
+without gating the other four members. An unset or unrecognised value falls
+back to `off`.
+
+Done: migration 008, sign-in/sign-out, the session gate, the Menu → Account
+group. **Not done:** the claim/link step (so a session does not yet decide
+`myMember` — that is still `localStorage.pf_my_member_id`), self-service name
+and photo, and the RLS rewrite.
+
+Two things to keep in view:
+
+- **A login proves identity but restricts nothing yet.** RLS is still
+  `using (true)`, and the PINs are still served in plaintext. The security
+  payoff arrives with the RLS migration, not with the sign-in screen.
+- **The sign-in screen has no approved mockup.** It borrows
+  `OnboardingWelcome.dc.html`'s composition. Flagged for UI/UX QA as new
+  design, not as a port.
 
 ## Tests
 

@@ -227,9 +227,31 @@ for five people who trust each other.
 Vercel URL like a shared password — share it only with the 5 members, don't post
 it publicly, and don't submit it to search engines.
 
-If you ever need real protection (per-person logins, audit trail, locked-down
-writes), add Supabase Auth and rewrite the RLS policies to check `auth.uid()`.
-That is out of scope for this version.
+**Member accounts are being added** (migration 008), and they are the route to
+real protection — per-person logins, then RLS policies that check `auth.uid()`
+instead of `using (true)`. That work is deliberately staged, and where it has
+got to is controlled by one setting, `AUTH_MODE` in `js/config.js`:
+
+| `AUTH_MODE` | What it does |
+| --- | --- |
+| `"off"` *(shipped default)* | No auth anywhere. Everything above still applies, unchanged. |
+| `"optional"` | A "Sign in with Google" row appears in Menu and signing in works, but the app is fully usable without it. Use this to test on a real phone without locking the other four members out. |
+| `"required"` | No session, no app: the sign-in screen replaces everything. |
+
+Before switching off `"off"`, both of these must be true, or **every member is
+locked out, treasurer included**:
+
+1. Google is enabled under Supabase → Authentication → Providers.
+2. This site's URL is listed under Authentication → URL Configuration →
+   Redirect URLs.
+
+Note what a login does and does not buy you today. RLS is **still**
+`using (true) with check (true)`, so a signed-in member is not yet restricted
+to their own rows, and **the PINs are still readable in plaintext** by anyone
+with the anon key. Signing in currently proves who you are; it does not yet
+stop anyone from writing anything. Tightening RLS and moving the PINs out of
+the client's reach is a later migration — that is the step that turns the login
+into actual protection.
 
 **Never commit:** the `service_role` key, the database password (kept locally in
 `supabase-db-password.local.txt`, which is git-ignored), or real credentials in

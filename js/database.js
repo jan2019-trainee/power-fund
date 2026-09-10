@@ -881,6 +881,73 @@ window.DB = (function () {
     return () => client.removeChannel(channel);
   }
 
+  // ===================================================================
+  // Auth (migration 008)
+  //
+  // Google is the only provider, chosen because it is the only option that
+  // needs no SMTP: a forgotten password is Google's problem, not something
+  // this app has to build a recovery flow for. supabase-js persists the
+  // session in localStorage and refreshes the token itself; detectSessionInUrl
+  // (on by default) consumes the #access_token fragment on the way back from
+  // the redirect, so nothing here has to parse the URL.
+  // ===================================================================
+
+  /** The current session, or null. Never throws — a boot must not die here. */
+  async function getSession() {
+    try {
+      const res = await client.auth.getSession();
+      if (res.error) {
+        console.warn("Couldn't read the session:", res.error);
+        return null;
+      }
+      return (res.data && res.data.session) || null;
+    } catch (e) {
+      console.warn("Couldn't read the session:", e);
+      return null;
+    }
+  }
+
+  /** Fires on sign-in, sign-out and every silent token refresh. */
+  function onAuthChange(cb) {
+    try {
+      const res = client.auth.onAuthStateChange((event, session) => {
+        cb(event, session || null);
+      });
+      return (res && res.data && res.data.subscription) || null;
+    } catch (e) {
+      console.warn("Couldn't watch auth state:", e);
+      return null;
+    }
+  }
+
+  /** Leaves the page and comes back signed in. `redirectTo` must also be
+   *  listed in Supabase -> Authentication -> URL Configuration, or the
+   *  redirect lands on the project's Site URL instead of here. */
+  async function signInWithGoogle() {
+    const redirectTo = window.location.origin + window.location.pathname;
+    const res = await client.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo },
+    });
+    if (res.error) {
+      console.error("Google sign-in failed:", res.error);
+      throw new Error(
+        /provider is not enabled/i.test(res.error.message || "")
+          ? "Google sign-in isn't switched on for this fund yet. The treasurer needs to enable it in Supabase."
+          : "Couldn't start Google sign-in. Check your connection and try again."
+      );
+    }
+    return res.data;
+  }
+
+  async function signOut() {
+    const res = await client.auth.signOut();
+    if (res.error) {
+      console.error("Sign out failed:", res.error);
+      throw new Error("Couldn't sign out. Try again.");
+    }
+  }
+
   return {
     client,
     getMembers,
@@ -917,5 +984,9 @@ window.DB = (function () {
     resetAll,
     restoreFromBackup,
     subscribeToChanges,
+    getSession,
+    onAuthChange,
+    signInWithGoogle,
+    signOut,
   };
 })();

@@ -1657,6 +1657,160 @@ async function paymentSheets(browser, errors) {
   await rel.close();
 }
 
+// --- Member accounts (migration 008) --------------------------------------
+// AUTH_MODE lives in js/config.js, which the app loads as a plain script, so a
+// test picks its mode by serving a patched copy of that one file. The session
+// is seeded straight into the storage key supabase-js reads
+// (sb-<projectref>-auth-token) with a far-future expiry, so getSession()
+// resolves from storage and never tries to refresh over the network.
+const FAKE_USER_EMAIL = "regine@example.com";
+
+async function withAuthMode(page, mode, opts) {
+  const signedIn = !!(opts && opts.signedIn);
+  await page.route("**/js/config.js", async (route) => {
+    const res = await route.fetch();
+    const body = (await res.text()).replace(
+      /AUTH_MODE:\s*"[a-z]*"/,
+      `AUTH_MODE: "${mode}"`
+    );
+    return route.fulfill({ status: 200, contentType: "application/javascript", body });
+  });
+  // Nothing should reach the auth endpoints; fail loudly rather than hanging.
+  await page.route("**/auth/v1/**", (r) =>
+    r.fulfill({ status: 200, contentType: "application/json", body: "{}" })
+  );
+  if (signedIn) {
+    await page.addInitScript((arg) => {
+      const ref = new URL(arg.url).hostname.split(".")[0];
+      const email = arg.email;
+      const far = Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 365;
+      try {
+        localStorage.setItem(
+          `sb-${ref}-auth-token`,
+          JSON.stringify({
+            access_token: "test-access-token",
+            token_type: "bearer",
+            expires_in: 31536000,
+            expires_at: far,
+            refresh_token: "test-refresh-token",
+            user: { id: "11111111-1111-1111-1111-111111111111", email, aud: "authenticated" },
+          })
+        );
+      } catch (e) {}
+    }, { email: (opts && opts.email) || FAKE_USER_EMAIL, url: supabaseUrl() });
+  }
+}
+
+/** The project URL, read from js/config.js rather than hardcoded — the storage
+ *  key is derived from it, and a stale copy here would seed the wrong key and
+ *  fail the signed-in test for a reason nobody would guess. */
+let _cfgUrl = null;
+function supabaseUrl() {
+  if (_cfgUrl) return _cfgUrl;
+  const src = require("fs").readFileSync(path.join(__dirname, "..", "js", "config.js"), "utf8");
+  const m = src.match(/SUPABASE_URL:\s*"([^"]+)"/);
+  if (!m) throw new Error("Couldn't read SUPABASE_URL from js/config.js");
+  _cfgUrl = m[1];
+  return _cfgUrl;
+}
+
+async function memberAccounts(browser, errors) {
+  // 1. Required, signed out: the gate, and NOT a single data request.
+  const out = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  out.on("pageerror", (e) => errors.push(`auth: ${e}`));
+  const restCalls = [];
+  out.on("request", (r) => {
+    if (/\/rest\/v1\//.test(r.url())) restCalls.push(r.url());
+  });
+  await serve(out, M.TABLE_DATA);
+  await withAuthMode(out, "required");
+  await out.goto(BASE, { waitUntil: "domcontentloaded" });
+  await out.waitForTimeout(2000);
+  check("auth/required + signed out shows the sign-in screen", (await out.locator(".signin").count()) === 1);
+  check(
+    "auth/the gate offers Google",
+    /continue with google/i.test(await out.locator(".signin-btn").innerText()),
+    await out.locator(".signin-btn").innerText()
+  );
+  check("auth/no fund UI leaks behind the gate", (await out.locator(".tab-bar").count()) === 0);
+  // The whole point of gating the boot: don't ask for money data you have no
+  // business reading, and don't paint an error over the sign-in screen.
+  check("auth/nothing is fetched while gated", restCalls.length === 0, `${restCalls.length} call(s)`);
+  check("auth/no error banner over the gate", (await out.locator(".save-error-banner").count()) === 0);
+  await out.close();
+
+  // The gate has no sidebar, so the desktop shell's sidebar gutter must be
+  // cancelled or the card sits off-centre. Measured, because the body class
+  // that does it is set in render() and an early return once skipped it.
+  const wide = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  wide.on("pageerror", (e) => errors.push(`auth: ${e}`));
+  await serve(wide, M.TABLE_DATA);
+  await withAuthMode(wide, "required");
+  await wide.goto(BASE, { waitUntil: "domcontentloaded" });
+  await wide.waitForTimeout(2000);
+  const box = await wide.locator(".signin-card").boundingBox();
+  const offBy = Math.abs(box.x + box.width / 2 - 720);
+  check("auth/the gate centres on desktop", offBy <= 2, `off-centre by ${Math.round(offBy)}px`);
+  check(
+    "auth/the gate never scrolls sideways",
+    (await wide.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)) === true
+  );
+  await wide.close();
+
+  // 2. Required, signed in: the app behaves exactly as it always did.
+  const inp = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  inp.on("pageerror", (e) => errors.push(`auth: ${e}`));
+  await serve(inp, M.TABLE_DATA);
+  await withAuthMode(inp, "required", { signedIn: true });
+  await inp.goto(BASE, { waitUntil: "domcontentloaded" });
+  await inp.waitForTimeout(2000);
+  check("auth/a session gets you the app", (await inp.locator(".signin").count()) === 0);
+  check("auth/the fund renders as usual", (await inp.locator(".tab-bar").count()) === 1);
+  await inp.locator(".tab-item", { hasText: "Menu" }).click();
+  await inp.waitForTimeout(400);
+  const acct = inp.locator(".menu-row", { hasText: "Sign out" });
+  check("auth/Menu offers sign out", (await acct.count()) === 1);
+  check(
+    "auth/Menu names the signed-in account",
+    (await acct.innerText()).includes(FAKE_USER_EMAIL),
+    await acct.innerText()
+  );
+  await inp.close();
+
+  // 3. Optional, signed out: usable, with a way in. This is the mode the
+  //    treasurer deploys first to test Google without gating anyone.
+  const opt = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  opt.on("pageerror", (e) => errors.push(`auth: ${e}`));
+  await serve(opt, M.TABLE_DATA);
+  await withAuthMode(opt, "optional");
+  await opt.goto(BASE, { waitUntil: "domcontentloaded" });
+  await opt.waitForTimeout(2000);
+  check("auth/optional never gates the app", (await opt.locator(".signin").count()) === 0);
+  check("auth/optional still loads the fund", (await opt.locator(".tab-bar").count()) === 1);
+  await opt.locator(".tab-item", { hasText: "Menu" }).click();
+  await opt.waitForTimeout(400);
+  check(
+    "auth/optional offers a way in",
+    (await opt.locator(".menu-row", { hasText: "Sign in with Google" }).count()) === 1
+  );
+  await opt.close();
+
+  // 4. Off (the shipped default): no trace of accounts anywhere.
+  const off = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  off.on("pageerror", (e) => errors.push(`auth: ${e}`));
+  await serve(off, M.TABLE_DATA);
+  await off.goto(BASE, { waitUntil: "domcontentloaded" });
+  await off.waitForTimeout(1500);
+  await off.locator(".tab-item", { hasText: "Menu" }).click();
+  await off.waitForTimeout(400);
+  check(
+    "auth/off hides accounts entirely",
+    (await off.locator(".menu-row", { hasText: "Sign in with Google" }).count()) === 0 &&
+      (await off.locator(".menu-row", { hasText: "Sign out" }).count()) === 0
+  );
+  await off.close();
+}
+
 /** Home's "Record a contribution" shortcut must actually reach a confirmation.
  *  A treasurer's cash record and undo confirm INSIDE the Rounds cycle grid, so
  *  picking a member from Home used to close the picker and do nothing at all. */
@@ -1859,6 +2013,8 @@ async function bootFailure(browser) {
   await qaFixes(browser, errors);
   console.log("\nPayment sheets");
   await paymentSheets(browser, errors);
+  console.log("\nMember accounts");
+  await memberAccounts(browser, errors);
   console.log("\nContribute picker");
   await contributePickerFromHome(browser, errors);
   console.log("\nDesktop header actions");

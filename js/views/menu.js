@@ -16,7 +16,10 @@
 window.PFViews = window.PFViews || {};
 
 window.PFViews.menu = function (ctx) {
-  const { members, unlocked, myMember, escapeHtml, icon, memberAvatar, C, hasMasterPin } = ctx;
+  const {
+    members, unlocked, myMember, escapeHtml, icon, memberAvatar, C, hasMasterPin,
+    authMode, sessionEmail
+  } = ctx;
 
   /** One tappable settings row. `note` is the quiet second line. */
   const row = (iconName, label, action, note) =>
@@ -133,6 +136,28 @@ window.PFViews.menu = function (ctx) {
     html += group("General", general);
 
     html += `<p class="menu-locked-note">Payment tools, exports and fund settings are only available in treasurer mode.</p>`;
+  }
+
+  // Account (migration 008). Hidden entirely while AUTH_MODE is "off", so a
+  // fund that has not switched accounts on sees no trace of them. In
+  // "optional" this is the only way in, which is the point: it lets one person
+  // test Google sign-in without the other four hitting a gate.
+  if (authMode !== "off") {
+    html += group("Account", [
+      sessionEmail
+        ? row(
+            "unlocked",
+            "Sign out",
+            "PowerFund.signOut()",
+            `Signed in as ${escapeHtml(sessionEmail)}`
+          )
+        : row(
+            "lock",
+            "Sign in with Google",
+            "PowerFund.signIn()",
+            "Use the account the treasurer has on file for you"
+          ),
+    ]);
   }
 
   html += `<div class="footer-note">

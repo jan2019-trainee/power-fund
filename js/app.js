@@ -40,6 +40,24 @@
     }
   }
 
+  // ---- Member accounts (migration 008) ---------------------------------
+  // AUTH_MODE decides how much of this is live; see js/config.js. Reading it
+  // through helpers rather than inline so an unset/garbage value degrades to
+  // "off" — the state the app has always been in — instead of a locked door.
+  const AUTH_MODE = (function () {
+    const m = ((window.APP_CONFIG || {}).AUTH_MODE || "off").toLowerCase();
+    return m === "required" || m === "optional" ? m : "off";
+  })();
+  function authEnabled() {
+    return AUTH_MODE !== "off";
+  }
+  function authRequired() {
+    return AUTH_MODE === "required";
+  }
+  let session = null; // the Supabase session, or null when signed out
+  let authReady = false; // has the first getSession() settled yet?
+  let signingIn = false; // the redirect is being started
+
   // ---- Data cache (filled by loadAll) ---------------------------------
   let state = null; // { members, cycles, contributions, payouts, activityLog, settings }
   let cycleIdByNumber = {}; // cycle_number -> cycle uuid  (for writes)
@@ -401,6 +419,11 @@
   }
 
   async function reload() {
+    // Signed out with auth required: there is nothing this may read. The
+    // 30-second poll, the realtime callback and the visibility handler all
+    // land here, so guarding the one choke point stops all three from firing
+    // doomed requests at the sign-in screen and painting an error over it.
+    if (authRequired() && !session) return;
     try {
       await loadAll();
       render();
@@ -429,6 +452,43 @@
     modalCount = 1;
     clearProofSelection();
     render();
+  }
+
+  // ===================================================================
+  // Sign in / sign out (migration 008)
+  // ===================================================================
+  async function signIn() {
+    if (signingIn) return;
+    signingIn = true;
+    render();
+    try {
+      // This navigates away on success, so nothing after it normally runs.
+      await window.DB.signInWithGoogle();
+    } catch (e) {
+      signingIn = false;
+      showError(e.message);
+    }
+  }
+
+  async function signOut() {
+    if (busy) return;
+    busy = true;
+    render();
+    try {
+      await window.DB.signOut();
+      // Don't hand the next person a warm treasurer session.
+      unlocked = false;
+      unlockedViaMaster = false;
+      session = null;
+      // When auth is only optional the app stays usable, so the data has to
+      // stay loaded; when it is required the gate takes over on the next
+      // render and state is no longer reachable.
+      busy = false;
+      render();
+    } catch (e) {
+      busy = false;
+      showError(e.message);
+    }
   }
 
   /** "Record a contribution" → pick which member you are for a given cycle. */
@@ -3361,6 +3421,12 @@
   function render() {
     const app = document.getElementById("app");
     if (!app) return;
+    // Set here rather than inside renderView: the gate returns early from
+    // renderView, so anything after that early return never runs on the one
+    // screen this class exists for. The gate has no sidebar and no tab bar,
+    // so the desktop shell's sidebar gutter (body padding-left) has to go or
+    // the card sits off-centre.
+    document.body.classList.toggle("auth-gate", authRequired() && !session);
     try {
       renderView(app);
     } catch (e) {
@@ -3449,7 +3515,47 @@
     });
   }
 
+  /** The sign-in screen.
+   *
+   *  NO APPROVED MOCKUP EXISTS for this screen — the design predates member
+   *  accounts and says so (canvas.json, forgot-pin-notes). Rather than invent
+   *  a new visual language it borrows OnboardingWelcome.dc.html's shape: the
+   *  glow, the round emblem, a Space Grotesk headline over the fund name in
+   *  accent caps, and the gold gradient CTA the rest of the app already uses.
+   *  Recorded as an implementation gap for UI/UX QA to review as NEW design,
+   *  not as a port of something signed off. */
+  function signInHtml() {
+    const name = (window.APP_CONFIG || {}).SUBTITLE || "";
+    return `<div class="signin">
+      <div class="signin-glow" aria-hidden="true"></div>
+      <div class="signin-card">
+        <div class="signin-emblem" aria-hidden="true">${icon("lock", 38)}</div>
+        <h1 class="signin-title">Sign in to Power Fund</h1>
+        ${name ? `<p class="signin-fund">${escapeHtml(name)}</p>` : ""}
+        <p class="signin-sub">This fund tracks real money, so it now asks who you
+          are. Use the Google account the treasurer has on file for you.</p>
+        <button type="button" class="signin-btn" onclick="PowerFund.signIn()" ${
+          signingIn ? "disabled" : ""
+        }>
+          ${signingIn ? "Opening Google…" : "Continue with Google"}
+        </button>
+        <p class="signin-note">You'll be taken to Google and brought straight
+          back. Power Fund never sees your password.</p>
+      </div>
+    </div>`;
+  }
+
   function renderView(app) {
+    // The auth gate. Placed before the !state check because when auth is
+    // required there is deliberately no data load until there is a session —
+    // so "no state" is the normal, expected condition here, not a failure.
+    if (authRequired() && !session) {
+      app.innerHTML = authReady
+        ? signInHtml()
+        : `<div class="loading"><div class="loading-spinner" aria-hidden="true"></div><p>Checking your sign-in…</p></div>`;
+      return;
+    }
+
     if (!state) {
       app.innerHTML = appError
         ? bootErrorHtml(appError)
@@ -3737,6 +3843,10 @@
       overdueListOpen, startRoundConfirming, isWide, selectedMemberId,
       undoPaidTarget, markPaidTarget,
       hasMasterPin: hasMasterPin(),
+      // Accounts (migration 008). The mode drives whether Menu shows an
+      // Account group at all; the email is what "Signed in as ..." prints.
+      authMode: AUTH_MODE,
+      sessionEmail: (session && session.user && session.user.email) || null,
       payoutQrMemberId,
       // Helpers the views render with.
       //
@@ -4948,12 +5058,55 @@
     if (wideQuery.addEventListener) wideQuery.addEventListener("change", onWideChange);
     else if (wideQuery.addListener) wideQuery.addListener(onWideChange); // older Safari
 
-    try {
-      await loadAll();
-      render();
-    } catch (e) {
-      showError(e.message);
-      return;
+    // ---- Auth first (migration 008) ------------------------------------
+    // The session has to settle before the first load, or a required-auth
+    // boot fires a data request it has no business making and flashes the
+    // sign-in screen at someone who is already signed in.
+    if (authEnabled()) {
+      session = await window.DB.getSession();
+      authReady = true;
+      render(); // paint the gate or the spinner immediately
+
+      // Sign-in completes by NAVIGATING BACK to this page, so the session
+      // arrives through this listener rather than a return value. It also
+      // fires on token refresh and on sign-out in another tab.
+      window.DB.onAuthChange((event, next) => {
+        const was = session && session.user && session.user.id;
+        const now = next && next.user && next.user.id;
+        session = next;
+        if (was === now) return; // a silent token refresh: nothing to redraw
+        signingIn = false;
+        if (!now) {
+          // Signed out. Treasurer mode must not survive it.
+          unlocked = false;
+          unlockedViaMaster = false;
+          if (authRequired()) state = null;
+          render();
+          return;
+        }
+        // Signed in: load the fund if the gate had held it back.
+        if (!state) reload();
+        else render();
+      });
+
+    } else {
+      authReady = true;
+    }
+
+    // Gated: there is nothing to load until someone signs in, and the
+    // onAuthChange listener above does the load when they do. The listeners
+    // below are still registered — returning early here would leave a
+    // signed-in app with no realtime, no polling and no Esc key.
+    const gated = authRequired() && !session;
+    if (!gated) {
+      try {
+        await loadAll();
+        render();
+      } catch (e) {
+        showError(e.message);
+        // Keep going: the error screen offers a retry, and that retry needs
+        // the keydown and visibility listeners set up below to work.
+      }
     }
 
     // Realtime: refresh when another device changes something.
@@ -5049,6 +5202,8 @@
     cellClicked,
     openContributeModal,
     closeModal,
+    signIn,
+    signOut,
     openContributePicker,
     closeContributePicker,
     openWhoAmIPicker,

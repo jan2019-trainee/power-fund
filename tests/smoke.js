@@ -49,18 +49,35 @@ function uuid(n) {
 /** Onboarding shows once per device and would otherwise front every single
  *  test in this file. serve() marks it seen by default; a test that builds its
  *  own routes instead of calling serve() must call this itself. */
+/** Mark this device as past BOTH first-run screens: the intro, and — in
+ *  "optional" mode — the sign-in prompt. Either one fronts the whole app, so
+ *  without this every check below would be looking at the wrong screen. */
 async function markOnboarded(page) {
   await page.addInitScript(() => {
     try {
       localStorage.setItem("pf_onboarded", "1");
+      localStorage.setItem("pf_signin_skipped", "1");
+    } catch (e) {}
+  });
+}
+
+/** Past the sign-in prompt but NOT the intro — what the onboarding tests need
+ *  now that "optional" mode asks first. Keeps them testing the intro rather
+ *  than accidentally testing the prompt in front of it. */
+async function markSignInSkipped(page) {
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem("pf_signin_skipped", "1");
     } catch (e) {}
   });
 }
 
 async function serve(page, data, opts) {
   // Pass { freshDevice: true } for a first-run browser — what the onboarding
-  // test itself needs.
-  if (!(opts && opts.freshDevice)) await markOnboarded(page);
+  // test itself needs. That still skips the sign-in prompt: it fronts the
+  // intro in "optional" mode, and the onboarding tests are not about it.
+  if (opts && opts.freshDevice) await markSignInSkipped(page);
+  else await markOnboarded(page);
   await page.route("**/rest/v1/**", (route) => {
     const url = new URL(route.request().url());
     if (url.pathname.includes("/rpc/")) {
@@ -1809,6 +1826,8 @@ async function signInAdmin(browser, errors) {
   page.on("pageerror", (e) => errors.push(`signin-admin: ${e}`));
 
   // A half-rolled-out fund: three of five have an address, one has signed in.
+  // rosterWithEmails() flags member 0 as the treasurer, and that member is the
+  // one our fake session owns — so this page is the admin.
   const members = rosterWithEmails();
   members[3].email = null;
   members[4].email = null;
@@ -1853,12 +1872,25 @@ async function signInAdmin(browser, errors) {
       body: JSON.stringify(req.method() === "GET" ? data.activity_log || [] : []),
     });
   });
-  await withAuthMode(page, "optional");
+  await withAuthMode(page, "optional", { signedIn: true, email: "regine@example.com" });
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(2000);
-  await unlockTreasurer(page);
+  await page.waitForTimeout(2500);
+
+  // No PIN is typed anywhere in this test. The flagged treasurer's login
+  // out-ranks the PIN — which the whole group shares — so treasurer mode is
+  // already open.
+  check(
+    "signin-admin/the flagged treasurer is unlocked without a PIN",
+    (await page.locator(".unlock-btn").innerText()).length > 0 &&
+      (await page.locator(".modal-overlay").count()) === 0
+  );
+
   await page.locator(".tab-item", { hasText: "Menu" }).click();
   await page.waitForTimeout(400);
+  check(
+    "signin-admin/the mode card says why it is open",
+    /admin/i.test(await page.locator(".mode-card .mode-card-note").innerText())
+  );
 
   const menuRow = page.locator(".menu-row", { hasText: "Member sign-in" });
   check("signin-admin/the treasurer gets a Member sign-in row", (await menuRow.count()) === 1);
@@ -1959,8 +1991,61 @@ async function signInAdmin(browser, errors) {
     "signin-admin/Unlink clears the link and touches nothing else",
     !!unlink && unlink.body.auth_user_id === null && Object.keys(unlink.body).length === 1
   );
-
   await page.close();
+
+  // THE POINT OF THE ADMIN GATE. The treasurer PIN is shared with all five
+  // members, so a member who is NOT the flagged treasurer can unlock treasurer
+  // mode — and must still not be able to decide who can sign in. Gating this
+  // on `unlocked` would let them put their own address on somebody else's row.
+  const notAdmin = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  notAdmin.on("pageerror", (e) => errors.push(`signin-admin/member: ${e}`));
+  const roster2 = rosterWithEmails();
+  roster2[1].auth_user_id = FAKE_USER_ID; // Sarah's login; Regine is the treasurer
+  await serve(notAdmin, { ...M.TABLE_DATA, members: roster2 });
+  await withAuthMode(notAdmin, "optional", { signedIn: true, email: "sarah@example.com" });
+  await notAdmin.goto(BASE, { waitUntil: "domcontentloaded" });
+  await notAdmin.waitForTimeout(2500);
+  check(
+    "signin-admin/a non-treasurer login is NOT auto-unlocked",
+    /unlock/i.test(await notAdmin.locator(".unlock-btn").innerText())
+  );
+  await unlockTreasurer(notAdmin);
+  await notAdmin.locator(".tab-item", { hasText: "Menu" }).click();
+  await notAdmin.waitForTimeout(400);
+  check(
+    "signin-admin/the PIN alone does not reveal Member sign-in",
+    (await notAdmin.locator(".menu-row", { hasText: "Member sign-in" }).count()) === 0
+  );
+  // The handler is exported on PowerFund, so hiding the row is not the gate.
+  await notAdmin.evaluate(() => window.PowerFund.openMemberAccountsModal());
+  await notAdmin.waitForTimeout(400);
+  check(
+    "signin-admin/the handler refuses a non-treasurer outright",
+    (await notAdmin.locator(".member-accounts-modal").count()) === 0
+  );
+  await notAdmin.close();
+
+  // Locking by hand has to stick, or the 30-second poll would re-open it and
+  // the admin could never see the app the way a member does.
+  const lock = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  lock.on("pageerror", (e) => errors.push(`signin-admin/lock: ${e}`));
+  const roster3 = rosterWithEmails();
+  roster3[0].auth_user_id = FAKE_USER_ID;
+  await serve(lock, { ...M.TABLE_DATA, members: roster3 });
+  await withAuthMode(lock, "optional", { signedIn: true, email: "regine@example.com" });
+  await lock.goto(BASE, { waitUntil: "domcontentloaded" });
+  await lock.waitForTimeout(2500);
+  await lock.evaluate(() => window.PowerFund.toggleUnlock());
+  await lock.waitForTimeout(300);
+  // A real reload, through the same path the 30-second poll and the tab-focus
+  // handler use — reload() is not exported, and faking it would prove nothing.
+  await lock.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await lock.waitForTimeout(1500);
+  check(
+    "signin-admin/an explicit lock survives a reload cycle",
+    /unlock/i.test(await lock.locator(".unlock-btn").innerText())
+  );
+  await lock.close();
 }
 
 /** Claim / link on first sign-in (phase 3). */
@@ -1968,10 +2053,14 @@ async function accountLinking(browser, errors) {
   // 1. A matching address that nobody has claimed: link it, silently.
   const link = await browser.newPage({ viewport: { width: 430, height: 950 } });
   link.on("pageerror", (e) => errors.push(`link: ${e}`));
+  // Sarah, deliberately — NOT the flagged treasurer at index 0. A flagged
+  // treasurer's login now auto-unlocks treasurer mode, and that branch of the
+  // Menu has no "You are" card at all (its route to a profile is Account ->
+  // Edit my profile, asserted separately in profileEditing).
   const data = { ...M.TABLE_DATA, members: rosterWithEmails() };
   await serve(link, data);
   const writes = await captureLinkWrites(link, data);
-  await withAuthMode(link, "required", { signedIn: true, email: "regine@example.com" });
+  await withAuthMode(link, "required", { signedIn: true, email: "sarah@example.com" });
   await link.goto(BASE, { waitUntil: "domcontentloaded" });
   await link.waitForTimeout(2500);
   check("link/a matching first login gets into the app", (await link.locator(".tab-bar").count()) === 1);
@@ -2063,6 +2152,74 @@ async function accountLinking(browser, errors) {
       /roster/i.test(await soft.locator(".save-warning-banner").first().innerText())
   );
   await soft.close();
+}
+
+/** The optional-mode first-run sign-in prompt. Exists so a shared link
+ *  explains itself: the alternative is telling five people, one at a time, to
+ *  find Menu -> Account. */
+async function signInPrompt(browser, errors) {
+  // A genuinely first-run device in "optional" mode: sign-in fronts the app.
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`signin-prompt: ${e}`));
+  await serve(page, M.TABLE_DATA);
+  await page.addInitScript(() => {
+    try {
+      localStorage.removeItem("pf_signin_skipped");
+    } catch (e) {}
+  });
+  await withAuthMode(page, "optional");
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2000);
+  check("prompt/optional mode fronts the app with sign-in", (await page.locator(".signin").count()) === 1);
+  check("prompt/the shell is not behind it", (await page.locator(".tab-bar").count()) === 0);
+  // Unlike the required-mode gate, this one must be escapable — the app really
+  // does work without an account in this mode.
+  check(
+    "prompt/it offers a way past, and says where to find it later",
+    (await page.locator(".signin-btn-quiet").count()) === 1 &&
+      /Menu/.test(await page.locator(".signin-card").innerText())
+  );
+  await page.locator(".signin-btn-quiet").click();
+  await page.waitForTimeout(600);
+  check("prompt/Not now enters the app", (await page.locator(".tab-bar").count()) === 1);
+  check(
+    "prompt/and the skip is remembered, so it asks once per device",
+    (await page.evaluate(() => localStorage.getItem("pf_signin_skipped"))) === "1"
+  );
+  await page.close();
+
+  // "required" mode has its own gate and must NOT offer a way past it.
+  const gate = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  gate.on("pageerror", (e) => errors.push(`signin-prompt/gate: ${e}`));
+  await serve(gate, M.TABLE_DATA);
+  await withAuthMode(gate, "required");
+  await gate.goto(BASE, { waitUntil: "domcontentloaded" });
+  await gate.waitForTimeout(2000);
+  check(
+    "prompt/the required-mode gate has no Not now",
+    (await gate.locator(".signin").count()) === 1 &&
+      (await gate.locator(".signin-btn-quiet").count()) === 0
+  );
+  await gate.close();
+
+  // "off" has no accounts at all, so nothing should front the app.
+  const off = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  off.on("pageerror", (e) => errors.push(`signin-prompt/off: ${e}`));
+  await serve(off, M.TABLE_DATA);
+  await off.addInitScript(() => {
+    try {
+      localStorage.removeItem("pf_signin_skipped");
+    } catch (e) {}
+  });
+  await withAuthMode(off, "off");
+  await off.goto(BASE, { waitUntil: "domcontentloaded" });
+  await off.waitForTimeout(2000);
+  check(
+    "prompt/auth off never asks",
+    (await off.locator(".signin").count()) === 0 &&
+      (await off.locator(".tab-bar").count()) === 1
+  );
+  await off.close();
 }
 
 /** Onboarding: five approved artboards, previously deferred entirely. */
@@ -2604,9 +2761,15 @@ async function profileEditing(browser, errors) {
   // Signed in and linked: Menu offers Edit, and the sheet validates live.
   const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
   page.on("pageerror", (e) => errors.push(`profile: ${e}`));
-  const members = rosterWithEmails({ auth_user_id: FAKE_USER_ID });
+  // Linked as Sarah, not the flagged treasurer: the "You are" card lives in
+  // the member branch of the Menu, and a flagged treasurer's login now
+  // auto-unlocks past it.
+  const members = rosterWithEmails();
+  const me = members[1]; // the member this login owns
+  const someoneElse = members[0];
+  me.auth_user_id = FAKE_USER_ID;
   await serve(page, { ...M.TABLE_DATA, members });
-  await withAuthMode(page, "required", { signedIn: true, email: "regine@example.com" });
+  await withAuthMode(page, "required", { signedIn: true, email: "sarah@example.com" });
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(2200);
   await page.locator(".tab-item", { hasText: "Menu" }).click();
@@ -2625,7 +2788,7 @@ async function profileEditing(browser, errors) {
   check("profile/the sheet opens", (await page.locator(".sheet-profile").count()) === 1);
   check(
     "profile/it is prefilled with the current name",
-    (await page.locator("#profile-name").inputValue()) === members[0].name,
+    (await page.locator("#profile-name").inputValue()) === me.name,
     await page.locator("#profile-name").inputValue()
   );
   check(
@@ -2641,7 +2804,7 @@ async function profileEditing(browser, errors) {
     /can't be empty/i.test(await page.locator("#profileNameHint").innerText()) &&
       (await page.locator("#profileSave").isDisabled())
   );
-  await page.locator("#profile-name").fill(M.MEMBERS[1].name);
+  await page.locator("#profile-name").fill(someoneElse.name);
   await page.waitForTimeout(200);
   check(
     "profile/a name another member holds is refused",
@@ -2651,7 +2814,7 @@ async function profileEditing(browser, errors) {
   );
   // Its own current name must stay valid — the uniqueness check has to skip
   // the row being edited or Save would never re-enable.
-  await page.locator("#profile-name").fill(members[0].name);
+  await page.locator("#profile-name").fill(me.name);
   await page.waitForTimeout(200);
   check(
     "profile/your own current name is still valid",
@@ -3062,6 +3225,7 @@ async function bootFailure(browser) {
   await signInAdmin(browser, errors);
   await accountLinking(browser, errors);
   console.log("\nOnboarding");
+  await signInPrompt(browser, errors);
   await onboarding(browser, errors);
   console.log("\nBackup round-trip");
   await backupRoundTrip(browser, errors);

@@ -18,7 +18,7 @@ window.PFViews = window.PFViews || {};
 window.PFViews.menu = function (ctx) {
   const {
     members, unlocked, myMember, escapeHtml, icon, memberAvatar, C, hasMasterPin,
-    authMode, sessionEmail, identityLocked, signInStatus
+    authMode, sessionEmail, identityLocked, signInStatus, isAdmin
   } = ctx;
 
   /** One tappable settings row. `note` is the quiet second line. */
@@ -48,7 +48,14 @@ window.PFViews.menu = function (ctx) {
         ${icon("unlocked", 16)}
         <div>
           <div class="mode-card-title">Treasurer mode</div>
-          <div class="mode-card-note">Unlocked on this device</div>
+          <div class="mode-card-note">${
+            // Says WHY it is open. An admin did not type anything, and
+            // "Unlocked on this device" would misdescribe a permission that
+            // actually follows their account across devices.
+            isAdmin && identityLocked
+              ? "You're the fund's admin — always on when you're signed in"
+              : "Unlocked on this device"
+          }</div>
         </div>
       </div>
       <span class="mode-card-state">Active</span>
@@ -88,7 +95,14 @@ window.PFViews.menu = function (ctx) {
           ? "The group's way back in if the treasurer PIN is forgotten"
           : "Not set — there is currently no way back from a forgotten PIN"
       ),
-      row("lock", "Lock treasurer mode", "PowerFund.toggleUnlock()"),
+      row(
+        "lock",
+        "Lock treasurer mode",
+        "PowerFund.toggleUnlock()",
+        isAdmin && identityLocked
+          ? "See the app as a member does. Comes back when you reload"
+          : undefined
+      ),
     ]);
 
     html += `<div class="danger-zone">
@@ -165,11 +179,12 @@ window.PFViews.menu = function (ctx) {
         )
       );
     }
-    // Treasurer: the addresses a Google login is matched against. Before this
-    // they could only be set with a hand-written SQL update, so the person
-    // rolling accounts out had to be whoever held the Supabase password — and
-    // every member's address had to travel to them.
-    if (unlocked) {
+    // ADMIN ONLY — gated on isAdmin (a login owning a row with is_treasurer),
+    // not on `unlocked`. The treasurer PIN is shared with all five members by
+    // design, so gating this on the PIN would let any of them put their own
+    // address on somebody else's row. Deciding WHO CAN SIGN IN is not a
+    // day-to-day treasurer tool; it is administration.
+    if (isAdmin) {
       const st = signInStatus || { total: 0, withEmail: 0, linked: 0 };
       account.push(
         row(

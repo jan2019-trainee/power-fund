@@ -226,18 +226,22 @@ Member accounts are gated by `AUTH_MODE` in `js/config.js` (`off` | `optional` |
 
 Set `AUTH_MODE` in `js/config.js` and redeploy:
 
-- `"optional"` first — the login appears as **Menu → Account → Sign in with
-  Google** and the app stays fully usable without it, so one person can test
-  the flow without gating anyone.
-- `"required"` only together with migration `011_rls_lockdown.sql`. See the
-  migration's own header: it revokes `anon`, so either half alone leaves the
-  app broken.
+- `"optional"` first. A first visit **opens on the sign-in screen**, with a
+  **Not now** that steps past it (remembered per device), and the app stays
+  fully usable without an account. This is the mode to share the link in:
+  everyone sees the login without being told where to find it, and anyone not
+  yet on the roster can still use the app.
+- `"required"` once **every member's address is on file**. Without one, that
+  member hits a full-screen dead-end with no way into the app. It does *not*
+  have to wait for migration 011 — the coupling runs one way only: 011 without
+  `required` shows every member a load error, while `required` without 011 is
+  just a gate in front of rules Postgres is not enforcing yet.
 
 **4. The addresses**
 
 A member's Google login is matched to their row **by email** (migration 008).
-Record the addresses in the app rather than by hand: with treasurer mode
-unlocked, **Menu → Account → Member sign-in**. It lists every member with
+Record the addresses in the app rather than by hand: **Menu → Account → Member
+sign-in**. It lists every member with
 
 - the address their login is matched against, editable in place,
 - whether they have signed in yet, or whether no address is on file,
@@ -248,6 +252,16 @@ unlocked, **Menu → Account → Member sign-in**. It lists every member with
   have signed in, and whether a treasurer is flagged. Those are the same three
   things `011_preflight.sql` refuses to lock down without — the migration
   stays the authority, this just saves you running it to find out.
+
+**This panel is admin-only, and admin is not the PIN.** The treasurer PIN is
+shared with the whole group by design, so gating this on it would let any
+member put their own address on somebody else's row. It is gated instead on a
+Google-verified login owning a row with `is_treasurer` — the same flag
+migration 011's policies use. That account also gets treasurer mode
+automatically, without typing a PIN it out-ranks; **Lock treasurer mode** in
+Menu → Security still works and lasts until reload, which is how you check
+what the other members see. (If *nobody* is flagged yet, the panel falls back
+to the PIN, so a fund that never ran 008's one-off can still bootstrap.)
 
 Blank is a legitimate state: a member with no address simply cannot sign in
 yet. Addresses are stored lowercased, because that is how they are compared.

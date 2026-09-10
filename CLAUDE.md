@@ -478,9 +478,9 @@ Done: migration 008, sign-in/sign-out, the session gate, the Menu → Account
 group, the claim/link step, self-service name + photo (migration 009), and
 **the treasurer's Member sign-in panel** (below). **Not done:** the RLS rewrite.
 
-**Menu → Account → Member sign-in** (treasurer, and only while `AUTH_MODE` is
-not `off`) is where the addresses a login is matched against are actually
-recorded. They had **no UI at all** — only a hand-written SQL update — which
+**Menu → Account → Member sign-in** (ADMIN only — see below — and only while
+`AUTH_MODE` is not `off`) is where the addresses a login is matched against
+are actually recorded. They had **no UI at all** — only a hand-written SQL update — which
 meant whoever rolled accounts out had to be whoever held the Supabase
 password, and every member's personal address had to travel to them. Category:
 **UI Only**. 010's guard has always said the treasurer "may reorder, flag and
@@ -506,6 +506,72 @@ It also prints the rollout state: addresses on file, who has signed in, and
 whether a treasurer is flagged — the same three conditions `011_preflight.sql`
 refuses to lock down without. Deliberately **not** a promise that the lockdown
 will succeed; the migration stays the authority.
+
+## `unlocked` is NOT the admin gate — `isTreasurerAccount()` is
+
+A distinction worth keeping straight, because getting it wrong was a real hole
+in the first cut of the sign-in panel.
+
+`unlocked` means **somebody typed the treasurer PIN**, and that PIN is shared
+with the whole group by design — any of the five can unlock treasurer mode.
+That is fine for the day-to-day treasurer tools (the group trusts each other
+with the fund) and it is the wrong gate for administering **who can sign in**:
+gated on the PIN, any member could put their own address on somebody else's
+row and claim it.
+
+`isTreasurerAccount()` is the admin test: a Google-verified login that owns a
+member row carrying `is_treasurer`. It is the same flag migration 011's
+policies key off, so it is the authority Postgres will use after the lockdown.
+The Member sign-in panel — the menu row, the render branch, and all four
+exported handlers — is gated on it, never on `unlocked`.
+
+- **Bootstrap escape hatch:** with nobody flagged at all, it falls back to the
+  PIN. Otherwise a fund whose 008 one-off was never run could never reach the
+  panel that sets the addresses — a permanent dead end. It grants nothing new:
+  with no treasurer flagged, 011's readiness check refuses the lockdown
+  anyway, so the PIN is the only authority that exists yet.
+- **The flagged treasurer is auto-unlocked** (`applyAdminAutoUnlock()`, run
+  after every resolve). A Google login owning an `is_treasurer` row is
+  strictly stronger proof than a four-digit code five people share, so making
+  them type it added nothing. `treasurerLockedByChoice` makes an explicit Lock
+  stick — without it the 30-second poll would re-open treasurer mode and the
+  admin could never see the app as a member does.
+- **Consequence to remember:** the "You are / Edit" profile card lives in the
+  member branch of the Menu, so an auto-unlocked admin does not see it. Their
+  route to their own name and photo is Menu → Account → **Edit my profile**,
+  which already existed for exactly this reason. Two smoke tests had to move
+  to a non-treasurer login because of this.
+
+## The optional-mode sign-in prompt
+
+`AUTH_MODE = "optional"` used to hide sign-in behind Menu → Account, which
+does not survive being explained to five people one at a time. A first visit
+now opens on the sign-in screen, with a **Not now** that steps past it;
+`localStorage.pf_signin_skipped` remembers the skip, so it asks once per
+device. `promptSignIn()` decides; it waits on `authReady` so it cannot flash a
+login at somebody whose session is still being read from storage.
+
+- **Rendered BEFORE onboarding, AFTER `!state`.** Before onboarding so the
+  claim has happened by the time the tour renders — which is what lets
+  onboarding correctly drop its who-am-I step for a linked member. After
+  `!state` so a member whose fund failed to load sees the connection error
+  rather than a login screen that cannot work.
+- **`signInHtml()` is skippable only when auth is not `required`.** The
+  required-mode gate must not offer a way past itself; a test asserts it has
+  no Not-now.
+- **Signing out sets the skip flag.** Fronting the app with the prompt one
+  render after a deliberate sign-out would read as the app refusing to let
+  them out.
+- **`tests/smoke.js`'s `markOnboarded()` now sets BOTH keys**, or the prompt
+  would front every check the way onboarding once did. `{ freshDevice: true }`
+  still skips the prompt and keeps the intro — the onboarding tests are not
+  about the prompt.
+
+**`required` does NOT have to ship with 011.** The coupling runs one way only:
+011 without `required` shows every member a load error, but `required` without
+011 is merely a gate in front of rules Postgres is not enforcing yet. What
+`required` DOES need is **every member's address on file** — without one, that
+member hits the `unknown` dead-end with no way into the app at all.
 
 `resolveAccount()` runs after every load and puts the account in one of five
 states, which drive everything else: `linked` (this login owns a member row),

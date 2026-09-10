@@ -59,6 +59,8 @@
   function isAuthScreenUp() {
     // Onboarding replaces the whole shell too, at any AUTH_MODE.
     if (onboardingStep != null) return true;
+    // So does the optional-mode first-run prompt.
+    if (promptSignIn()) return true;
     if (!authRequired()) return false;
     if (!session) return true;
     return (
@@ -85,6 +87,12 @@
   // "first-time" flow, and there is no DB column for it.
   const ONBOARDED_KEY = "pf_onboarded";
   let onboardingStep = null;
+
+  /* Whether this device has already stepped past the optional-mode sign-in
+   * prompt. Per-device, like pf_onboarded and for the same reason: there is no
+   * DB column for it, and there could not be one — the whole point is that
+   * nobody has identified themselves yet, so there is no row to write it to. */
+  const SIGNIN_SKIPPED_KEY = "pf_signin_skipped";
 
   // ---- Edit Profile / Change Photo (migration 009) ---------------------
   let profileModalOpen = false;
@@ -178,6 +186,11 @@
   // different powers, because the master PIN exists precisely so a locked-out
   // group gets full treasurer access back.
   let unlockedViaMaster = false;
+  /* Set only when the flagged treasurer LOCKS treasurer mode by hand. Without
+   * it the auto-unlock below would re-open on the next 30-second poll, so the
+   * admin could never look at the app the way a member sees it. Per session,
+   * deliberately: a reload is a fresh start. */
+  let treasurerLockedByChoice = false;
 
   let payoutModalRound = null;
   let payoutNoteValue = "";
@@ -472,6 +485,7 @@
     try {
       await loadAll();
       await resolveAccount();
+      applyAdminAutoUnlock();
       render();
     } catch (e) {
       showError(e.message);
@@ -528,6 +542,30 @@
 
   function onboardingSeen() {
     return lsGet(ONBOARDED_KEY) === "1";
+  }
+  /** Should the sign-in screen front the app on THIS load?
+   *
+   *  Only in "optional" mode — "required" has its own gate above, and "off"
+   *  has no accounts at all. It exists because the alternative is telling five
+   *  people, one at a time, to find Menu → Account: a sharable link has to
+   *  explain itself. Skippable, and the skip is remembered, so it asks once
+   *  per device rather than nagging.
+   *
+   *  Waits for `authReady`: asking someone to sign in while their session is
+   *  still being read from storage would flash a login at somebody who is
+   *  already signed in. */
+  function promptSignIn() {
+    return (
+      AUTH_MODE === "optional" &&
+      authReady &&
+      !session &&
+      lsGet(SIGNIN_SKIPPED_KEY) !== "1"
+    );
+  }
+  /** "Not now". Remembered, or the next reload would ask again. */
+  function skipSignInPrompt() {
+    lsSet(SIGNIN_SKIPPED_KEY, "1");
+    render();
   }
   function finishOnboarding() {
     lsSet(ONBOARDED_KEY, "1");
@@ -795,6 +833,47 @@
   function editableMember() {
     if (accountState !== "linked" || !accountMemberId || !state) return null;
     return state.members.find((m) => m.id === accountMemberId) || null;
+  }
+
+  /** THE ADMIN TEST — a Google-verified login that owns a member row carrying
+   *  `is_treasurer`. Not the same thing as `unlocked`.
+   *
+   *  `unlocked` means somebody typed the treasurer PIN, and that PIN is shared
+   *  with the whole group by design: any of the five can unlock treasurer mode.
+   *  That is fine for the day-to-day treasurer tools — the group trusts each
+   *  other with the fund — but it is the wrong gate for administering WHO CAN
+   *  SIGN IN, because a member could add their own address to somebody else's
+   *  row. This is checked against the database instead.
+   *
+   *  It is also the flag migration 011's policies key off, so it is the same
+   *  authority Postgres will use once the lockdown is applied.
+   *
+   *  THE BOOTSTRAP ESCAPE HATCH: with nobody flagged at all, fall back to the
+   *  PIN. Otherwise a fund whose 008 one-off was never run could never reach
+   *  the panel that sets the addresses — a permanent dead end. It grants
+   *  nothing new: with no treasurer flagged, 011's readiness check refuses the
+   *  lockdown anyway, so the PIN is the only authority that exists yet. */
+  function isTreasurerAccount() {
+    const mine = editableMember();
+    if (mine && mine.is_treasurer) return true;
+    const anyFlagged = ((state && state.members) || []).some((m) => m.is_treasurer);
+    return !anyFlagged && unlocked;
+  }
+
+  /** The flagged treasurer should not have to type a PIN they already out-rank:
+   *  a Google login that owns a row carrying `is_treasurer` is strictly
+   *  stronger proof than a four-digit code the whole group shares. Applied
+   *  after every resolve, so it survives a reload and a token refresh.
+   *
+   *  `unlockedViaMaster` is cleared on purpose — this is not the recovery path,
+   *  and leaving it set would put the recovery banner up for no reason. */
+  function applyAdminAutoUnlock() {
+    if (treasurerLockedByChoice || unlocked) return;
+    const mine = editableMember();
+    if (mine && mine.is_treasurer) {
+      unlocked = true;
+      unlockedViaMaster = false;
+    }
   }
 
   function openProfileModal() {
@@ -1070,6 +1149,10 @@
       // Don't hand the next person a warm treasurer session.
       unlocked = false;
       unlockedViaMaster = false;
+      treasurerLockedByChoice = false;
+      // Signing out is a deliberate act. Fronting the app with the sign-in
+      // prompt one render later would read as the app refusing to let them.
+      lsSet(SIGNIN_SKIPPED_KEY, "1");
       session = null;
       accountState = null;
       accountMemberId = null;
@@ -2020,9 +2103,14 @@
     if (unlocked) {
       unlocked = false;
       unlockedViaMaster = false;
+      // Remember the choice, or the next poll's auto-unlock would undo it.
+      treasurerLockedByChoice = true;
       render();
       return;
     }
+    // Unlocking by hand cancels the lock-out, so a later reload auto-unlocks
+    // again rather than making the admin re-enter a PIN it does not need.
+    treasurerLockedByChoice = false;
     pinInputValue = "";
     pinError = null;
     pinNewValue = "";
@@ -2724,6 +2812,9 @@
   }
 
   function openMemberAccountsModal() {
+    // Exported, so reachable from a console by anyone. Same reasoning as
+    // openWhoAmIPicker()'s refusal: the render guard alone is not the gate.
+    if (!isTreasurerAccount()) return;
     memberEmailValues = {};
     state.members.forEach((m) => (memberEmailValues[m.id] = m.email || ""));
     memberAccountsError = null;
@@ -2792,7 +2883,7 @@
   }
 
   async function saveMemberEmails() {
-    if (busy) return;
+    if (busy || !isTreasurerAccount()) return;
     const problem = memberEmailsProblem();
     if (problem) {
       memberAccountsError = problem;
@@ -2841,6 +2932,7 @@
    *  when somebody claimed the wrong member, or signed in with the wrong
    *  Google account. It removes no contribution and no history. */
   function unlinkMember(memberId) {
+    if (!isTreasurerAccount()) return;
     const m = (state.members || []).find((x) => String(x.id) === String(memberId));
     if (!m) return;
     openConfirm({
@@ -2855,7 +2947,7 @@
     });
   }
   async function doUnlinkMember(memberId) {
-    if (busy) return;
+    if (busy || !isTreasurerAccount()) return;
     busy = true;
     render();
     try {
@@ -4432,16 +4524,29 @@
    *  accent caps, and the gold gradient CTA the rest of the app already uses.
    *  Recorded as an implementation gap for UI/UX QA to review as NEW design,
    *  not as a port of something signed off. */
+  /** The sign-in screen. Drawn as the whole app in two situations:
+   *   - AUTH_MODE "required": the gate. There is no way past it.
+   *   - AUTH_MODE "optional": the FIRST-RUN PROMPT (see promptSignIn()). The
+   *     same screen, plus a "Not now" that steps around it — because in
+   *     optional mode the app genuinely works without an account, and a
+   *     hard-looking gate in front of a soft rule would be a lie. */
   function signInHtml() {
     const name = (window.APP_CONFIG || {}).SUBTITLE || "";
+    const skippable = !authRequired();
     return `<div class="signin">
       <div class="signin-glow" aria-hidden="true"></div>
       <div class="signin-card">
         <div class="signin-emblem" aria-hidden="true">${icon("lock", 38)}</div>
         <h1 class="signin-title">Sign in to Power Fund</h1>
         ${name ? `<p class="signin-fund">${escapeHtml(name)}</p>` : ""}
-        <p class="signin-sub">This fund tracks real money, so it now asks who you
-          are. Use the Google account the treasurer has on file for you.</p>
+        <p class="signin-sub">${
+          skippable
+            ? `Sign in so this app knows who you are — your name, your photo and
+               your own payments. Use the Google account the treasurer has on
+               file for you.`
+            : `This fund tracks real money, so it now asks who you
+          are. Use the Google account the treasurer has on file for you.`
+        }</p>
         <button type="button" class="signin-btn" onclick="PowerFund.signIn()" ${
           signingIn ? "disabled" : ""
         }>
@@ -4449,6 +4554,14 @@
         </button>
         <p class="signin-note">You'll be taken to Google and brought straight
           back. Power Fund never sees your password.</p>
+        ${
+          skippable
+            ? `<button type="button" class="signin-btn signin-btn-quiet"
+                 onclick="PowerFund.skipSignInPrompt()">Not now</button>
+               <p class="signin-note">You can sign in later from
+                 <b>Menu → Account</b>.</p>`
+            : ""
+        }
       </div>
     </div>`;
   }
@@ -4525,6 +4638,18 @@
         accountState === "no-email")
     ) {
       app.innerHTML = accountProblemHtml();
+      return;
+    }
+
+    // OPTIONAL MODE, FIRST RUN ON THIS DEVICE: front the app with sign-in.
+    //
+    // After !state, on purpose: a member whose fund failed to load should see
+    // the connection error, not a sign-in screen that cannot work. And BEFORE
+    // onboarding, also on purpose — signing in first means the claim has
+    // happened by the time the tour renders, so onboarding correctly drops its
+    // who-am-I step for a member whose identity now comes from the database.
+    if (promptSignIn()) {
+      app.innerHTML = signInHtml();
       return;
     }
 
@@ -4853,9 +4978,12 @@
       // you?" control has to go. Leaving them would offer a choice the app
       // then ignores.
       identityLocked: accountState === "linked",
-      // Counts for the treasurer's "Member sign-in" row, so the menu can say
-      // how far the rollout has got without opening the panel.
+      // Counts for the admin's "Member sign-in" row, so the menu can say how
+      // far the rollout has got without opening the panel.
       signInStatus: signInReadiness(),
+      // The ADMIN gate — a login that owns a row carrying is_treasurer. Not
+      // `unlocked`: that is the shared PIN, which every member has.
+      isAdmin: isTreasurerAccount(),
       payoutQrMemberId,
       // Helpers the views render with.
       //
@@ -5836,11 +5964,14 @@
       </div>`;
     }
 
-    // Treasurer: the addresses a Google login is matched against, and who has
-    // actually signed in. Gated on `unlocked` here as well as in the menu row —
-    // the open* handlers are exported on PowerFund, so anyone can reach them
-    // from a console and the render must not take the caller's word for it.
-    if (memberAccountsModalOpen && unlocked) {
+    // ADMIN: the addresses a Google login is matched against, and who has
+    // actually signed in. Gated on isTreasurerAccount(), NOT on `unlocked` —
+    // the treasurer PIN is shared with all five members, so gating this on the
+    // PIN would let any of them put their own address on somebody else's row.
+    // Checked here as well as in the menu row: the open* handlers are exported
+    // on PowerFund, so anyone can reach them from a console and the render
+    // must never take the caller's word for it.
+    if (memberAccountsModalOpen && isTreasurerAccount()) {
       const ordered = sortedMembers();
       const r = signInReadiness();
       const rows = ordered
@@ -6315,6 +6446,7 @@
       try {
         await loadAll();
         await resolveAccount();
+        applyAdminAutoUnlock();
         // First run on this device. Started here rather than in render() so a
         // later reload never re-opens it mid-session.
         if (!onboardingSeen()) onboardingStep = 0;
@@ -6508,6 +6640,7 @@
     chooseAnotherBackup,
     openReorderModal,
     closeReorderModal,
+    skipSignInPrompt,
     openEditNamesModal,
     openMemberAccountsModal,
     closeMemberAccountsModal,

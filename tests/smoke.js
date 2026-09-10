@@ -1657,6 +1657,60 @@ async function paymentSheets(browser, errors) {
   await rel.close();
 }
 
+/** Home's "Record a contribution" shortcut must actually reach a confirmation.
+ *  A treasurer's cash record and undo confirm INSIDE the Rounds cycle grid, so
+ *  picking a member from Home used to close the picker and do nothing at all. */
+async function contributePickerFromHome(browser, errors) {
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`picker: ${e}`));
+  await serve(page, { ...M.TABLE_DATA, app_settings: { ...M.SETTINGS, treasurer_pin: "1234" } });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1500);
+  await unlockTreasurer(page);
+  await page.waitForTimeout(300);
+
+  const cta = page.locator(".floating-cta button, .home-greet-cta").first();
+  check("picker/Home offers the shortcut in treasurer mode", (await cta.count()) === 1);
+  await cta.click();
+  await page.waitForTimeout(400);
+  check("picker/the shortcut opens the member picker", (await page.locator(".picker-list").count()) === 1);
+
+  // An unpaid member: the treasurer's cash path.
+  const unpaid = page.locator(".picker-row.unpaid:not([disabled])").first();
+  check("picker/an unpaid member is offered", (await unpaid.count()) === 1);
+  check(
+    "picker/the row says where the tap goes",
+    /record as paid/i.test(await unpaid.innerText()),
+    await unpaid.innerText()
+  );
+  await unpaid.click();
+  await page.waitForTimeout(600);
+
+  // THE regression: something has to appear, on a screen that can show it.
+  check(
+    "picker/picking a member reaches the cash confirmation",
+    (await page.locator(".mark-paid-panel").count()) === 1
+  );
+  check(
+    "picker/it lands on Rounds, where that panel lives",
+    (await page.locator(".rounds-detail, .round").count()) > 0
+  );
+  const seen = await page.locator(".mark-paid-panel").evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return r.top < window.innerHeight && r.bottom > 0;
+  });
+  check("picker/the confirmation is scrolled into view", seen === true, String(seen));
+
+  // And it is still a confirmation, not a write: cancelling leaves it unpaid.
+  await page.locator(".mark-paid-panel .modal-btn-secondary").click();
+  await page.waitForTimeout(300);
+  check(
+    "picker/cancelling writes nothing",
+    (await page.locator(".mark-paid-panel").count()) === 0
+  );
+  await page.close();
+}
+
 /** The desktop shell carries its header actions: Export CSV on Activity,
  *  Reorder payout order on Members, and a titled detail header with
  *  Export round CSV on Rounds. */
@@ -1805,6 +1859,8 @@ async function bootFailure(browser) {
   await qaFixes(browser, errors);
   console.log("\nPayment sheets");
   await paymentSheets(browser, errors);
+  console.log("\nContribute picker");
+  await contributePickerFromHome(browser, errors);
   console.log("\nDesktop header actions");
   await desktopHeaderActions(browser, errors);
   console.log("\nBoot failure");

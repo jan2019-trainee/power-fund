@@ -75,6 +75,9 @@
   let appSuccess = null; // green banner: confirms an action fully succeeded (auto-dismisses)
   let successTimer = null;
   let openRound = null;
+  // Set when a jump from elsewhere lands on an inline money-confirmation panel
+  // deep in the Rounds grid; cleared by the render that scrolls to it.
+  let scrollPanelIntoView = false;
   let hasAutoOpened = false;
 
   let modalTarget = null; // { memberId, cycleNumber }
@@ -441,6 +444,19 @@
     const cyc = contributePicker;
     contributePicker = null;
     if (cyc == null) return render();
+    // A treasurer's confirmation for "record as cash" and "undo a confirmed
+    // payment" is an inline panel inside the Rounds cycle grid — deliberately,
+    // because both write money and belong next to the row they change. Picked
+    // from Home, that panel had nowhere to draw: the picker closed and nothing
+    // happened. Take them to the grid first, with the round open, so the
+    // confirmation lands where it lives. Reviewing a pending claim opens a
+    // modal and needs no such move, so Home stays put for that one.
+    const status = C.statusOf(state.contributions, memberId, cyc);
+    if (unlocked && status !== C.STATUS_PENDING) {
+      currentView = "rounds";
+      openRound = C.roundOfCycle(cyc);
+      scrollPanelIntoView = true;
+    }
     // Route through the same handler the cycle grid uses, so a treasurer gets
     // the review / mark-paid behaviour and a member gets the contribute modal.
     cellClicked(memberId, cyc);
@@ -4757,8 +4773,15 @@
                 // pick it and resubmit — isOwed() keeps that in step with the
                 // cycle grid, which routes both states to the same handler.
                 const clickable = unlocked || C.isOwed(s);
+                // Say where each tap goes. The unpaid and rejected rows lead
+                // to the cash record, whose confirmation is an inline panel in
+                // the Rounds grid — so this row is also a jump to that screen,
+                // and saying "record as paid" makes that predictable rather
+                // than a surprise change of view.
                 if (unlocked && s === 1) status += " · tap to review";
                 else if (unlocked && s === 2) status += " · tap to undo";
+                else if (unlocked && s === 3) status = "✕ Rejected · tap to record as paid";
+                else if (unlocked) status += " · tap to record as paid";
                 return `<button type="button" class="picker-row ${cls}" ${
                   clickable ? "" : "disabled"
                 } onclick="PowerFund.pickContributor('${m.id}')">
@@ -4859,6 +4882,28 @@
 
     app.innerHTML = html;
     runCountUps();
+
+    // A confirmation the viewer was sent to but cannot see is the same as no
+    // confirmation at all. render() assigns innerHTML on the line above, so
+    // the panel exists only from here on.
+    if (scrollPanelIntoView) {
+      scrollPanelIntoView = false;
+      requestAnimationFrame(() => {
+        const panel = document.querySelector(".undo-paid-panel");
+        if (!panel) return;
+        const reduce =
+          window.matchMedia &&
+          window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        try {
+          panel.scrollIntoView({
+            behavior: reduce ? "auto" : "smooth",
+            block: "center",
+          });
+        } catch (e) {
+          panel.scrollIntoView();
+        }
+      });
+    }
 
     // Move focus into a dialog the first render it appears (a11y).
     const modalNow = isAnyModalOpen();

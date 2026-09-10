@@ -18,7 +18,8 @@ window.PFViews.home = function (ctx) {
     attentionQueueExpanded, overdueListOpen, startRoundConfirming,
     escapeHtml, inlineArg, icon, batteryCell, memberAvatar, getPayout,
     sparkline, C,
-    formatDateTime, overdueRows, activityTimeLabel, isWide, identityLocked
+    formatDateTime, overdueRows, activityTimeLabel, isWide, identityLocked,
+    payoutOwner, pesoWhole
   } = ctx;
   // Cycles due so far — the denominator behind each member's standing ring.
   // Set when the pinned action renders, so the view can reserve room for it.
@@ -159,6 +160,52 @@ window.PFViews.home = function (ctx) {
   })();
 
   S.myStatus = section();
+
+  /* ---- "Add your payout QR" -------------------------------------------
+   * The member-side half of a reminder the design only built one end of.
+   * PayoutReleaseNoQR gives the TREASURER a "Copy reminder message" to paste
+   * into the group chat when a recipient has no QR on file — which is the
+   * fallback for a nudge that never happened. This is the nudge: tell the
+   * member themselves, in the app, before their round lands.
+   *
+   * Shown only when it is actually theirs to act on and actually soon:
+   *   - a LINKED account (the who-am-I preference cannot be trusted with
+   *     where money goes, so a nudge keyed off it would point at a sheet
+   *     that refuses to open),
+   *   - nothing on file at all,
+   *   - and their round is the one collecting now, or the next one up.
+   * Any earlier and it is noise for four rounds; any later and the payout has
+   * already been released.
+   */
+  if (payoutOwner) {
+    const nothingOnFile =
+      !payoutOwner.payout_qr_url &&
+      !payoutOwner.payout_bank &&
+      !payoutOwner.payout_account_number;
+    const mine = payoutOwner.member_order;
+    const cur = C.currentRound(state.contributions, rounds);
+    const released = getPayout(mine).released;
+    if (nothingOnFile && !released && mine <= cur + 1) {
+      html += `<button type="button" class="payout-nudge" onclick="PowerFund.openPayoutQrModal()">
+        <span class="payout-nudge-mark">${icon("qr", 17)}</span>
+        <span class="payout-nudge-lines">
+          <span class="payout-nudge-title">${
+            mine === cur
+              ? "Add your payout QR — your round is collecting now"
+              : "Add your payout QR before Round " + mine
+          }</span>
+          <span class="payout-nudge-note">The treasurer sends your ${pesoWhole(
+            C.GOAL_PER_ROUND
+          )} to whatever you save here. Nothing is on file yet.</span>
+        </span>
+        <span class="payout-nudge-go">›</span>
+      </button>`;
+    }
+  }
+  // section() slices whatever was appended since the last call, so it must be
+  // called unconditionally — skipping it would hand the next section this
+  // block's markup.
+  S.payoutNudge = section();
 
   // The old standalone due-countdown banner was removed — the same date is
   // always visible a little further down, either on the My-status card
@@ -766,6 +813,7 @@ window.PFViews.home = function (ctx) {
       S.dayOne +
       S.rejected +
       (unlocked ? S.complete + S.release + S.attention + S.myStatus : S.myStatus + S.complete) +
+      S.payoutNudge +
       S.fundTotal + S.hero + S.cta + S.roster + S.roundsLink + S.prevRounds +
       S.spacer
     );
@@ -900,7 +948,7 @@ window.PFViews.home = function (ctx) {
           unlocked
             ? `${S.complete}${S.release}${S.attention}${S.myStatus}`
             : `${S.myStatus}${S.complete}`
-        }${overview}${quick}
+        }${S.payoutNudge}${overview}${quick}
       </aside>
     </div>` +
     S.cta +

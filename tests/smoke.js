@@ -739,8 +739,12 @@ async function membersAndMenu(browser, errors) {
     (await mem.locator(".profile-card").count()) === 1 && memText.includes(ME.name)
   );
   check(
-    "menu/member: view-only QR + payout destination",
-    /the treasurer manages this/i.test(memText) && /payout destination/i.test(memText)
+    // "Payout destination" became "My Payout QR Code" when the row stopped
+    // being a read-only link into the member record and became the sheet where
+    // a member sets it themselves. This page is not signed in, so that row
+    // offers sign-in rather than opening a sheet that would be refused.
+    "menu/member: view-only fund QR + a route to their own payout QR",
+    /the treasurer manages this/i.test(memText) && /My Payout QR Code/i.test(memText)
   );
   // Nothing a member cannot act on should be reachable here.
   const forbidden = ["Export CSV", "Backup data", "Restore from backup", "Change PIN",
@@ -1771,6 +1775,16 @@ function supabaseUrl() {
 
 const FAKE_USER_ID = "11111111-1111-1111-1111-111111111111";
 
+/** PAYOUT_BANKS lives in js/app.js; read it rather than hardcoding a number,
+ *  so adding a bank does not fail a test for the wrong reason. +2 for the
+ *  "Choose one…" placeholder and "Other". */
+const PAYOUT_BANK_COUNT =
+  (require("fs")
+    .readFileSync(path.join(__dirname, "..", "js", "app.js"), "utf8")
+    .match(/const PAYOUT_BANKS = \[([^\]]*)\]/) || [, ""])[1]
+    .split(",")
+    .filter((x) => x.trim()).length + 2;
+
 /** The roster with email addresses, as it looks after the treasurer has run
  *  migration 008's one-off. `overrides` patches the member at index 0. */
 function rosterWithEmails(overrides) {
@@ -2162,6 +2176,204 @@ async function accountLinking(browser, errors) {
       /roster/i.test(await soft.locator(".save-warning-banner").first().innerText())
   );
   await soft.close();
+}
+
+/** My Payout QR Code — member-managed (MyPayoutQRManage.dc.html). This is
+ *  where a member's ₱30,000 gets sent, so the interesting assertions are the
+ *  refusals: the UI must not offer, and the handlers must not accept, editing
+ *  anybody else's. */
+async function myPayoutQr(browser, errors) {
+  // ---- A linked member editing their OWN -------------------------------
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`payout-qr: ${e}`));
+  const members = rosterWithEmails();
+  const me = members[1]; // Sarah — deliberately NOT the flagged treasurer
+  const other = members[0];
+  me.auth_user_id = FAKE_USER_ID;
+  other.payout_bank = "BPI";
+  other.payout_account_name = "Regine R";
+  other.payout_account_number = "091712345678";
+  const data = { ...M.TABLE_DATA, members };
+
+  await serve(page, data);
+  const writes = [];
+  await page.route("**/rest/v1/members**", async (route) => {
+    const req = route.request();
+    if (req.method() === "GET") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(data.members),
+      });
+    }
+    let body = {};
+    try {
+      body = JSON.parse(req.postData() || "{}");
+    } catch (e) {}
+    const target = data.members.find((m) => req.url().includes(m.id));
+    writes.push({ name: target && target.name, body });
+    Object.assign(target || {}, body);
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([target || {}]),
+    });
+  });
+  await withAuthMode(page, "optional", { signedIn: true, email: "sarah@example.com" });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
+
+  // Nothing on file and Sarah is member_order 2, so the Home nudge is due.
+  check(
+    "payout-qr/Home nudges a member whose round is near and has nothing on file",
+    (await page.locator(".payout-nudge").count()) === 1 &&
+      /Add your payout QR/i.test(await page.locator(".payout-nudge").innerText())
+  );
+
+  await page.locator(".tab-item", { hasText: "Menu" }).click();
+  await page.waitForTimeout(400);
+  const ownRow = page.locator(".menu-row", { hasText: "My Payout QR Code" });
+  check("payout-qr/the member gets the design's Menu row", (await ownRow.count()) === 1);
+  await ownRow.first().click();
+  await page.waitForTimeout(450);
+  check("payout-qr/the sheet opens", (await page.locator(".sheet-payout-qr").count()) === 1);
+  check(
+    "payout-qr/it says what is on file, and nudges by round",
+    /Nothing on file/i.test(await page.locator(".pq-status").innerText()) &&
+      /before Round 2/i.test(await page.locator(".pq-status").innerText())
+  );
+  check(
+    "payout-qr/the bank is a picker, not a free-text box",
+    (await page.locator("#pq-bank option").count()) === PAYOUT_BANK_COUNT
+  );
+  check(
+    "payout-qr/both camera and library are offered",
+    (await page.locator('.sheet-payout-qr .photo-row input[capture="environment"]').count()) === 1 &&
+      (await page.locator(".sheet-payout-qr .photo-row").count()) === 2
+  );
+
+  // "Other" is a dead option in the artboard; it has to reveal a field.
+  check(
+    "payout-qr/no free-text bank field until Other is chosen",
+    (await page.locator("#pq-bank-other").count()) === 0
+  );
+  await page.locator("#pq-bank").selectOption("__other");
+  await page.waitForTimeout(400);
+  check(
+    "payout-qr/Other reveals a field to type one in",
+    (await page.locator("#pq-bank-other").count()) === 1
+  );
+  // ...and picking a listed bank must not leave the stale Other text behind.
+  await page.locator("#pq-bank").selectOption("GCash");
+  await page.waitForTimeout(400);
+  check(
+    "payout-qr/choosing a listed bank hides it again",
+    (await page.locator("#pq-bank-other").count()) === 0
+  );
+
+  await page.locator("#pq-num").fill("09171234567");
+  await page.locator("#pq-name").fill("Sarah T");
+  await page.locator(".modal-btn-primary", { hasText: /Save Payout QR/i }).click();
+  await page.waitForTimeout(1200);
+  const w = writes.find((x) => x.body && "payout_bank" in x.body);
+  check(
+    "payout-qr/it saves to the signed-in member's OWN row",
+    !!w && w.name === "Sarah" && w.body.payout_bank === "GCash",
+    JSON.stringify(w || null)
+  );
+  check(
+    "payout-qr/and stamps payout_updated_at, so a swap is datable",
+    !!w && !!w.body.payout_updated_at
+  );
+  await page.close();
+
+  // ---- The refusals ----------------------------------------------------
+  const guard = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  guard.on("pageerror", (e) => errors.push(`payout-qr/guard: ${e}`));
+  const g = rosterWithEmails();
+  g[1].auth_user_id = FAKE_USER_ID;
+  await serve(guard, { ...M.TABLE_DATA, members: g });
+  await withAuthMode(guard, "optional", { signedIn: true, email: "sarah@example.com" });
+  await guard.goto(BASE, { waitUntil: "domcontentloaded" });
+  await guard.waitForTimeout(2500);
+
+  // THE ONE THAT MATTERS. openPayoutQrModal is exported on PowerFund, so the
+  // absence of a button is not the gate: passing someone else's id must be
+  // refused outright, not open their sheet.
+  const otherId = g[0].id;
+  await guard.evaluate((id) => window.PowerFund.openPayoutQrModal(id), otherId);
+  await guard.waitForTimeout(450);
+  check(
+    "payout-qr/the handler refuses another member's id",
+    (await guard.locator(".sheet-payout-qr").count()) === 0
+  );
+  // With no argument it must open THEIR OWN, not the first row it finds.
+  await guard.evaluate(() => window.PowerFund.openPayoutQrModal());
+  await guard.waitForTimeout(450);
+  check(
+    "payout-qr/with no argument it opens your own",
+    (await guard.locator(".sheet-payout-qr").count()) === 1 &&
+      /e.g. Sarah/i.test(await guard.locator("#pq-name").getAttribute("placeholder"))
+  );
+  await guard.close();
+
+  // ---- Not signed in: offered, but as sign-in --------------------------
+  const anon = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  anon.on("pageerror", (e) => errors.push(`payout-qr/anon: ${e}`));
+  await serve(anon, { ...M.TABLE_DATA, members: rosterWithEmails() });
+  await withAuthMode(anon, "optional");
+  await anon.goto(BASE, { waitUntil: "domcontentloaded" });
+  await anon.waitForTimeout(2200);
+  await anon.evaluate((id) => {
+    try { localStorage.setItem("pf_my_member_id", id); } catch (e) {}
+  }, rosterWithEmails()[1].id);
+  await anon.reload({ waitUntil: "domcontentloaded" });
+  await anon.waitForTimeout(2200);
+  await anon.locator(".tab-item", { hasText: "Menu" }).click();
+  await anon.waitForTimeout(400);
+  check(
+    // The who-am-I preference is per-device and unverified, so it must not be
+    // enough to change where money goes — the row offers sign-in instead.
+    "payout-qr/the who-am-I preference alone does not unlock it",
+    /Sign in to set where your payout is sent/i.test(
+      await anon.locator(".view-menu").innerText()
+    )
+  );
+  await anon.evaluate(() => window.PowerFund.openPayoutQrModal());
+  await anon.waitForTimeout(400);
+  check(
+    "payout-qr/and the handler refuses without a linked account",
+    (await anon.locator(".sheet-payout-qr").count()) === 0
+  );
+  await anon.close();
+
+  // ---- The treasurer no longer edits anyone else's --------------------
+  const tre = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  tre.on("pageerror", (e) => errors.push(`payout-qr/treasurer: ${e}`));
+  const t = rosterWithEmails();
+  t[0].auth_user_id = FAKE_USER_ID; // Regine, the flagged treasurer
+  t[1].payout_bank = "GCash";
+  t[1].payout_account_number = "091712345678";
+  await serve(tre, { ...M.TABLE_DATA, members: t });
+  await withAuthMode(tre, "optional", { signedIn: true, email: "regine@example.com" });
+  await tre.goto(BASE, { waitUntil: "domcontentloaded" });
+  await tre.waitForTimeout(2500);
+  await tre.locator(".tab-item", { hasText: "Home" }).click();
+  await tre.waitForTimeout(300);
+  await tre.locator(".roster-chip, .roster-item, .member-row").first().click().catch(() => {});
+  await tre.waitForTimeout(500);
+  // Reached however the roster opens, the point is the same: no edit button on
+  // somebody else's payout destination, and the number is masked.
+  const treText = await tre.locator("body").innerText();
+  check(
+    "payout-qr/the treasurer gets no edit button on another member's payout",
+    !/Edit payout details/i.test(treText)
+  );
+  check(
+    "payout-qr/another member's account number is masked in the roster",
+    !treText.includes("091712345678")
+  );
+  await tre.close();
 }
 
 /** The unlock button is hidden from a member the app can identify as somebody
@@ -3429,6 +3641,7 @@ async function bootFailure(browser) {
   await signInAdmin(browser, errors);
   await accountLinking(browser, errors);
   console.log("\nOnboarding");
+  await myPayoutQr(browser, errors);
   await unlockVisibility(browser, errors);
   await transferRole(browser, errors);
   await signInPrompt(browser, errors);

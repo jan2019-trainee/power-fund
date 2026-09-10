@@ -18,7 +18,8 @@ window.PFViews = window.PFViews || {};
 window.PFViews.menu = function (ctx) {
   const {
     members, unlocked, myMember, escapeHtml, icon, memberAvatar, C, hasMasterPin,
-    authMode, sessionEmail, identityLocked, signInStatus, isAdmin
+    authMode, sessionEmail, identityLocked, signInStatus, isAdmin,
+    payoutOwner, maskAccount
   } = ctx;
 
   /** One tappable settings row. `note` is the quiet second line. */
@@ -157,13 +158,46 @@ window.PFViews.menu = function (ctx) {
         "View only · the treasurer manages this"
       ),
     ];
+    // MY PAYOUT QR CODE — the design's own row, "right after the existing
+    // view-only Payment QR code row" (canvas.json, my-payout-qr-notes).
+    //
+    // Needs a LINKED ACCOUNT, not the who-am-I preference: this is where a
+    // member's ₱30,000 gets sent, and the preference is unverified and
+    // per-device. `payoutOwner` is editableMember() — the same gate as Edit
+    // Profile. Without it, the row still appears but explains itself rather
+    // than opening a sheet that would be refused.
+    if (payoutOwner) {
+      const acct = [payoutOwner.payout_bank, maskAccount(payoutOwner.payout_account_number)]
+        .filter(Boolean)
+        .join(" · ");
+      general.push(
+        row(
+          "qr",
+          "My Payout QR Code",
+          "PowerFund.openPayoutQrModal()",
+          acct ||
+            (payoutOwner.payout_qr_url
+              ? "QR code saved"
+              : "Not added yet — the treasurer sends your payout here")
+        )
+      );
+    } else if (myMember && authMode !== "off") {
+      general.push(
+        row(
+          "qr",
+          "My Payout QR Code",
+          "PowerFund.signIn()",
+          "Sign in to set where your payout is sent"
+        )
+      );
+    }
     if (myMember) {
       general.push(
         row(
           "members",
-          "My payout destination",
+          "My standing",
           `PowerFund.openMemberDetail('${String(myMember.id).replace(/'/g, "\\'")}')`,
-          "Where you receive money when it's your turn"
+          "Your payments, round by round"
         )
       );
     }
@@ -191,6 +225,26 @@ window.PFViews.menu = function (ctx) {
           "Your display name and photo"
         )
       );
+      // The treasurer branch above has no General group, so this is a
+      // signed-in treasurer's only route to their OWN payout QR — they are a
+      // member too, and their round comes round like everyone's. The member
+      // branch gets this row under General instead, where the design puts it.
+      if (unlocked && payoutOwner) {
+        const own = [payoutOwner.payout_bank, maskAccount(payoutOwner.payout_account_number)]
+          .filter(Boolean)
+          .join(" · ");
+        account.push(
+          row(
+            "qr",
+            "My Payout QR Code",
+            "PowerFund.openPayoutQrModal()",
+            own ||
+              (payoutOwner.payout_qr_url
+                ? "QR code saved"
+                : "Not added yet — where your own payout is sent")
+          )
+        );
+      }
     }
     // ADMIN ONLY — gated on isAdmin (a login owning a row with is_treasurer),
     // not on `unlocked`. The treasurer PIN is shared with all five members by

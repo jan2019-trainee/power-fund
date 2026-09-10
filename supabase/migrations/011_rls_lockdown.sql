@@ -271,14 +271,66 @@ drop policy if exists "payment_assets_write"  on storage.objects;
 drop policy if exists "payment_assets_update" on storage.objects;
 drop policy if exists "payment_assets_delete" on storage.objects;
 
--- The payment QR and payout receipts. Treasurer-managed, so treasurer-only.
+-- The fund's payment QR and the payout receipts are treasurer-managed, so
+-- treasurer-only — WITH ONE CARVE-OUT.
+--
+-- `payout-qr/<memberId>/...` is a MEMBER's own receiving QR: where their own
+-- 30,000 gets sent. The design has always had members self-manage this
+-- (canvas.json, my-payout-qr-notes); the app only kept it treasurer-only
+-- because there was no per-member auth to gate it with, which is no longer
+-- true. Scoped by folder exactly like member-avatars, which is also why
+-- js/database.js writes `payout-qr/<id>/<ts>.<ext>` and not the flat
+-- `payout-qr/<id>-<ts>.<ext>` it used to: storage.foldername() sees folders,
+-- never a filename prefix, so the old path could not be scoped at all.
+--
+-- The treasurer keeps write access to the whole bucket. Removing it would mean
+-- a member who loses their Google account has NO route to correct where their
+-- payout goes, and neither does anyone else — a lockout with money on the
+-- other side of it. The app hides the treasurer's edit button; the database
+-- deliberately keeps the recovery path open.
 create policy "payment_assets_write" on storage.objects for insert to authenticated
-  with check (bucket_id = 'payment-assets' and pf_is_treasurer());
+  with check (
+    bucket_id = 'payment-assets'
+    and (
+      pf_is_treasurer()
+      or (
+        (storage.foldername(name))[1] = 'payout-qr'
+        and (storage.foldername(name))[2] = pf_member_id()::text
+      )
+    )
+  );
 create policy "payment_assets_update" on storage.objects for update to authenticated
-  using (bucket_id = 'payment-assets' and pf_is_treasurer())
-  with check (bucket_id = 'payment-assets' and pf_is_treasurer());
+  using (
+    bucket_id = 'payment-assets'
+    and (
+      pf_is_treasurer()
+      or (
+        (storage.foldername(name))[1] = 'payout-qr'
+        and (storage.foldername(name))[2] = pf_member_id()::text
+      )
+    )
+  )
+  with check (
+    bucket_id = 'payment-assets'
+    and (
+      pf_is_treasurer()
+      or (
+        (storage.foldername(name))[1] = 'payout-qr'
+        and (storage.foldername(name))[2] = pf_member_id()::text
+      )
+    )
+  );
 create policy "payment_assets_delete" on storage.objects for delete to authenticated
-  using (bucket_id = 'payment-assets' and pf_is_treasurer());
+  using (
+    bucket_id = 'payment-assets'
+    and (
+      pf_is_treasurer()
+      or (
+        (storage.foldername(name))[1] = 'payout-qr'
+        and (storage.foldername(name))[2] = pf_member_id()::text
+      )
+    )
+  );
 
 drop policy if exists "member_avatars_write"  on storage.objects;
 drop policy if exists "member_avatars_update" on storage.objects;

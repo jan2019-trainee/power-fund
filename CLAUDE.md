@@ -345,8 +345,10 @@ conclusions are not discoverable from artboard markup. See `design/README.md`.
   (The design removes them entirely; this project overrode that.)
 - **Mid-fund member add/remove** — out of scope. The roster is read-only.
 - **Fund Setup wizard** — deferred; the designer marked it lowest priority.
-- **Payout QR / renaming** — treasurer-managed. No per-member auth exists, so a
-  member-only gate would be decorative.
+- **Payout QR / renaming** — ~~treasurer-managed. No per-member auth exists, so
+  a member-only gate would be decorative.~~ **REVERSED once auth landed** —
+  members now manage their own payout QR and bank details, which is what the
+  design said all along. See "My payout details" below.
 - **Forgot PIN** — solved with a master PIN (`app_settings.master_pin`), not the
   design's destructive reset. Non-destructive; every use is logged.
 - **Profile photos** — now built (migration 009). **Onboarding** — now built,
@@ -423,6 +425,80 @@ Phase 9, from the independent coverage audit — all closed:
   `isWide`.
 - **Status 3 (rejected)** is not money and still owes the cycle. `isOwed()` keeps
   unpaid and rejected together.
+
+## My payout details (member-managed)
+
+A **port**, not new design: `MyPayoutQRManage.dc.html` + its `Desktop` twin,
+and `canvas.json`'s `my-payout-qr-notes` ("every member now has their own
+receiving QR… added as a row in Menu — Member") plus
+`payout-release-no-qr-notes` ("a real scenario now that members self-manage
+their own payout QR"). The app was the deviation, for one stated reason — no
+per-member auth — which migration 008 removed.
+
+**The gate is `editableMember()`, a LINKED ACCOUNT — never
+`localStorage.pf_my_member_id`.** That preference is unverified and
+per-device, so honouring it would restore exactly the hole the old code
+comment described: anyone with the site URL could pick any member and change
+where their ₱30,000 is sent. `openPayoutQrModal()` also **ignores its
+argument** and always targets the caller's own row; the argument survives only
+so an old call site does not break, and taking it as the target would leave one
+guard between a member and somebody else's destination.
+
+**The treasurer's edit button is gone from everyone else's card.** Their route
+is unchanged where it matters: Release Payout still shows the recipient's full
+details, and `PayoutReleaseNoQR`'s "Copy reminder message" is how they chase a
+member who has not added one. That was already built.
+
+- **The database still lets the treasurer write these columns, deliberately.**
+  A member who loses their Google account would otherwise have no route to
+  correct where their payout goes, and nor would anyone else — a lockout with
+  money on the far side of it. So the UI hides the button and the DB keeps the
+  recovery path. Do not "finish the job" by tightening the guard without
+  deciding what happens to that member.
+- **Account numbers are MASKED in the roster** (`maskAccount()`, last four
+  digits). Not secrecy — the treasurer needs the full number and gets it in
+  Release Payout, and the owner sees their own in full where they edit it. It
+  is that a roster read by all five does not need to recite everyone's account
+  number to say a destination exists.
+- **The bank is a picker now**, from `PAYOUT_BANKS`, per the artboard's own
+  `<select>`. Five people typing "GCash" / "gcash" / "G-Cash" into a free-text
+  box the treasurer reads back under time pressure is a real way to send money
+  to the wrong wallet. The artboard offers **"Other"** and gives it nowhere to
+  go; it reveals a field here, because a dead option is worse than none. Free
+  text saved before this was a picker selects "Other" rather than silently
+  becoming GCash.
+- **The activity entry names the member, not the number** — same rule as the
+  member emails: the log is read by all five and lands in the CSV export and
+  the backup file.
+- **One addition the design does not have:** a Home nudge when a member has
+  nothing on file and their round is the one collecting now or next. The design
+  built only the treasurer's end of this reminder (the "Copy reminder message"
+  above), which is the fallback for a nudge that never happened. Deliberately
+  narrow — any earlier it is noise for four rounds, any later the payout is
+  already out.
+
+### The storage path had to change
+
+`uploadMemberPayoutQr()` now writes **`payout-qr/<memberId>/<ts>.<ext>`**, not
+the flat `payout-qr/<memberId>-<ts>.<ext>`. `storage.foldername()` sees folders
+and never a filename prefix, so the old path could not be scoped to a member
+at all — only to the whole bucket, which is why it was treasurer-only. Same
+shape as `member-avatars`.
+
+**Migration 011 was amended** (it is not applied yet, so no 012 was needed):
+`payment_assets_write/update/delete` now allow `pf_is_treasurer()` **or** a
+member's own `payout-qr/<their id>/` folder. Everything else in the bucket —
+the fund's payment QR, the payout receipts — stays treasurer-only.
+
+### `.single()` bit again, on the worst possible write
+
+`saveMemberPayoutDetails()` used `.single()` and so **could not tell a refusal
+from a success**: RLS hides the row rather than raising, and the reply is `[]`
+with no error. It now uses `requireRows()`. This was a ninth instance of the
+bug the "all eight money writes" note below describes — missed because payout
+details were not in that audit. `tests/sql/run.sh` asserts the refusal returns
+0 rows and no error, which is what makes the guard necessary rather than
+decorative.
 
 ## Migrations
 
@@ -822,9 +898,26 @@ confirmation names everything it replaces.
 ```bash
 node tests/views.test.js      # static: view scope. no browser
 node tests/calc.test.js       # money rules. no browser
+bash tests/sql/run.sh         # RLS on a real Postgres 16. no browser
 python3 -m http.server 8791 & # then:
 PF_CHROMIUM=/opt/pw-browsers/chromium-1194/chrome-linux/chrome node tests/smoke.js
 ```
+
+`tests/sql/run.sh` is the only suite that can see an RLS policy at all — the
+smoke harness mocks the network. It stands up a throwaway PostgreSQL 16
+cluster, stubs Supabase's `auth.uid()` and `storage.foldername()` to their real
+definitions, and applies the policy text **extracted from
+`supabase/migrations/`** rather than a copy. Two things it taught, both of
+which would have read as migration bugs:
+
+- **`UPDATE … WHERE` applies SELECT policies too**, so the harness needs
+  `payment_assets_read` from `schema.sql` — which 011 deliberately leaves
+  alone. Without it, "a member may replace their own QR" fails against a
+  policy that is correct.
+- **`authenticated` needs `USAGE` on the `auth` and `storage` schemas**, which
+  real Supabase grants. Without it every policy denies for the wrong reason —
+  and that is a false PASS on every DENY assertion, which is the dangerous
+  direction.
 
 Bump `CACHE` in `sw.js` on every deploy that changes the shell.
 

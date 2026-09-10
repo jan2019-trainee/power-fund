@@ -183,6 +183,17 @@ window.PFViews.menu = function (ctx) {
     html += group("Account", account);
   }
 
+  // The design gives this flow no re-entry point at all, which makes it
+  // unreachable — and untestable by the group — after its one showing.
+  html += group("Learn", [
+    row(
+      "party",
+      "Replay the intro",
+      "PowerFund.replayOnboarding()",
+      "The five-screen walkthrough of how the fund works"
+    ),
+  ]);
+
   html += `<div class="footer-note">
     <b>How this works</b>
     <ul class="how-it-works-list">

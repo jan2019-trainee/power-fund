@@ -46,7 +46,21 @@ function uuid(n) {
  *  PIN columns. Answering an unknown function with 200 [] instead would be a
  *  lie no real deployment tells, and it hid a bug once: the app read the empty
  *  answer as "no PIN is set" and offered to create one. */
-async function serve(page, data) {
+/** Onboarding shows once per device and would otherwise front every single
+ *  test in this file. serve() marks it seen by default; a test that builds its
+ *  own routes instead of calling serve() must call this itself. */
+async function markOnboarded(page) {
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem("pf_onboarded", "1");
+    } catch (e) {}
+  });
+}
+
+async function serve(page, data, opts) {
+  // Pass { freshDevice: true } for a first-run browser — what the onboarding
+  // test itself needs.
+  if (!(opts && opts.freshDevice)) await markOnboarded(page);
   await page.route("**/rest/v1/**", (route) => {
     const url = new URL(route.request().url());
     if (url.pathname.includes("/rpc/")) {
@@ -1889,6 +1903,163 @@ async function accountLinking(browser, errors) {
   await soft.close();
 }
 
+/** Onboarding: five approved artboards, previously deferred entirely. */
+async function onboarding(browser, errors) {
+  // A genuinely first-run device.
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`onboarding: ${e}`));
+  await serve(
+    page,
+    { ...M.TABLE_DATA, app_settings: { ...M.SETTINGS, fund_name: "ViTAMiN Fund 2027", qr_bank: "Maya" } },
+    { freshDevice: true }
+  );
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1800);
+
+  check("onb/a first run shows the intro, not the dashboard", (await page.locator(".onboarding").count()) === 1);
+  check("onb/the shell is not behind it", (await page.locator(".tab-bar").count()) === 0);
+  check(
+    "onb/step 1 is Welcome, named for the fund",
+    /Welcome to Power Fund/i.test(await page.locator(".ob-title").innerText()) &&
+      /ViTAMiN Fund 2027/i.test(await page.locator(".ob-kicker").innerText())
+  );
+  // Nobody is linked in these fixtures, so the picker step is included: 5 dots.
+  check("onb/five dots for five steps", (await page.locator(".ob-dot").count()) === 5);
+  check("onb/the first dot is the active one", (await page.locator(".ob-dot.active").first().evaluate(
+    (el) => el.previousElementSibling === null
+  )) === true);
+  check(
+    "onb/the first CTA reads Get started",
+    /get started/i.test(await page.locator(".ob-next").innerText())
+  );
+
+  // Step 2 — the numbers must come from calculations.js, not the mockup.
+  await page.locator(".ob-next").click();
+  await page.waitForTimeout(350);
+  const s2 = (await page.locator(".ob-body").innerText()).replace(/\s+/g, " ");
+  check(
+    // From calculations.js's constants, and WITHOUT the .00 that C.peso()
+    // adds — the artboards write these as prose, not as ledger amounts.
+    "onb/step 2 states the real cycle maths, in whole pesos",
+    /₱1,000 each cycle/.test(s2) &&
+      /6 cycles/.test(s2) &&
+      /₱30,000 collected/.test(s2) &&
+      /5 rounds/.test(s2) &&
+      !/\.00/.test(s2),
+    s2.slice(0, 130)
+  );
+  check("onb/one bar per cycle in a round", (await page.locator(".ob-cycle-bar").count()) === 6);
+
+  // Step 3 — the real wallet name, not the artboard's hardcoded "GCash".
+  await page.locator(".ob-next").click();
+  await page.waitForTimeout(350);
+  const s3 = await page.locator(".ob-text").innerText();
+  check("onb/step 3 names the treasurer's ACTUAL wallet", /Maya/.test(s3) && !/GCash/.test(s3), s3.slice(0, 90));
+  check("onb/step 3 shows the three-step flow", (await page.locator(".ob-step").count()) === 3);
+
+  // Step 4 — the real roster, not Ana/Ben/Cathy.
+  await page.locator(".ob-next").click();
+  await page.waitForTimeout(350);
+  const rows = await page.locator(".ob-order-row").count();
+  const names = (await page.locator(".ob-order-name").allInnerTexts()).join(",");
+  check("onb/step 4 lists the real roster", rows === M.MEMBERS.length, `${rows} rows`);
+  check(
+    "onb/with real names, not the mockup's placeholders",
+    names.includes(M.MEMBERS[0].name) && !/Ana|Cathy|Elena/.test(names),
+    names
+  );
+  check(
+    "onb/and marks exactly one round as the live one",
+    (await page.locator(".ob-order-row.is-now").count()) <= 1
+  );
+
+  // Step 5 — the picker, which is the flow's exit.
+  await page.locator(".ob-next").click();
+  await page.waitForTimeout(350);
+  check("onb/step 5 is the member picker", (await page.locator(".ob-picker-row").count()) === M.MEMBERS.length);
+  await page.locator(".ob-picker-row").nth(2).click();
+  await page.waitForTimeout(600);
+  check("onb/picking a member enters the app", (await page.locator(".tab-bar").count()) === 1);
+  check(
+    "onb/and that member becomes this device's identity",
+    (await page.evaluate(() => localStorage.getItem("pf_my_member_id"))) === M.MEMBERS[2].id
+  );
+  check(
+    "onb/the intro does not come back on reload",
+    (await page.evaluate(() => localStorage.getItem("pf_onboarded"))) === "1"
+  );
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1600);
+  check("onb/confirmed on an actual reload", (await page.locator(".onboarding").count()) === 0);
+
+  // Menu offers a way back in — the design gives none.
+  await page.locator(".tab-item", { hasText: "Menu" }).click();
+  await page.waitForTimeout(400);
+  await page.locator(".menu-row", { hasText: "Replay the intro" }).click();
+  await page.waitForTimeout(500);
+  check("onb/Menu can replay it", (await page.locator(".onboarding").count()) === 1);
+  await page.close();
+
+  // Skip, from the very first step.
+  const skip = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  skip.on("pageerror", (e) => errors.push(`onboarding: ${e}`));
+  await serve(skip, M.TABLE_DATA, { freshDevice: true });
+  await skip.goto(BASE, { waitUntil: "domcontentloaded" });
+  await skip.waitForTimeout(1800);
+  await skip.locator(".ob-skip").click();
+  await skip.waitForTimeout(500);
+  check("onb/Skip goes straight to the dashboard", (await skip.locator(".tab-bar").count()) === 1);
+  check(
+    "onb/and Skip still marks it seen",
+    (await skip.evaluate(() => localStorage.getItem("pf_onboarded"))) === "1"
+  );
+  await skip.close();
+
+  // A LINKED member already answers "which one is you?", so that step is
+  // dropped — the design predates accounts and cannot know this.
+  const linked = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  linked.on("pageerror", (e) => errors.push(`onboarding: ${e}`));
+  await serve(
+    linked,
+    { ...M.TABLE_DATA, members: rosterWithEmails({ auth_user_id: FAKE_USER_ID }) },
+    { freshDevice: true }
+  );
+  await withAuthMode(linked, "required", { signedIn: true, email: "regine@example.com" });
+  await linked.goto(BASE, { waitUntil: "domcontentloaded" });
+  await linked.waitForTimeout(2200);
+  check("onb/a linked member still gets the intro", (await linked.locator(".onboarding").count()) === 1);
+  check(
+    "onb/but four steps, not five — the picker is dropped",
+    (await linked.locator(".ob-dot").count()) === 4,
+    `${await linked.locator(".ob-dot").count()} dots`
+  );
+  for (let n = 0; n < 3; n++) {
+    await linked.locator(".ob-next").click();
+    await linked.waitForTimeout(300);
+  }
+  check("onb/no picker on the last step", (await linked.locator(".ob-picker-row").count()) === 0);
+  await linked.locator(".ob-next").click();
+  await linked.waitForTimeout(600);
+  check("onb/the last Next enters the app", (await linked.locator(".tab-bar").count()) === 1);
+  await linked.close();
+
+  // Desktop frame: centred column, no horizontal scroll.
+  const wide = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  wide.on("pageerror", (e) => errors.push(`onboarding: ${e}`));
+  await serve(wide, M.TABLE_DATA, { freshDevice: true });
+  await wide.goto(BASE, { waitUntil: "domcontentloaded" });
+  await wide.waitForTimeout(1800);
+  check("onb/desktop shows it too", (await wide.locator(".onboarding").count()) === 1);
+  const box = await wide.locator(".ob-body").boundingBox();
+  const off = Math.abs(box.x + box.width / 2 - 720);
+  check("onb/desktop centres the column", off <= 2, `off-centre by ${Math.round(off)}px`);
+  check(
+    "onb/desktop never scrolls sideways",
+    (await wide.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)) === true
+  );
+  await wide.close();
+}
+
 /** Backup and restore must round-trip everything they claim to.
  *
  *  The backup silently omitted five migrations' worth of columns — most
@@ -2138,6 +2309,7 @@ async function pinVault(browser, errors) {
   // ---- Post-010: the digits never reach the browser --------------------
   const vault = await browser.newPage({ viewport: { width: 430, height: 950 } });
   vault.on("pageerror", (e) => errors.push(`vault: ${e}`));
+  await markOnboarded(vault); // routes by hand, so serve() never ran
   const rpcCalls = [];
   const bodies = [];
   // app_settings without the PIN columns, exactly as 010 leaves it.
@@ -2230,6 +2402,7 @@ async function pinVault(browser, errors) {
   // offers to create a treasurer PIN to whoever hit the error.
   const broken = await browser.newPage({ viewport: { width: 430, height: 950 } });
   broken.on("pageerror", (e) => errors.push(`vault: ${e}`));
+  await markOnboarded(broken); // routes by hand, so serve() never ran
   await broken.route("**/rest/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const last = url.pathname.split("/").pop();
@@ -2721,6 +2894,8 @@ async function bootFailure(browser) {
   await memberAccounts(browser, errors);
   console.log("\nAccount linking");
   await accountLinking(browser, errors);
+  console.log("\nOnboarding");
+  await onboarding(browser, errors);
   console.log("\nBackup round-trip");
   await backupRoundTrip(browser, errors);
   console.log("\nSilent refusal");

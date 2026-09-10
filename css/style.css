@@ -5229,3 +5229,237 @@ body.auth-gate {
 @media (prefers-reduced-motion: reduce) {
   .profile-avatar-btn:active { transform: none; }
 }
+
+/* ---------------------------------------------------------------------------
+ * Onboarding — Onboarding{Welcome,HowItWorks,HowToPay,PayoutOrder,WhoAreYou}
+ * and their Desktop* counterparts.
+ *
+ * One render path, two frames: the phone fills the viewport with Skip pinned
+ * top-right, the desktop centres a 520px column, exactly as the two artboard
+ * sets draw it.
+ * ------------------------------------------------------------------------- */
+.onboarding {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 20px 24px calc(28px + env(safe-area-inset-bottom, 0px));
+  overflow: hidden;
+}
+.ob-top { display: flex; justify-content: flex-end; }
+.ob-skip {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 8px;
+}
+.ob-skip:active { opacity: 0.6; }
+.ob-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  animation: pfFadeUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.ob-emblem {
+  width: 104px;
+  height: 104px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 26px;
+  flex: none;
+}
+.ob-emblem.gold {
+  background: linear-gradient(160deg, rgba(245,166,35,0.2), rgba(76,217,192,0.14));
+  box-shadow: 0 0 46px -10px rgba(245, 166, 35, 0.4);
+  color: var(--accent);
+}
+.ob-emblem.teal {
+  background: linear-gradient(160deg, rgba(76,217,192,0.2), rgba(245,166,35,0.12));
+  box-shadow: 0 0 46px -10px rgba(76, 217, 192, 0.35);
+  color: #4CD9C0;
+}
+.ob-title {
+  margin: 0 0 8px;
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  max-width: 300px;
+  color: var(--text-primary);
+}
+.ob-kicker {
+  margin: 0 0 14px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ob-text {
+  margin: 4px 0 26px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  max-width: 300px;
+}
+.ob-panel {
+  width: 100%;
+  max-width: 340px;
+  padding: 16px;
+  border-radius: 16px;
+  background: rgba(20, 42, 66, 0.55);
+  border: 1px solid var(--border);
+}
+.ob-cycle-bars { display: flex; gap: 5px; margin-bottom: 10px; }
+.ob-cycle-bar {
+  flex: 1;
+  height: 10px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--accent), #4CD9C0);
+}
+.ob-panel-note { margin: 0; font-size: 12.5px; color: var(--text-muted); text-align: left; }
+.ob-panel-note b {
+  color: var(--text-primary);
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+}
+
+/* How-to-pay: three steps with arrows between them. */
+.ob-steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ob-step { display: flex; flex-direction: column; align-items: center; gap: 7px; }
+.ob-step-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ob-step-icon.accent { background: var(--accent-soft); border: 1px solid rgba(245,166,35,0.3); color: var(--accent); }
+.ob-step-icon.violet { background: var(--pending-review-soft); border: 1px solid rgba(155,127,224,0.3); color: var(--pending-review); }
+.ob-step-icon.success { background: var(--success-soft); border: 1px solid rgba(76,175,131,0.3); color: var(--success); }
+.ob-step-label { font-size: 11.5px; color: var(--text-muted); }
+.ob-step-arrow { color: var(--text-muted); opacity: 0.5; font-size: 15px; margin-bottom: 18px; }
+
+/* Payout order: the REAL roster, with the live round highlighted. */
+.ob-order { display: flex; flex-direction: column; gap: 6px; padding: 12px; }
+.ob-order-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+.ob-order-row.is-now {
+  background: rgba(245, 166, 35, 0.12);
+  border: 1px solid rgba(245, 166, 35, 0.4);
+}
+.ob-order-pos {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.ob-order-name { flex: 1; text-align: left; color: var(--text-primary); }
+.ob-order-word { font-size: 11.5px; color: var(--text-muted); }
+.ob-order-word.paid { color: var(--success); }
+
+/* Who-are-you: the same grouped-rows card the design uses. */
+.ob-picker {
+  width: 100%;
+  max-width: 340px;
+  border-radius: 16px;
+  background: rgba(20, 42, 66, 0.55);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.ob-picker-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 14px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-primary);
+}
+.ob-picker-row + .ob-picker-row { border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.ob-picker-row:hover { background: rgba(255, 255, 255, 0.04); }
+.ob-picker-name { flex: 1; font-size: 14.5px; font-weight: 600; }
+.ob-picker-chevron { color: var(--text-muted); }
+
+.ob-foot { flex: none; animation: pfFadeUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.12s both; }
+.ob-dots { display: flex; gap: 8px; justify-content: center; margin-bottom: 20px; }
+.ob-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+}
+.ob-dot.active { width: 22px; border-radius: 3px; background: var(--accent); }
+.ob-next {
+  width: 100%;
+  height: 52px;
+  border: none;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #F5A623, #FFC966);
+  color: #14213D;
+  font-weight: 700;
+  font-size: 14.5px;
+  cursor: pointer;
+}
+.ob-next:active { transform: scale(0.97); }
+.ob-skip-wide {
+  width: 100%;
+  padding: 14px 0;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Desktop: a centred column, as the Desktop* artboards draw it. */
+@media (min-width: 900px) {
+  .onboarding {
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+  }
+  .ob-top { position: absolute; top: 24px; right: 32px; }
+  .ob-body,
+  .ob-foot { width: 100%; max-width: 520px; }
+  .ob-body { flex: none; }
+  .ob-title { font-size: 30px; max-width: none; }
+  .ob-text { font-size: 15px; max-width: 440px; margin-bottom: 32px; }
+  .ob-panel, .ob-picker { max-width: 440px; }
+  .ob-foot { margin-top: 34px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ob-body, .ob-foot { animation: none; }
+  .ob-next:active { transform: none; }
+}

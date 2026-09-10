@@ -349,7 +349,8 @@ conclusions are not discoverable from artboard markup. See `design/README.md`.
   member-only gate would be decorative.
 - **Forgot PIN** — solved with a master PIN (`app_settings.master_pin`), not the
   design's destructive reset. Non-destructive; every use is logged.
-- **Profile photos** — now built (migration 009). **Onboarding** — still deferred.
+- **Profile photos** — now built (migration 009). **Onboarding** — now built,
+  mobile and desktop, from all five artboards plus their `Desktop*` twins.
 - **CropPhoto (drag to reposition / pinch to zoom)** — deferred. Photos are
   centre-cropped square and downscaled to 512px in the browser before upload,
   which frames a phone portrait acceptably at the 34–60px these render at. The
@@ -599,6 +600,43 @@ Two things to keep in view:
   `photos` icon paths lifted verbatim from the artboards. They reuse the
   established `.modal-overlay.sheet` treatment, whose `::before` already draws
   the grabber, so do not add another.
+
+## Onboarding (built from the five approved artboards)
+
+`Onboarding{Welcome,HowItWorks,HowToPay,PayoutOrder,WhoAreYou}` and their
+`Desktop*` twins — one render path, two frames, the way the rest of the app
+does it. Full-screen like the auth gate, so it renders in `renderView` **after**
+the account checks (someone who cannot use the app at all should be told that,
+not walked through a tour and dead-ended at the end of it) and **before** the
+shell.
+
+"Seen" is `localStorage.pf_onboarded` — per device, which is what "first-time"
+means here, and there is no DB column for it.
+
+**Two deliberate departures from the artboards:**
+
+- **The final step is dropped for a linked member.** It is the who-am-I
+  picker, which writes the per-device preference — but once a login owns a
+  member row the identity comes from the database and cannot be switched
+  (`openWhoAmIPicker()` refuses). The design predates accounts and cannot know
+  this. Four steps and four dots in that case; five otherwise.
+- **Every name and figure is real.** The artboards hardcode "Ana / Ben /
+  Cathy…", "Paid out / This round / Upcoming" and "GCash". Rendering those
+  would be fake data (rule 4), so the payout-order step reads the actual
+  roster and round state, and step 3 names the treasurer's actual wallet from
+  `settings.qr_bank`.
+
+Two additions the design does not have: a **Menu → "Replay the intro"** row,
+because otherwise the flow is unreachable and untestable after its one
+showing; and `pesoWhole()` for the prose figures, since `C.peso()`'s two
+decimals are right for a ledger and wrong in a sentence — the artboards write
+"₱1,000", not "₱1,000.00".
+
+**`tests/smoke.js`'s `serve()` now marks onboarding seen by default**, or it
+would front all ~290 checks. Pass `{ freshDevice: true }` for a first-run
+browser. A test that routes by hand instead of calling `serve()` must call
+`markOnboarded(page)` itself — `pinVault` did not, and that is how this was
+caught.
 
 ## Backup completeness (found while waiting on member emails)
 

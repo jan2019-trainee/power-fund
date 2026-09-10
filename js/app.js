@@ -57,6 +57,8 @@
   /** Is a full-screen auth screen (the gate, or an account dead-end) showing?
    *  Both replace the whole shell, so both need the sidebar gutter cancelled. */
   function isAuthScreenUp() {
+    // Onboarding replaces the whole shell too, at any AUTH_MODE.
+    if (onboardingStep != null) return true;
     if (!authRequired()) return false;
     if (!session) return true;
     return (
@@ -76,6 +78,13 @@
   let accountState = null;
   let accountMemberId = null; // the linked member's id, when accountState === "linked"
   let linking = false; // a first-login claim is being written
+
+  // ---- Onboarding (5 approved artboards, previously deferred) ----------
+  // Which step is showing, or null when the flow is not running. Whether it
+  // has been seen is per-device, in localStorage: the design calls it a
+  // "first-time" flow, and there is no DB column for it.
+  const ONBOARDED_KEY = "pf_onboarded";
+  let onboardingStep = null;
 
   // ---- Edit Profile / Change Photo (migration 009) ---------------------
   let profileModalOpen = false;
@@ -480,6 +489,220 @@
     modalCount = 1;
     clearProofSelection();
     render();
+  }
+
+  // ===================================================================
+  // Onboarding — OnboardingWelcome / HowItWorks / HowToPay / PayoutOrder /
+  // WhoAreYou, plus their Desktop* counterparts.
+  //
+  // TWO CONFLICTS WITH THE DESIGN, both resolved deliberately:
+  //
+  //  1. The final step is the "Which one is you?" picker, which writes the
+  //     per-device preference. That predates member accounts: once a login
+  //     owns a member row the identity comes from the database and cannot be
+  //     switched (openWhoAmIPicker refuses). So the step is DROPPED for a
+  //     linked member and the flow is four steps long, with four dots.
+  //
+  //  2. The artboards hardcode "Ana / Ben / Cathy…", "Paid out / This round /
+  //     Upcoming" and "GCash". Those are mockup placeholders; showing them
+  //     would be fake data (rule 4). Every figure and name below comes from
+  //     the real roster, the real round state and the real QR bank.
+  // ===================================================================
+
+  /** Whole pesos, for prose. C.peso() keeps two decimals because it prints
+   *  money the fund actually owes or holds; the intro's "₱1,000 each cycle" is
+   *  a sentence, and the artboards write it without decimals. Presentation
+   *  only — no money rule reads this. */
+  function pesoWhole(amount) {
+    return "₱" + Math.round(Number(amount) || 0).toLocaleString("en-PH");
+  }
+
+  function onboardingSeen() {
+    return lsGet(ONBOARDED_KEY) === "1";
+  }
+  function finishOnboarding() {
+    lsSet(ONBOARDED_KEY, "1");
+    onboardingStep = null;
+    render();
+  }
+  function onboardingNext() {
+    const last = onboardingSteps().length - 1;
+    if (onboardingStep == null) return;
+    if (onboardingStep >= last) return finishOnboarding();
+    onboardingStep += 1;
+    render();
+  }
+  function onboardingPick(memberId) {
+    // Same write the who-am-I picker makes, then straight to the dashboard.
+    myMemberId = memberId || null;
+    lsSet(MY_MEMBER_KEY, myMemberId);
+    finishOnboarding();
+  }
+  /** Menu → "Replay the intro". The design has no way back into this flow
+   *  once it is dismissed, which makes it unreachable and untestable for
+   *  everyone after the first run. */
+  function replayOnboarding() {
+    onboardingStep = 0;
+    render();
+  }
+
+  /** The steps, built from real data each render. */
+  function onboardingSteps() {
+    const members = sortedMembers();
+    const fund = (state && state.settings && state.settings.fund_name) || fundName();
+    const wallet =
+      (state && state.settings && state.settings.qr_bank) || "e-wallet or bank";
+    const curRound = C.currentRound(state.payouts, state.contributions);
+
+    const steps = [
+      {
+        key: "welcome",
+        emblem: "wallet",
+        tone: "gold",
+        title: "Welcome to Power Fund",
+        kicker: fund,
+        body:
+          `A shared savings pot for the group. Everyone puts in a little every ` +
+          `cycle — and takes turns receiving the whole pot.`,
+      },
+      {
+        key: "how",
+        emblem: "rounds",
+        tone: "teal",
+        title: "Every cycle, everyone chips in",
+        body:
+          `You contribute ${pesoWhole(C.CONTRIBUTION_AMOUNT)} each cycle. ` +
+          `${C.CYCLES_PER_ROUND} cycles make one round — ${pesoWhole(
+            C.GOAL_PER_ROUND
+          )} collected per round, across ${C.TOTAL_ROUNDS} rounds in total.`,
+        extra: `<div class="ob-panel">
+          <div class="ob-cycle-bars">${Array.from(
+            { length: C.CYCLES_PER_ROUND },
+            () => `<span class="ob-cycle-bar"></span>`
+          ).join("")}</div>
+          <p class="ob-panel-note"><b>${C.CYCLES_PER_ROUND} cycles</b> = 1 round = <b>${pesoWhole(
+          C.GOAL_PER_ROUND
+        )}</b></p>
+        </div>`,
+      },
+      {
+        key: "pay",
+        emblem: "qr",
+        tone: "gold",
+        title: "Paying is simple",
+        body:
+          `Scan the treasurer's ${escapeHtml(wallet)} QR, send ${pesoWhole(
+            C.CONTRIBUTION_AMOUNT
+          )}, then upload your screenshot as proof. The treasurer verifies it ` +
+          `and you're marked paid.`,
+        extra: `<div class="ob-steps">
+          ${[
+            ["qr", "accent", "Scan &amp; pay"],
+            ["upload", "violet", "Upload proof"],
+            ["check", "success", "Confirmed"],
+          ]
+            .map(
+              ([ic, tone, label]) => `<div class="ob-step">
+                 <span class="ob-step-icon ${tone}">${icon(ic, 18)}</span>
+                 <span class="ob-step-label">${label}</span>
+               </div>`
+            )
+            .join('<span class="ob-step-arrow" aria-hidden="true">→</span>')}
+        </div>`,
+      },
+      {
+        key: "order",
+        emblem: "members",
+        tone: "teal",
+        title: "Everyone gets a turn",
+        body:
+          `Each round, the full ${pesoWhole(C.GOAL_PER_ROUND)} goes to one member ` +
+          `— in a fixed order. Once your round is funded, it's yours.`,
+        // The REAL roster and the REAL round states, not the mockup's names.
+        extra: `<div class="ob-panel ob-order">${members
+          .map((m) => {
+            const released = getPayout(m.member_order).released;
+            const isNow = m.member_order === curRound && !released;
+            const word = released
+              ? "Paid out"
+              : isNow
+              ? "This round"
+              : "Upcoming";
+            return `<div class="ob-order-row${isNow ? " is-now" : ""}">
+              <span class="ob-order-pos">${m.member_order}</span>
+              <span class="ob-order-name">${escapeHtml(m.name)}</span>
+              <span class="ob-order-word${released ? " paid" : ""}">${word}</span>
+            </div>`;
+          })
+          .join("")}</div>`,
+      },
+    ];
+
+    // The picker, unless a login already answers the question.
+    if (accountState !== "linked") {
+      steps.push({
+        key: "who",
+        picker: true,
+        title: "Which one is you?",
+        body:
+          "This just personalises your dashboard with your own status. You can " +
+          "change it anytime.",
+      });
+    }
+    return steps;
+  }
+
+  function onboardingHtml() {
+    const steps = onboardingSteps();
+    const i = Math.min(onboardingStep || 0, steps.length - 1);
+    const step = steps[i];
+    const dots = steps
+      .map(
+        (_, n) => `<span class="ob-dot${n === i ? " active" : ""}"></span>`
+      )
+      .join("");
+
+    const body = step.picker
+      ? `<div class="ob-picker">${sortedMembers()
+          .map(
+            (m) => `<button type="button" class="ob-picker-row" onclick="PowerFund.onboardingPick('${inlineArg(
+              m.id
+            )}')">
+              ${memberAvatar(m.name, "idle", 38, m.avatar_url)}
+              <span class="ob-picker-name">${escapeHtml(m.name)}</span>
+              <span class="ob-picker-chevron">›</span>
+            </button>`
+          )
+          .join("")}</div>`
+      : `<div class="ob-emblem ${step.tone}" aria-hidden="true">${icon(
+          step.emblem,
+          42
+        )}</div>`;
+
+    return `<div class="onboarding">
+      <div class="ob-top">
+        <button type="button" class="ob-skip" onclick="PowerFund.onboardingSkip()">Skip</button>
+      </div>
+      <div class="ob-body">
+        ${step.picker ? "" : body}
+        <h1 class="ob-title">${escapeHtml(step.title)}</h1>
+        ${step.kicker ? `<p class="ob-kicker">${escapeHtml(step.kicker)}</p>` : ""}
+        <p class="ob-text">${step.body}</p>
+        ${step.picker ? body : step.extra || ""}
+      </div>
+      <div class="ob-foot">
+        <div class="ob-dots" role="img" aria-label="Step ${i + 1} of ${
+      steps.length
+    }">${dots}</div>
+        ${
+          step.picker
+            ? `<button type="button" class="ob-skip-wide" onclick="PowerFund.onboardingSkip()">Skip for now — go to dashboard</button>`
+            : `<button type="button" class="ob-next" onclick="PowerFund.onboardingNext()">${
+                i === 0 ? "Get started" : "Next"
+              }</button>`
+        }
+      </div>
+    </div>`;
   }
 
   // ===================================================================
@@ -2518,6 +2741,9 @@
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
     trash:
       '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/><path d="M9 7V4h6v3"/>',
+    // From OnboardingWelcome.dc.html's emblem.
+    wallet:
+      '<rect x="3" y="6.5" width="18" height="13" rx="2.5"/><path d="M16.5 6.5V5.3A1.8 1.8 0 0 0 14.7 3.5H6A2.5 2.5 0 0 0 3.5 6"/><circle cx="17" cy="13" r="1.3" fill="currentColor" stroke="none"/>',
     // Taken verbatim from ProfilePhotoSheet.dc.html / EditProfile.dc.html.
     camera:
       '<path d="M4 8h3l1.6-2.4A2 2 0 0 1 10.3 4.6h3.4a2 2 0 0 1 1.7 1L17 8h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z"/><circle cx="12" cy="14" r="3.6"/>',
@@ -4102,6 +4328,17 @@
         accountState === "no-email")
     ) {
       app.innerHTML = accountProblemHtml();
+      return;
+    }
+
+    // First run. After the data load, because the picker needs the roster and
+    // the round strip shows real state; after the account checks, because
+    // someone who cannot use the app at all should be told so rather than
+    // walked through a tour and dead-ended at the end of it; and before the
+    // shell, because this replaces the whole screen rather than living in a
+    // tab.
+    if (onboardingStep != null) {
+      app.innerHTML = onboardingHtml();
       return;
     }
 
@@ -5776,7 +6013,9 @@
           render();
           return;
         }
-        // Signed in: load the fund if the gate had held it back.
+        // Signed in: load the fund if the gate had held it back, and show the
+        // intro if this device has not seen it.
+        if (!onboardingSeen() && onboardingStep == null) onboardingStep = 0;
         if (!state) reload();
         else render();
       });
@@ -5794,6 +6033,9 @@
       try {
         await loadAll();
         await resolveAccount();
+        // First run on this device. Started here rather than in render() so a
+        // later reload never re-opens it mid-session.
+        if (!onboardingSeen()) onboardingStep = 0;
         render();
       } catch (e) {
         showError(e.message);
@@ -5897,6 +6139,10 @@
     closeModal,
     signIn,
     signOut,
+    onboardingNext,
+    onboardingSkip: finishOnboarding,
+    onboardingPick,
+    replayOnboarding,
     openProfileModal,
     closeProfileModal,
     saveProfile,

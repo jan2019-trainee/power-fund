@@ -2559,6 +2559,18 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   line-height: 1;
   flex-shrink: 0;
 }
+/* A profile photo (migration 009). The initial stays in the markup behind the
+   image, so a photo that fails to load falls back to the letter rather than a
+   broken-image icon — the <img> removes itself on error. */
+.avatar { position: relative; overflow: hidden; }
+.avatar-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
 .avatar-current { box-shadow: 0 0 0 2.5px var(--success), 0 0 14px 1px rgba(76, 175, 131, 0.35); }
 .avatar-overdue { box-shadow: 0 0 0 2.5px var(--danger); }
 /* A claim waiting on the treasurer is the one state on this screen that is
@@ -3854,16 +3866,6 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   cursor: pointer;
   flex-shrink: 0;
 }
-/* Not a button: when a login owns this member row there is nothing to change. */
-.profile-card-locked {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11.5px;
-  font-weight: 600;
-  color: var(--text-muted);
-  flex: none;
-}
 .profile-card-change:hover { color: var(--accent); }
 
 /* Rows can carry a second line now, so the label stacks rather than centring. */
@@ -5094,4 +5096,136 @@ body.auth-gate {
 @media (prefers-reduced-motion: reduce) {
   .signin-card { animation: none; }
   .signin-btn:active { transform: none; }
+}
+
+/* ---------------------------------------------------------------------------
+ * Edit Profile / Change Photo (EditProfile.dc.html, ProfilePhotoSheet.dc.html)
+ *
+ * Both are bottom sheets in the design, so they reuse .sheet-pay's shape and
+ * add only what is specific to them: the grabber, the avatar-with-camera-badge,
+ * the name field's live hint, and the grouped photo rows.
+ * ------------------------------------------------------------------------- */
+.profile-avatar-wrap { display: flex; justify-content: center; margin-bottom: 20px; }
+.profile-avatar-btn,
+.profile-avatar-static {
+  position: relative;
+  display: inline-flex;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.profile-avatar-static { cursor: default; }
+/* The camera badge, notched into the ring with the page colour so it reads as
+   sitting on top rather than inside. */
+.profile-avatar-badge {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2.5px solid var(--bg-primary);
+  color: #14213D;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.profile-avatar-btn:active { transform: scale(0.95); }
+
+.profile-photo-pending {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: -8px 0 18px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: var(--success-soft);
+  border: 1px solid rgba(76, 175, 131, 0.3);
+  color: var(--success);
+  font-size: 12px;
+}
+.profile-name-input {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 16px;
+  margin-bottom: 6px;
+}
+.profile-name-hint {
+  margin: 0 0 20px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.profile-name-hint.is-error { color: var(--danger); }
+
+/* ---- Change Photo ---- */
+.photo-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 20px;
+}
+.profile-avatar-static { margin-bottom: 10px; }
+.photo-head h3 { margin: 0; font-size: 16px; }
+.photo-sub { margin: 2px 0 0; font-size: 12px; color: var(--text-muted); }
+
+.photo-options {
+  border-radius: 16px;
+  background: rgba(20, 42, 66, 0.5);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.photo-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-primary);
+}
+.photo-options .photo-row + .photo-row { border-top: 1px solid rgba(255, 255, 255, 0.06); }
+.photo-row:hover { background: rgba(255, 255, 255, 0.04); }
+.photo-row:disabled { opacity: 0.55; cursor: default; }
+.photo-row-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.photo-row-icon.accent { background: var(--accent-soft); color: var(--accent); }
+.photo-row-icon.teal { background: rgba(76, 217, 192, 0.14); color: #4CD9C0; }
+.photo-row-icon.danger { background: var(--danger-soft); color: var(--danger); }
+.photo-row-label { flex: 1; font-size: 14px; font-weight: 500; }
+/* Deliberately outside the grouped card and in red — removing is not another
+   way to upload, and the design styles it apart for exactly that reason. */
+.photo-row-danger {
+  border-radius: 16px;
+  background: rgba(225, 83, 83, 0.06);
+  border: 1px solid rgba(225, 83, 83, 0.25);
+  margin-bottom: 14px;
+}
+.photo-row-danger .photo-row-label { color: var(--danger); font-weight: 600; }
+.photo-cancel {
+  width: 100%;
+  padding: 13px 0;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-primary);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+@media (prefers-reduced-motion: reduce) {
+  .profile-avatar-btn:active { transform: none; }
 }

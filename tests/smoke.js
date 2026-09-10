@@ -1790,9 +1790,11 @@ async function accountLinking(browser, errors) {
   await link.locator(".tab-item", { hasText: "Menu" }).click();
   await link.waitForTimeout(400);
   check(
-    "link/Menu says signed in instead of \"Not you?\"",
-    (await link.locator(".profile-card-locked").count()) === 1 &&
-      (await link.locator(".profile-card-change").count()) === 0
+    // Linked, the card offers Edit (migration 009) rather than "Not you?" —
+    // the member row belongs to the account, so it is not switchable.
+    "link/Menu offers Edit instead of \"Not you?\"",
+    (await link.locator(".profile-card-change", { hasText: "Edit" }).count()) === 1 &&
+      (await link.locator(".profile-card-change", { hasText: "Not you?" }).count()) === 0
   );
   await link.close();
 
@@ -1861,6 +1863,154 @@ async function accountLinking(browser, errors) {
       /roster/i.test(await soft.locator(".save-warning-banner").first().innerText())
   );
   await soft.close();
+}
+
+/** Self-service name and photo (migration 009). */
+async function profileEditing(browser, errors) {
+  // Signed in and linked: Menu offers Edit, and the sheet validates live.
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`profile: ${e}`));
+  const members = rosterWithEmails({ auth_user_id: FAKE_USER_ID });
+  await serve(page, { ...M.TABLE_DATA, members });
+  await withAuthMode(page, "required", { signedIn: true, email: "regine@example.com" });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2200);
+  await page.locator(".tab-item", { hasText: "Menu" }).click();
+  await page.waitForTimeout(400);
+  check(
+    "profile/Menu offers Edit on the You-are card",
+    (await page.locator(".profile-card-change", { hasText: "Edit" }).count()) === 1
+  );
+  check(
+    "profile/Account also routes there, for a treasurer with no You-are card",
+    (await page.locator(".menu-row", { hasText: "Edit my profile" }).count()) === 1
+  );
+
+  await page.locator(".profile-card-change", { hasText: "Edit" }).click();
+  await page.waitForTimeout(400);
+  check("profile/the sheet opens", (await page.locator(".sheet-profile").count()) === 1);
+  check(
+    "profile/it is prefilled with the current name",
+    (await page.locator("#profile-name").inputValue()) === members[0].name,
+    await page.locator("#profile-name").inputValue()
+  );
+  check(
+    "profile/the avatar is the way to the photo sheet",
+    (await page.locator(".profile-avatar-btn").count()) === 1
+  );
+
+  // Live validation: empty, then a name another member already holds.
+  await page.locator("#profile-name").fill("");
+  await page.waitForTimeout(200);
+  check(
+    "profile/an empty name is refused as you type",
+    /can't be empty/i.test(await page.locator("#profileNameHint").innerText()) &&
+      (await page.locator("#profileSave").isDisabled())
+  );
+  await page.locator("#profile-name").fill(M.MEMBERS[1].name);
+  await page.waitForTimeout(200);
+  check(
+    "profile/a name another member holds is refused",
+    /already taken/i.test(await page.locator("#profileNameHint").innerText()) &&
+      (await page.locator("#profileSave").isDisabled()),
+    await page.locator("#profileNameHint").innerText()
+  );
+  // Its own current name must stay valid — the uniqueness check has to skip
+  // the row being edited or Save would never re-enable.
+  await page.locator("#profile-name").fill(members[0].name);
+  await page.waitForTimeout(200);
+  check(
+    "profile/your own current name is still valid",
+    !(await page.locator("#profileSave").isDisabled()) &&
+      /visible to the rest/i.test(await page.locator("#profileNameHint").innerText())
+  );
+
+  // The photo sheet, over the top.
+  await page.locator(".profile-avatar-btn").click();
+  await page.waitForTimeout(400);
+  check("profile/the photo sheet opens", (await page.locator(".sheet-photo").count()) === 1);
+  check(
+    "profile/it offers camera and library",
+    (await page.locator(".photo-row", { hasText: "Take Photo" }).count()) === 1 &&
+      (await page.locator(".photo-row", { hasText: "Choose from Library" }).count()) === 1
+  );
+  check(
+    "profile/Take Photo asks for the camera",
+    (await page
+      .locator('.photo-row input[capture="user"]')
+      .count()) === 1
+  );
+  check(
+    // Nothing stored and nothing cropped: a Remove button would do nothing.
+    "profile/Remove is not offered when there is no photo",
+    (await page.locator(".photo-row-danger").count()) === 0
+  );
+  // Esc must close the sheet on top, not the one underneath.
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  check(
+    "profile/Esc closes the photo sheet first",
+    (await page.locator(".sheet-photo").count()) === 0 &&
+      (await page.locator(".sheet-profile").count()) === 1
+  );
+  await page.close();
+
+  // A stored photo renders as an image everywhere, not just where it was set.
+  const shot = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  shot.on("pageerror", (e) => errors.push(`profile: ${e}`));
+  const withPhotos = M.MEMBERS.map((m) => ({
+    ...m,
+    avatar_url: "data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACwAAAAAAQABAAACAkQBADs=",
+  }));
+  await serve(shot, { ...M.TABLE_DATA, members: withPhotos });
+  await shot.goto(BASE, { waitUntil: "domcontentloaded" });
+  await shot.waitForTimeout(1600);
+  const roster = await shot.locator(".roster-strip .avatar").count();
+  const photos = await shot.locator(".roster-strip .avatar .avatar-img").count();
+  check("profile/Home's roster shows photos", roster > 0 && photos === roster, `${photos}/${roster}`);
+  // Checked HERE, while Home is still up: .roster-strip is gone once we drill
+  // into Members below.
+  check(
+    "profile/the initial is kept behind the photo",
+    (
+      await shot
+        .locator(".roster-strip .avatar")
+        .first()
+        .evaluate((el) => (el.textContent || "").trim())
+    ).length === 1
+  );
+  await shot.locator(".roster-strip-all").click();
+  await shot.waitForTimeout(400);
+  const mRows = await shot.locator(".member-list .avatar").count();
+  const mPhotos = await shot.locator(".member-list .avatar .avatar-img").count();
+  check("profile/Members shows photos too", mRows > 0 && mPhotos === mRows, `${mPhotos}/${mRows}`);
+  await shot.close();
+
+  // Not signed in: the surface is inert rather than half-available.
+  const anon = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  anon.on("pageerror", (e) => errors.push(`profile: ${e}`));
+  await serve(anon, M.TABLE_DATA);
+  await anon.addInitScript((id) => {
+    try { localStorage.setItem("pf_my_member_id", id); } catch (e) {}
+  }, M.MEMBERS[0].id);
+  await anon.goto(BASE, { waitUntil: "domcontentloaded" });
+  await anon.waitForTimeout(1600);
+  await anon.locator(".tab-item", { hasText: "Menu" }).click();
+  await anon.waitForTimeout(400);
+  check(
+    "profile/no Edit without a linked account",
+    (await anon.locator(".profile-card-change", { hasText: "Edit" }).count()) === 0 &&
+      (await anon.locator(".menu-row", { hasText: "Edit my profile" }).count()) === 0
+  );
+  // And the exported handler refuses, since hiding a button is not a guard.
+  await anon.evaluate(() => window.PowerFund.openProfileModal());
+  await anon.waitForTimeout(400);
+  check(
+    "profile/the handler refuses without a linked account",
+    (await anon.locator(".sheet-profile").count()) === 0 &&
+      (await anon.locator(".save-error-banner").count()) === 1
+  );
+  await anon.close();
 }
 
 async function memberAccounts(browser, errors) {
@@ -2172,6 +2322,8 @@ async function bootFailure(browser) {
   await memberAccounts(browser, errors);
   console.log("\nAccount linking");
   await accountLinking(browser, errors);
+  console.log("\nProfile editing");
+  await profileEditing(browser, errors);
   console.log("\nContribute picker");
   await contributePickerFromHome(browser, errors);
   console.log("\nDesktop header actions");

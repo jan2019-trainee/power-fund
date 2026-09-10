@@ -99,12 +99,14 @@ window.PFViews.menu = function (ctx) {
       )}<span>Reset all fund data</span></button>
     </div>`;
   } else {
-    // Who this device belongs to. The name itself is not editable here: with no
-    // per-member authentication any device could rename anyone, so renaming
-    // stays a treasurer action — same reasoning as the payout QR.
+    // Who this device belongs to. Editing your own name and photo needs a
+    // LINKED ACCOUNT (migration 008): the who-am-I preference is unverified
+    // and per-device, so honouring it here would let anyone with the site URL
+    // pick any member and rename them. Signed in, "Edit" opens the design's
+    // Edit Profile sheet; not signed in, this stays a treasurer action.
     html += myMember
       ? `<div class="profile-card">
-           ${memberAvatar(myMember.name, "idle", 44)}
+           ${memberAvatar(myMember.name, "idle", 44, myMember.avatar_url)}
            <div class="profile-card-main">
              <div class="profile-card-label">You are</div>
              <div class="profile-card-name">${escapeHtml(myMember.name)}</div>
@@ -114,7 +116,7 @@ window.PFViews.menu = function (ctx) {
              // Signed in? Then this is not a preference to change — the member
              // row belongs to the account. Sign out to be somebody else.
              identityLocked
-               ? `<span class="profile-card-locked">${icon("lock", 12)}<span>Signed in</span></span>`
+               ? `<button type="button" class="profile-card-change" onclick="PowerFund.openProfileModal()">Edit</button>`
                : `<button type="button" class="profile-card-change" onclick="PowerFund.openWhoAmIPicker()">Not you?</button>`
            }
          </div>`
@@ -149,7 +151,21 @@ window.PFViews.menu = function (ctx) {
   // "optional" this is the only way in, which is the point: it lets one person
   // test Google sign-in without the other four hitting a gate.
   if (authMode !== "off") {
-    html += group("Account", [
+    const account = [];
+    // Also here, not only on the member card above: the treasurer branch has
+    // no "You are" card, so this is a signed-in treasurer's only route to
+    // their own name and photo.
+    if (identityLocked) {
+      account.push(
+        row(
+          "members",
+          "Edit my profile",
+          "PowerFund.openProfileModal()",
+          "Your display name and photo"
+        )
+      );
+    }
+    account.push(
       sessionEmail
         ? row(
             "unlocked",
@@ -162,8 +178,9 @@ window.PFViews.menu = function (ctx) {
             "Sign in with Google",
             "PowerFund.signIn()",
             "Use the account the treasurer has on file for you"
-          ),
-    ]);
+          )
+    );
+    html += group("Account", account);
   }
 
   html += `<div class="footer-note">

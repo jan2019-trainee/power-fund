@@ -349,7 +349,17 @@ conclusions are not discoverable from artboard markup. See `design/README.md`.
   member-only gate would be decorative.
 - **Forgot PIN** — solved with a master PIN (`app_settings.master_pin`), not the
   design's destructive reset. Non-destructive; every use is logged.
-- **Profile photos, onboarding** — deferred.
+- **Profile photos** — now built (migration 009). **Onboarding** — still deferred.
+- **CropPhoto (drag to reposition / pinch to zoom)** — deferred. Photos are
+  centre-cropped square and downscaled to 512px in the browser before upload,
+  which frames a phone portrait acceptably at the 34–60px these render at. The
+  interactive crop is a real gesture surface and was not worth it for that.
+- **Editing your own name and photo needs a LINKED ACCOUNT**, not just the
+  who-am-I preference. That preference is unverified and per-device, so
+  honouring it would let anyone with the site URL pick any member and rename
+  them — and names are stamped into the activity log and payout records. A
+  permission decision, taken conservatively; the treasurer's Edit-member-names
+  path is unchanged. With `AUTH_MODE` `off` this surface is inert, by design.
 - **PIN entry does not auto-submit** on the 4th digit, though the design's
   annotation asks for it. PINs here may be longer than four digits (setup
   enforces only a minimum), and auto-submitting would make a longer PIN
@@ -424,7 +434,9 @@ Run in the Supabase SQL editor, in order. `006` also needs a one-off
 master PIN, fund name, treasurer QR fields, typed activity, reserved avatar ·
 `007_activity_attribution.sql` — `activity_log.member_id` / `.round_number` ·
 `008_member_auth.sql` — `members.auth_user_id` / `.email` / `.is_treasurer`,
-plus a documented one-off for the five addresses and the treasurer flag.
+plus a documented one-off for the five addresses and the treasurer flag ·
+`009_member_avatars.sql` — the `member-avatars` storage bucket, which is what
+finally gave `members.avatar_url` (reserved back in 006) somewhere to point.
 
 ## Member accounts (in progress)
 
@@ -443,8 +455,8 @@ without gating the other four members. An unset or unrecognised value falls
 back to `off`.
 
 Done: migration 008, sign-in/sign-out, the session gate, the Menu → Account
-group, and the claim/link step. **Not done:** self-service name and photo, and
-the RLS rewrite.
+group, the claim/link step, and self-service name + photo (migration 009).
+**Not done:** the RLS rewrite.
 
 `resolveAccount()` runs after every load and puts the account in one of five
 states, which drive everything else: `linked` (this login owns a member row),
@@ -478,7 +490,13 @@ Two things to keep in view:
   payoff arrives with the RLS migration, not with the sign-in screen.
 - **The sign-in screen has no approved mockup.** It borrows
   `OnboardingWelcome.dc.html`'s composition. Flagged for UI/UX QA as new
-  design, not as a port.
+  design, not as a port. The account dead-ends (`unknown` / `taken` /
+  `no-email`) reuse that same shell and are likewise unmocked.
+- **Edit Profile and Change Photo ARE ports** — `EditProfile.dc.html` and
+  `ProfilePhotoSheet.dc.html`, both as bottom sheets, with the `camera` and
+  `photos` icon paths lifted verbatim from the artboards. They reuse the
+  established `.modal-overlay.sheet` treatment, whose `::before` already draws
+  the grabber, so do not add another.
 
 ## Tests
 

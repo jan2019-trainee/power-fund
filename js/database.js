@@ -15,6 +15,7 @@ window.DB = (function () {
   const cfg = window.APP_CONFIG || {};
   const PROOF_BUCKET = "payment-proofs";
   const ASSET_BUCKET = "payment-assets"; // treasurer-managed assets (the payment QR)
+  const AVATAR_BUCKET = "member-avatars"; // members' own profile photos (009)
 
   if (
     !cfg.SUPABASE_URL ||
@@ -468,6 +469,64 @@ window.DB = (function () {
       throw new Error("Couldn't save the payout details. Please try again.");
     }
     return res.data;
+  }
+
+  /** A member's own profile photo (migration 009). The caller hands over an
+   *  already-squared, downscaled Blob — see squareAvatarBlob() in app.js — so
+   *  this only stores it. Always .jpg, because that is what the canvas encodes. */
+  async function uploadMemberAvatar(blob, memberId) {
+    const path = `${memberId}/${Date.now()}.jpg`;
+    const res = await client.storage
+      .from(AVATAR_BUCKET)
+      .upload(path, blob, { upsert: false, contentType: "image/jpeg" });
+    if (res.error) {
+      console.error("Avatar upload failed:", res.error);
+      const m = res.error.message || "";
+      if (/bucket.*not.*found|not.*found|does not exist/i.test(m)) {
+        throw new Error(
+          "The 'member-avatars' storage bucket is missing. Run " +
+            "supabase/migrations/009_member_avatars.sql in the Supabase SQL editor."
+        );
+      }
+      if (/policy|permission|unauthor/i.test(m)) {
+        throw new Error(
+          "Storage rejected the upload — the 'member-avatars' bucket policies " +
+            "are not set. Run supabase/migrations/009_member_avatars.sql."
+        );
+      }
+      throw new Error("Couldn't upload your photo. Please try again.");
+    }
+    const { data } = client.storage.from(AVATAR_BUCKET).getPublicUrl(path);
+    return data.publicUrl;
+  }
+
+  /** Clear the column FIRST, then best-effort delete the file. If the delete
+   *  fails the app is still correct — the photo is gone from every screen and
+   *  an orphaned object costs nothing. Doing it the other way round can leave
+   *  avatar_url pointing at a file that no longer exists, which renders as a
+   *  broken image on every member surface. */
+  async function removeMemberAvatar(memberId, currentUrl) {
+    unwrap(
+      await client.from("members").update({ avatar_url: null }).eq("id", memberId),
+      "Couldn't remove your photo"
+    );
+    const path = avatarPathFromUrl(currentUrl);
+    if (!path) return;
+    try {
+      const res = await client.storage.from(AVATAR_BUCKET).remove([path]);
+      if (res.error) console.warn("Avatar file left behind:", res.error.message);
+    } catch (e) {
+      console.warn("Avatar file left behind:", e);
+    }
+  }
+
+  /** ".../member-avatars/<memberId>/<ts>.jpg" -> "<memberId>/<ts>.jpg" */
+  function avatarPathFromUrl(url) {
+    if (!url) return null;
+    const marker = `/${AVATAR_BUCKET}/`;
+    const i = String(url).indexOf(marker);
+    if (i === -1) return null;
+    return decodeURIComponent(String(url).slice(i + marker.length).split("?")[0]) || null;
   }
 
   async function uploadPayoutReceipt(file, roundNumber) {
@@ -1011,6 +1070,8 @@ window.DB = (function () {
     restoreFromBackup,
     subscribeToChanges,
     linkMemberAccount,
+    uploadMemberAvatar,
+    removeMemberAvatar,
     getSession,
     onAuthChange,
     signInWithGoogle,

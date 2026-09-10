@@ -665,7 +665,7 @@ window.PFViews.home = function (ctx) {
             return `<button type="button" class="roster-row" onclick="PowerFund.setView('members')" aria-label="${escapeHtml(
               m.name
             )} — ${said}">
-              <span class="roster-row-avatar">${memberAvatar(m.name, ring, 34)}</span>
+              <span class="roster-row-avatar">${memberAvatar(m.name, ring, 34, m.avatar_url)}</span>
               <span class="roster-row-name">${escapeHtml(shown)}</span>
               <span class="roster-row-status ${ring}">${
               mark ? `<span class="roster-mark rm-${
@@ -678,7 +678,7 @@ window.PFViews.home = function (ctx) {
             m.name
           )} — ${said}">
             <span class="roster-avatar-wrap">
-              ${memberAvatar(m.name, ring, 52)}
+              ${memberAvatar(m.name, ring, 52, m.avatar_url)}
               <span class="roster-order">${m.member_order}</span>
             </span>
             <span class="roster-name">${

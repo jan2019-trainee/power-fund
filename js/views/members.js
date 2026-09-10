@@ -154,7 +154,7 @@ function memberRow(m, ctx, cyclesDueSoFar, isWide) {
       aria-expanded="${open ? "true" : "false"}"
       onclick="PowerFund.openMemberDetail('${inlineArgSafe(m.id)}')">
       <span class="member-row-avatar">
-        ${memberAvatar(m.name, standing, 40)}
+        ${memberAvatar(m.name, standing, 40, m.avatar_url)}
         <span class="member-row-order">${m.member_order}</span>
       </span>
       <span class="member-row-main">
@@ -353,7 +353,7 @@ function memberDetail(m, ctx, cyclesDueSoFar) {
   };
 
   return `<div class="detail-head">
-    ${memberAvatar(m.name, standing, 60)}
+    ${memberAvatar(m.name, standing, 60, m.avatar_url)}
     <div class="detail-ident">
       <h2 class="detail-name">${escapeHtml(m.name)}</h2>
       <p class="detail-order">Payout order #${m.member_order}${

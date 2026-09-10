@@ -77,6 +77,14 @@
   let accountMemberId = null; // the linked member's id, when accountState === "linked"
   let linking = false; // a first-login claim is being written
 
+  // ---- Edit Profile / Change Photo (migration 009) ---------------------
+  let profileModalOpen = false;
+  let profileNameValue = ""; // the field's live value
+  let profileError = null;
+  let photoSheetOpen = false;
+  let photoPreview = null; // object URL of the crop, shown before it is saved
+  let photoBlob = null; // the squared JPEG waiting to be uploaded
+
   // ---- Data cache (filled by loadAll) ---------------------------------
   let state = null; // { members, cycles, contributions, payouts, activityLog, settings }
   let cycleIdByNumber = {}; // cycle_number -> cycle uuid  (for writes)
@@ -472,6 +480,256 @@
     modalCount = 1;
     clearProofSelection();
     render();
+  }
+
+  // ===================================================================
+  // Profile: display name and photo (migration 009)
+  // ===================================================================
+
+  const AVATAR_PX = 512; // stored size; every surface renders it at 34-60px
+  const AVATAR_MAX_BYTES = 8 * 1024 * 1024; // reject before decoding
+
+  /** Centre-crop to a square and downscale, so a 4 MB phone photo does not get
+   *  stored and re-downloaded by five devices to be drawn 34px wide. Returns a
+   *  JPEG Blob.
+   *
+   *  The design's CropPhoto.dc.html offers drag-to-reposition and pinch-to-zoom
+   *  before saving. That is DEFERRED, not done: it is a real gesture surface,
+   *  and a centre crop of a phone portrait already frames a face acceptably at
+   *  these sizes. Recorded as a deviation for QA rather than left implied. */
+  function squareAvatarBlob(file) {
+    return new Promise((resolve, reject) => {
+      if (!file) return reject(new Error("No photo was chosen."));
+      if (!/^image\//.test(file.type || "")) {
+        return reject(new Error("That file isn't an image. Choose a photo."));
+      }
+      if (file.size > AVATAR_MAX_BYTES) {
+        return reject(new Error("That photo is over 8 MB. Choose a smaller one."));
+      }
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const side = Math.min(img.naturalWidth, img.naturalHeight);
+          if (!side) throw new Error("empty image");
+          const out = Math.min(AVATAR_PX, side);
+          const canvas = document.createElement("canvas");
+          canvas.width = out;
+          canvas.height = out;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(
+            img,
+            (img.naturalWidth - side) / 2, // centre crop
+            (img.naturalHeight - side) / 2,
+            side,
+            side,
+            0,
+            0,
+            out,
+            out
+          );
+          canvas.toBlob(
+            (blob) => {
+              URL.revokeObjectURL(url);
+              if (blob) resolve(blob);
+              else reject(new Error("Couldn't process that photo. Try another."));
+            },
+            "image/jpeg",
+            0.85
+          );
+        } catch (e) {
+          URL.revokeObjectURL(url);
+          reject(new Error("Couldn't read that photo. Try another."));
+        }
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("Couldn't read that photo. Try another."));
+      };
+      img.src = url;
+    });
+  }
+
+  /** The member this viewer is allowed to edit: only their OWN row, and only
+   *  when a login proves which row that is.
+   *
+   *  Gated on a linked account rather than on the who-am-I preference on
+   *  purpose. That preference is unverified and per-device, so honouring it
+   *  here would let anyone holding the site URL pick any member and rename
+   *  them — and names are stamped into the activity log and payout records.
+   *  A PERMISSION DECISION, taken conservatively; the treasurer's own
+   *  Edit-member-names path is unchanged and still covers every renaming need.
+   *  With AUTH_MODE "off" this surface is therefore inert, by design. */
+  function editableMember() {
+    if (accountState !== "linked" || !accountMemberId || !state) return null;
+    return state.members.find((m) => m.id === accountMemberId) || null;
+  }
+
+  function openProfileModal() {
+    const me = editableMember();
+    if (!me) {
+      return showError("Sign in first — your profile belongs to your account.");
+    }
+    profileNameValue = me.name || "";
+    profileError = null;
+    profileModalOpen = true;
+    clearPhotoDraft();
+    render();
+  }
+  function closeProfileModal() {
+    profileModalOpen = false;
+    profileNameValue = "";
+    profileError = null;
+    clearPhotoDraft();
+    render();
+  }
+
+  /** The same rule the treasurer's Edit-names modal enforces, scoped to one
+   *  member: non-empty, and unique across everybody else. One rule, two
+   *  screens — a name that Save accepts here must not be one the treasurer's
+   *  screen would reject. */
+  function profileNameProblem() {
+    const me = editableMember();
+    if (!me) return "Sign in first.";
+    const v = String(profileNameValue || "").trim();
+    if (!v) return "Name can't be empty.";
+    const clash = state.members.some(
+      (m) => m.id !== me.id && String(m.name || "").trim().toLowerCase() === v.toLowerCase()
+    );
+    if (clash) return "That name is already taken by another member.";
+    return null;
+  }
+
+  /** Live validation that patches the hint and the button by hand. render()
+   *  reassigns innerHTML, which would destroy the input being typed into. */
+  function refreshProfileValidity() {
+    const problem = profileNameProblem();
+    const hint = document.getElementById("profileNameHint");
+    if (hint) {
+      hint.textContent = problem || "Visible to the rest of the group. Must be unique.";
+      hint.classList.toggle("is-error", !!problem);
+    }
+    const save = document.getElementById("profileSave");
+    if (save) save.disabled = busy || !!problem;
+  }
+
+  async function saveProfile() {
+    if (busy) return;
+    const me = editableMember();
+    if (!me) return;
+    const problem = profileNameProblem();
+    if (problem) {
+      profileError = problem;
+      return render();
+    }
+    const nextName = String(profileNameValue).trim();
+    const nameChanged = nextName !== me.name;
+    if (!nameChanged && !photoBlob) return closeProfileModal();
+
+    busy = true;
+    render();
+    try {
+      let photoUrl = null;
+      if (photoBlob) {
+        photoUrl = await window.DB.uploadMemberAvatar(photoBlob, me.id);
+      }
+      const fields = {};
+      if (nameChanged) fields.name = nextName;
+      if (photoUrl) fields.avatar_url = photoUrl;
+      await window.DB.updateMember(me.id, fields);
+      // One line per real change, and the rename records both names — the log
+      // is the only place the old one survives once the row is updated.
+      if (nameChanged) {
+        await logActivity(`${me.name} changed their display name to ${nextName}`, {
+          type: "admin",
+          memberId: me.id,
+        });
+      }
+      if (photoUrl) {
+        await logActivity(`${nextName} updated their profile photo`, {
+          type: "admin",
+          memberId: me.id,
+        });
+      }
+      busy = false;
+      closeProfileModal();
+      showSuccess("Profile updated.");
+      await reload();
+    } catch (e) {
+      busy = false;
+      profileError = e.message;
+      render();
+    }
+  }
+
+  // ---- Change Photo sheet ----------------------------------------------
+  function openPhotoSheet() {
+    if (!editableMember()) return;
+    photoSheetOpen = true;
+    render();
+  }
+  function closePhotoSheet() {
+    photoSheetOpen = false;
+    render();
+  }
+  function clearPhotoDraft() {
+    if (photoPreview) {
+      try {
+        URL.revokeObjectURL(photoPreview);
+      } catch (e) {
+        /* already revoked */
+      }
+    }
+    photoPreview = null;
+    photoBlob = null;
+  }
+
+  /** Chosen from the camera or the library. Cropped and previewed here; not
+   *  uploaded until Save Changes, so backing out costs nothing and no orphan
+   *  file is left in the bucket. */
+  async function onAvatarSelected(input) {
+    const file = input && input.files && input.files[0];
+    if (input) input.value = ""; // let the same file be re-picked
+    if (!file) return;
+    try {
+      const blob = await squareAvatarBlob(file);
+      clearPhotoDraft();
+      photoBlob = blob;
+      photoPreview = URL.createObjectURL(blob);
+      photoSheetOpen = false;
+      render();
+    } catch (e) {
+      showError(e.message);
+    }
+  }
+
+  async function removeAvatar() {
+    if (busy) return;
+    const me = editableMember();
+    if (!me) return;
+    // Nothing stored yet: this is only discarding the unsaved crop.
+    if (!me.avatar_url) {
+      clearPhotoDraft();
+      photoSheetOpen = false;
+      return render();
+    }
+    busy = true;
+    render();
+    try {
+      await window.DB.removeMemberAvatar(me.id, me.avatar_url);
+      await logActivity(`${me.name} removed their profile photo`, {
+        type: "admin",
+        memberId: me.id,
+      });
+      clearPhotoDraft();
+      photoSheetOpen = false;
+      busy = false;
+      showSuccess("Photo removed.");
+      await reload();
+    } catch (e) {
+      busy = false;
+      showError(e.message);
+    }
   }
 
   // ===================================================================
@@ -2165,6 +2423,12 @@
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
     trash:
       '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/><path d="M9 7V4h6v3"/>',
+    // Taken verbatim from ProfilePhotoSheet.dc.html / EditProfile.dc.html.
+    camera:
+      '<path d="M4 8h3l1.6-2.4A2 2 0 0 1 10.3 4.6h3.4a2 2 0 0 1 1.7 1L17 8h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z"/><circle cx="12" cy="14" r="3.6"/>',
+    // The "Choose from Library" glyph, likewise from the artboard.
+    photos:
+      '<rect x="3" y="4" width="18" height="15" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M21 15l-5.5-5-6 5.5-2-2L3 18"/>',
   };
   /**
    * The fund's battery-cell progress visual: a cell that fills bottom-up.
@@ -2209,12 +2473,23 @@
    *
    * status: "paid-out" | "overdue" | "pending" | "current" | "idle"
    */
-  function memberAvatar(name, status, size) {
+  /** The ring keeps meaning what it meant; `avatarUrl` (migration 009) just
+   *  swaps the initial for a photo. The initial stays in the markup underneath
+   *  so a photo that 404s — a deleted object, a dead bucket — degrades to the
+   *  letter instead of a broken-image icon. */
+  function memberAvatar(name, status, size, avatarUrl) {
     const px = size || 44;
     const initial = (name || "?").trim().charAt(0).toUpperCase();
-    return `<span class="avatar avatar-${status}" style="width:${px}px;height:${px}px;font-size:${Math.round(
+    const inner = avatarUrl
+      ? `<img class="avatar-img" src="${escapeHtml(
+          avatarUrl
+        )}" alt="" onerror="this.remove()">${escapeHtml(initial)}`
+      : escapeHtml(initial);
+    return `<span class="avatar avatar-${status}${
+      avatarUrl ? " has-photo" : ""
+    }" style="width:${px}px;height:${px}px;font-size:${Math.round(
       px * 0.36
-    )}px" aria-hidden="true">${escapeHtml(initial)}</span>`;
+    )}px" aria-hidden="true">${inner}</span>`;
   }
 
   /** One member's standing, used for the avatar ring and the card's wording. */
@@ -3472,7 +3747,9 @@
       qrModalOpen ||
       confirmDialog ||
       contributePicker != null ||
-      whoAmIPickerOpen
+      whoAmIPickerOpen ||
+      profileModalOpen ||
+      photoSheetOpen
     );
   }
 
@@ -3480,6 +3757,9 @@
   function closeTopModal() {
     if (lightboxSrc) return closeLightbox();
     if (confirmDialog) return closeConfirm();
+    // Change Photo opens over Edit Profile, so it is the one on top.
+    if (photoSheetOpen) return closePhotoSheet();
+    if (profileModalOpen) return closeProfileModal();
     if (contributePicker != null) return closeContributePicker();
     if (whoAmIPickerOpen) return closeWhoAmIPicker();
     if (modalTarget) return closeModal();
@@ -4317,7 +4597,12 @@
 
           <!-- Claimant, what for, and how much — one row, as the mockup has it. -->
           <div class="claim-row">
-            ${memberAvatar(member ? member.name : "?", "pending", 40)}
+            ${memberAvatar(
+            member ? member.name : "?",
+            "pending",
+            40,
+            member && member.avatar_url
+          )}
             <span class="claim-body">
               <span class="claim-name">${member ? escapeHtml(member.name) : "—"}</span>
               <span class="claim-meta">${
@@ -4603,7 +4888,7 @@
             recipient
               ? `<p class="sheet-section-label">Recipient</p>
                  <div class="recipient-card">
-                   ${memberAvatar(recipient.name, "paid-out", 40)}
+                   ${memberAvatar(recipient.name, "paid-out", 40, recipient.avatar_url)}
                    <span class="recipient-body">
                      <span class="recipient-name">${escapeHtml(recipient.name)}</span>
                      <span class="recipient-meta">Payout order #${
@@ -4875,6 +5160,119 @@
           </div>
         </div>
       </div>`;
+    }
+
+    // ---- Edit Profile (EditProfile.dc.html) -----------------------------
+    // A bottom sheet: grabber, title with a round close chip, the avatar with
+    // a camera badge, then Display name over its hint, Save, Cancel.
+    if (profileModalOpen) {
+      const me = editableMember();
+      if (me) {
+        const shown = photoPreview || me.avatar_url || null;
+        const standing = memberStanding(
+          me.id,
+          C.completedCyclesCount(state.cycles),
+          getPayout(me.member_order).released
+        );
+        const problem = profileNameProblem();
+        html += `<div class="modal-overlay sheet" onclick="if(event.target===this) PowerFund.closeProfileModal()">
+          <div class="modal sheet-pay sheet-profile" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+            <div class="sheet-head">
+              <h3 id="dlg-title">Edit Profile</h3>
+              <button type="button" class="sheet-x" onclick="PowerFund.closeProfileModal()" aria-label="Close">${icon(
+                "close",
+                13
+              )}</button>
+            </div>
+            <div class="profile-avatar-wrap">
+              <button type="button" class="profile-avatar-btn" onclick="PowerFund.openPhotoSheet()" aria-label="Change photo">
+                ${memberAvatar(me.name, standing, 76, shown)}
+                <span class="profile-avatar-badge" aria-hidden="true">${icon("camera", 13)}</span>
+              </button>
+            </div>
+            ${
+              photoBlob
+                ? `<p class="profile-photo-pending">${icon(
+                    "check",
+                    13
+                  )}<span>New photo ready — it saves with your changes.</span></p>`
+                : ""
+            }
+            <label class="field-label" for="profile-name">Display name</label>
+            <input id="profile-name" class="text-input profile-name-input" type="text"
+                   value="${escapeHtml(profileNameValue)}" placeholder="Your name"
+                   oninput="PowerFund.setProfileName(this.value)">
+            <p class="profile-name-hint${problem ? " is-error" : ""}" id="profileNameHint">${escapeHtml(
+          problem || "Visible to the rest of the group. Must be unique."
+        )}</p>
+            ${
+              profileError
+                ? `<p class="pin-error" role="alert">${escapeHtml(profileError)}</p>`
+                : ""
+            }
+            <div class="modal-actions">
+              <button class="modal-btn-primary" id="profileSave" onclick="PowerFund.saveProfile()" ${
+                busy || problem ? "disabled" : ""
+              }>${busy ? "Saving…" : "Save Changes"}</button>
+              <button class="modal-btn-secondary" onclick="PowerFund.closeProfileModal()">Cancel</button>
+            </div>
+          </div>
+        </div>`;
+      }
+    }
+
+    // ---- Change Photo (ProfilePhotoSheet.dc.html) -----------------------
+    // Take Photo / Choose from Library as one grouped card, then a separately
+    // styled red Remove Photo so it is never mistaken for an upload option.
+    if (photoSheetOpen) {
+      const me = editableMember();
+      if (me) {
+        const shown = photoPreview || me.avatar_url || null;
+        const standing = memberStanding(
+          me.id,
+          C.completedCyclesCount(state.cycles),
+          getPayout(me.member_order).released
+        );
+        html += `<div class="modal-overlay sheet" onclick="if(event.target===this) PowerFund.closePhotoSheet()">
+          <div class="modal sheet-pay sheet-photo" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+            <div class="photo-head">
+              <span class="profile-avatar-static">
+                ${memberAvatar(me.name, standing, 72, shown)}
+                <span class="profile-avatar-badge" aria-hidden="true">${icon("camera", 12)}</span>
+              </span>
+              <h3 id="dlg-title">Change Photo</h3>
+              <p class="photo-sub">Visible to the rest of the group</p>
+            </div>
+            <div class="photo-options">
+              <label class="photo-row">
+                <span class="photo-row-icon accent">${icon("camera", 17)}</span>
+                <span class="photo-row-label">Take Photo</span>
+                <input type="file" accept="image/*" capture="user" onchange="PowerFund.onAvatarSelected(this)" hidden>
+              </label>
+              <label class="photo-row">
+                <span class="photo-row-icon teal">${icon("photos", 17)}</span>
+                <span class="photo-row-label">Choose from Library</span>
+                <input type="file" accept="image/*" onchange="PowerFund.onAvatarSelected(this)" hidden>
+              </label>
+            </div>
+            ${
+              // Offered only when there is something to remove — a stored photo
+              // or an unsaved crop. Otherwise it is a button that does nothing.
+              me.avatar_url || photoBlob
+                ? `<button type="button" class="photo-row photo-row-danger" onclick="PowerFund.removeAvatar()" ${
+                    busy ? "disabled" : ""
+                  }>
+                     <span class="photo-row-icon danger">${icon("trash", 17)}</span>
+                     <span class="photo-row-label">${
+                       me.avatar_url ? "Remove Photo" : "Discard this photo"
+                     }</span>
+                   </button>`
+                : ""
+            }
+            <button type="button" class="photo-cancel" onclick="PowerFund.closePhotoSheet()">Cancel</button>
+          </div>
+        </div>`;
+      }
     }
 
     if (editNamesModalOpen) {
@@ -5404,6 +5802,17 @@
     closeModal,
     signIn,
     signOut,
+    openProfileModal,
+    closeProfileModal,
+    saveProfile,
+    setProfileName: (v) => {
+      profileNameValue = v;
+      refreshProfileValidity();
+    },
+    openPhotoSheet,
+    closePhotoSheet,
+    onAvatarSelected,
+    removeAvatar,
     openContributePicker,
     closeContributePicker,
     openWhoAmIPicker,

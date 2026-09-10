@@ -17,6 +17,8 @@
 -- SAFE TO RE-RUN.
 -- ===========================================================================
 
+begin;
+
 -- 1) Columns back, values back. app_secrets is the source of truth right now,
 --    so copy from it rather than trusting anything left in app_settings.
 alter table app_settings add column if not exists treasurer_pin text;
@@ -55,6 +57,9 @@ drop function if exists pf_member_id();
 --    to gain by rushing. Uncomment only once app_settings is verified correct.
 --
 --   drop table if exists app_secrets;
+
+
+commit;
 
 -- VERIFY — both columns present again and populated:
 --

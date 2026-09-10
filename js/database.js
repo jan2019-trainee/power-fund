@@ -34,11 +34,53 @@ window.DB = (function () {
     { realtime: { params: { eventsPerSecond: 5 } } }
   );
 
+  /** A write that changed NOTHING, when it should have changed something.
+   *
+   *  After migration 011, RLS refuses an update by making the row invisible
+   *  rather than by raising — the response comes back `[]` with no error. A
+   *  caller that only checks `res.error` therefore reports success for a
+   *  write Postgres declined, which is worse than having no RLS at all: the
+   *  treasurer PIN is shared with the whole group, so somebody who is not the
+   *  flagged treasurer can unlock treasurer mode, tap Confirm, and be told it
+   *  worked while nothing happened.
+   *
+   *  Inserts that are refused DO raise (the `with check` violation), so this
+   *  is specifically about updates and upserts of existing rows. */
+  const REFUSED_TREASURER =
+    "the database refused it. Treasurer actions need the account the fund has " +
+    "on file as treasurer, not just the PIN.";
+  const REFUSED_OWN =
+    "the database refused it. You can only change your own profile, and only " +
+    "while signed in.";
+
+  function requireRows(res, whatFailed, why) {
+    const rows = res && res.data;
+    if (Array.isArray(rows) ? rows.length === 0 : rows == null) {
+      console.error(whatFailed + ": the database changed no rows (RLS refusal)");
+      throw new Error(whatFailed + " — " + (why || REFUSED_TREASURER));
+    }
+    return rows;
+  }
+
   /** Unwrap a Supabase response, turning errors into friendly exceptions. */
   function unwrap(res, whatFailed) {
     if (res.error) {
       console.error(whatFailed + ":", res.error);
       const msg = res.error.message || "";
+      // A .single() write that matched nothing. After migration 011 this is
+      // overwhelmingly an RLS refusal, not a missing row — and it must not be
+      // reported as a connection problem, which sends people to check their
+      // wifi over a permissions error.
+      if (
+        res.error.code === "PGRST116" ||
+        /multiple \(or no\) rows|0 rows|Cannot coerce the result/i.test(msg)
+      ) {
+        throw new Error(
+          whatFailed +
+            " — the database refused it. Treasurer actions need the account the " +
+            "fund has on file as treasurer, not just the PIN."
+        );
+      }
       if (/Failed to fetch|NetworkError|network/i.test(msg)) {
         throw new Error("Can't reach the database — check your internet connection.");
       }
@@ -95,10 +137,11 @@ window.DB = (function () {
   }
 
   async function updateMember(id, fields) {
-    return unwrap(
-      await client.from("members").update(fields).eq("id", id).select().single(),
-      "Couldn't update member"
-    );
+    const res = await client.from("members").update(fields).eq("id", id).select();
+    unwrap(res, "Couldn't update member");
+    // Reached both by a member editing their own profile and by the treasurer
+    // editing anyone, so the hint names the likelier of the two causes.
+    return requireRows(res, "Couldn't update member", REFUSED_OWN);
   }
 
   async function deleteMember(id) {
@@ -108,13 +151,13 @@ window.DB = (function () {
   /** updates: [{ id, member_order }, ...] — used by the reorder arrows. */
   async function updateMemberOrder(updates) {
     for (const u of updates) {
-      unwrap(
-        await client
-          .from("members")
-          .update({ member_order: u.member_order })
-          .eq("id", u.id),
-        "Couldn't change payout order"
-      );
+      const res = await client
+        .from("members")
+        .update({ member_order: u.member_order })
+        .eq("id", u.id)
+        .select();
+      unwrap(res, "Couldn't change payout order");
+      requireRows(res, "Couldn't change payout order");
     }
   }
 
@@ -167,14 +210,12 @@ window.DB = (function () {
       notes: notes != null ? notes : null,
       paid_at: status === 2 ? new Date().toISOString() : null,
     };
-    return unwrap(
-      await client
-        .from("contributions")
-        .upsert(row, { onConflict: "cycle_id,member_id" })
-        .select()
-        .single(),
-      "Couldn't save the contribution"
-    );
+    const res = await client
+      .from("contributions")
+      .upsert(row, { onConflict: "cycle_id,member_id" })
+      .select();
+    unwrap(res, "Couldn't save the contribution");
+    return requireRows(res, "Couldn't save the contribution");
   }
 
   /** Batch version of upsertContribution for "pay several cycles at once". */
@@ -188,20 +229,18 @@ window.DB = (function () {
       notes: r.notes != null ? r.notes : null,
       paid_at: r.status === 2 ? new Date().toISOString() : null,
     }));
-    return unwrap(
-      await client
-        .from("contributions")
-        .upsert(payload, { onConflict: "cycle_id,member_id" })
-        .select(),
-      "Couldn't save the contributions"
-    );
+    const res = await client
+      .from("contributions")
+      .upsert(payload, { onConflict: "cycle_id,member_id" })
+      .select();
+    unwrap(res, "Couldn't save the contributions");
+    return requireRows(res, "Couldn't save the contributions");
   }
 
   async function updateContribution(id, fields) {
-    return unwrap(
-      await client.from("contributions").update(fields).eq("id", id).select().single(),
-      "Couldn't update the contribution"
-    );
+    const res = await client.from("contributions").update(fields).eq("id", id).select();
+    unwrap(res, "Couldn't update the contribution");
+    return requireRows(res, "Couldn't update the contribution");
   }
 
   async function deleteContribution(memberId, cycleId) {
@@ -241,9 +280,15 @@ window.DB = (function () {
         rejection_note: note && note.trim() ? note.trim() : null,
         rejected_at: new Date().toISOString(),
       })
-      .in("id", ids);
+      .in("id", ids)
+      .select();
 
-    if (!res.error) return true;
+    // .select() above is what makes a silent RLS refusal detectable: without
+    // it res.data is always null and there is nothing to count.
+    if (!res.error) {
+      requireRows(res, "Couldn't reject the claim");
+      return true;
+    }
 
     // Un-migrated database: either the columns are absent, or the older
     // status check — which only allows 0/1/2 — refuses the value 3.
@@ -561,17 +606,12 @@ window.DB = (function () {
   }
 
   async function updatePayout(roundNumber, fields) {
-    return unwrap(
-      await client
-        .from("payouts")
-        .upsert(
-          { round_number: roundNumber, ...fields },
-          { onConflict: "round_number" }
-        )
-        .select()
-        .single(),
-      "Couldn't update the payout"
-    );
+    const res = await client
+      .from("payouts")
+      .upsert({ round_number: roundNumber, ...fields }, { onConflict: "round_number" })
+      .select();
+    unwrap(res, "Couldn't update the payout");
+    return requireRows(res, "Couldn't update the payout");
   }
 
   /**
@@ -584,15 +624,23 @@ window.DB = (function () {
    * error is turned into a clear "run migration 002" message by unwrap().
    */
   async function startRound(roundNumber) {
-    return unwrap(
-      await client
-        .from("payouts")
-        .update({ started_at: new Date().toISOString() })
-        .eq("round_number", roundNumber)
-        .is("started_at", null)
-        .select(),
-      "Couldn't start the next round"
-    );
+    const res = await client
+      .from("payouts")
+      .update({ started_at: new Date().toISOString() })
+      .eq("round_number", roundNumber)
+      .is("started_at", null)
+      .select();
+    unwrap(res, "Couldn't start the next round");
+    // The `is("started_at", null)` guard means zero rows has two honest
+    // causes: another device started this round first, or RLS refused it.
+    if (!res.data || res.data.length === 0) {
+      throw new Error(
+        `Round ${roundNumber} was not started — it may already have been ` +
+          "started on another device, or the database refused it because your " +
+          "account is not the fund's treasurer."
+      );
+    }
+    return res.data;
   }
 
   // ===================================================================

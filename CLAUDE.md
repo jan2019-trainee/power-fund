@@ -439,9 +439,23 @@ finally gave `members.avatar_url` (reserved back in 006) somewhere to point ·
 claim RPC and the members guard trigger. **Changes no table policy, so it
 cannot lock anyone out.** Ships with `010_rollback.sql`.
 
-**`011` — the RLS rewrite — is NOT WRITTEN YET and must not be applied until
-all five members have an email AND have signed in once.** Its policies key off
-`members.auth_user_id`, so an unlinked member is denied everything.
+**`011` is written and validated but NOT APPLIED.** Three files:
+`011_preflight.sql` (read-only readiness report, run it first),
+`011_rls_lockdown.sql` (the policies), `011_rollback.sql`. The lockdown calls
+the readiness check and **refuses to run** while any member lacks an email, a
+treasurer is not flagged, or anybody has not signed in once — its policies key
+off `members.auth_user_id`, so an unlinked member is denied everything.
+Overridable with `select set_config('pf.allow_unready','yes',false);` but
+don't.
+
+**011 and `AUTH_MODE = "required"` must ship together.** 011 revokes `anon`
+entirely, so the migration without the deploy shows every member a load error,
+and the deploy without the migration is a gate in front of nothing.
+
+Every migration from 010 on is wrapped in `begin; … commit;`. Not decoration:
+without it a `raise` in 011's preflight aborted one statement and psql
+cheerfully ran the rest, dropping `open_all` and locking the fund out — the
+exact outcome the check exists to prevent.
 
 ## Member accounts (in progress)
 
@@ -537,11 +551,45 @@ now recognises a claim explicitly, with every other column pinned so the
 exemption cannot smuggle anything else through. No smoke test could have found
 this; the harness mocks the network.
 
+## What 011 enforces, and what it cost to get right
+
+Reads stay open to any signed-in member — this fund is transparent by design.
+Writes: own row only on `members` (010's trigger does the columns); own
+contributions only, and **only into status 0/1 with a proof for 1 — status 2
+is treasurer-only**, because confirming money is the treasurer's act;
+`cycles`/`payouts`/`app_settings` treasurer-only; `activity_log` append-only
+with **no update policy for anyone, treasurer included**; avatars scoped to
+`<memberId>/` folders; the payment QR treasurer-only.
+
+Validated on a real PostgreSQL 16 cluster with `auth.uid()` and
+`storage.foldername()` stubbed to Supabase's definitions, exercising each rule
+as an ordinary member and as the treasurer. Three real bugs came out of it:
+
+- **The rollback did not roll back.** `%L` quotes a policy name as a string
+  literal where Postgres wants an identifier (`%I`), so the storage section was
+  a syntax error. A rollback that doesn't run is worse than none.
+- **A rollback→reapply cycle left the lockdown undone for one bucket.** The
+  rollback derived policy names from bucket ids, producing `payment_proofs_*`,
+  but `schema.sql` calls those `proofs_*` — so 011 didn't know to drop them and
+  `anon` kept insert/update/delete on payment-proofs. The rollback now uses an
+  explicit mapping and 011 drops both spellings.
+- **`.single()` does not detect a refusal.** It returned `[]` with no error, so
+  `upsertContribution` reported success for a write Postgres declined.
+
+That last one matters more than it sounds. **RLS refuses an update by making
+the row invisible, not by raising** — the reply is `[]` with no error. And the
+treasurer PIN is shared with the whole group, so a member who is not the
+flagged treasurer can unlock treasurer mode, tap Confirm, and be told it
+worked. `requireRows()` in `js/database.js` now guards all eight money writes
+and says which account is actually needed. `unwrap()` also maps PGRST116 to
+that message instead of "check your internet connection", which sent people
+after their wifi over a permissions error.
+
 Two things to keep in view:
 
-- **A login proves identity but does not yet restrict writes.** RLS is still
-  `using (true)` on every table. The PINs are no longer exposed, but the
-  write-side payoff arrives with 011.
+- **Until 011 is applied, a login proves identity but does not restrict
+  writes.** RLS is still `using (true)` on every table. The PINs are no longer
+  exposed, but the write-side payoff arrives with 011.
 - **The sign-in screen has no approved mockup.** It borrows
   `OnboardingWelcome.dc.html`'s composition. Flagged for UI/UX QA as new
   design, not as a port. The account dead-ends (`unknown` / `taken` /

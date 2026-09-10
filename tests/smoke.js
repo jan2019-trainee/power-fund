@@ -1889,6 +1889,57 @@ async function accountLinking(browser, errors) {
   await soft.close();
 }
 
+/** A write that RLS refuses silently must not be reported as success.
+ *
+ *  Migration 011 refuses an update by making the row invisible, so the reply
+ *  is `[]` with NO error. The treasurer PIN is shared with the whole group, so
+ *  a member who is not the flagged treasurer can unlock treasurer mode and tap
+ *  Confirm — and without requireRows() the UI would tell them it worked. */
+async function silentRefusal(browser, errors) {
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`refusal: ${e}`));
+  await serve(page, { ...M.TABLE_DATA, app_settings: { ...M.SETTINGS, treasurer_pin: "1234" } });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1500);
+  await unlockTreasurer(page);
+  await page.waitForTimeout(300);
+
+  // From here on, every write comes back 200 [] — exactly what a post-011
+  // policy refusal looks like over the wire.
+  await page.route("**/rest/v1/contributions**", (r) =>
+    r.request().method() === "GET"
+      ? r.continue()
+      : r.fulfill({ status: 200, contentType: "application/json", body: "[]" })
+  );
+
+  await page.locator(".tab-item", { hasText: "Rounds" }).click();
+  await page.waitForTimeout(400);
+  const unpaid = ".member-chip.editable:not(.paid):not(.pending):not(.rejected)";
+  const rounds = await page.locator(".round").count();
+  for (let i = 0; i < rounds; i++) {
+    await page.locator(".round").nth(i).click();
+    await page.waitForTimeout(250);
+    if ((await page.locator(unpaid).count()) > 0) break;
+  }
+  await page.locator(unpaid).first().click();
+  await page.waitForTimeout(300);
+  await page.locator(".mark-paid-panel button", { hasText: "Record as paid" }).click();
+  await page.waitForTimeout(1200);
+
+  const banner = page.locator(".save-error-banner");
+  check("refusal/a refused write surfaces an error", (await banner.count()) === 1);
+  check(
+    "refusal/and says the treasurer account is what is missing",
+    /refused it|treasurer/i.test(await banner.innerText()),
+    (await banner.innerText().catch(() => "")).slice(0, 90)
+  );
+  check(
+    "refusal/it is NOT reported as a success",
+    (await page.locator(".toast .toast-text").count()) === 0
+  );
+  await page.close();
+}
+
 /** The PIN vault (migration 010).
  *
  *  Every other test in this file runs the PRE-010 world, because the fixtures
@@ -2482,6 +2533,8 @@ async function bootFailure(browser) {
   await memberAccounts(browser, errors);
   console.log("\nAccount linking");
   await accountLinking(browser, errors);
+  console.log("\nSilent refusal");
+  await silentRefusal(browser, errors);
   console.log("\nPIN vault");
   await pinVault(browser, errors);
   console.log("\nProfile editing");

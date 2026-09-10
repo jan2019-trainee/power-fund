@@ -50,6 +50,8 @@
 -- ROLLBACK: supabase/migrations/010_rollback.sql
 -- ===========================================================================
 
+begin;
+
 -- ---------------------------------------------------------------------------
 -- 1) The PIN vault
 -- ---------------------------------------------------------------------------
@@ -334,6 +336,9 @@ grant execute on function pf_claim_member()         to authenticated;
 grant execute on function pf_pin_status()           to anon, authenticated;
 grant execute on function pf_check_pin(text, text)  to anon, authenticated;
 grant execute on function pf_set_pin(text, text)    to anon, authenticated;
+
+
+commit;
 
 -- VERIFY
 --

@@ -9,9 +9,21 @@
  *   member       { id, name, member_order }
  *   cycle        { id, cycle_number, due_date }   due_date is "YYYY-MM-DD"
  *   contribution { id, member_id, cycle_id, cycle_number, amount, status,
- *                  proof_url, notes, paid_at }
+ *                  proof_url, notes, paid_at,
+ *                  rejection_note, rejected_at }   -- needs migration 006
  *
- * Payment status:  0 = unpaid   1 = pending review   2 = confirmed paid
+ * Payment status:
+ *   0 = unpaid          nothing submitted
+ *   1 = pending review  submitted, awaiting the treasurer (carries a proof)
+ *   2 = confirmed paid  the ONLY status that counts as money
+ *   3 = rejected        submitted and refused (carries a proof + a reason)
+ *
+ * Status 3 needs migration 006. Before it is run no row can hold that value,
+ * so every rule below simply never fires — the app behaves exactly as it did.
+ *
+ * Status 3 is NOT money. It counts as nothing collected, exactly like status 0,
+ * and a rejected cycle stays OVERDUE: refusing a claim must never quietly
+ * excuse the member from paying it.
  * ------------------------------------------------------------------------- */
 
 window.Calc = (function () {
@@ -28,6 +40,18 @@ window.Calc = (function () {
   const STATUS_UNPAID = 0;
   const STATUS_PENDING = 1;
   const STATUS_PAID = 2;
+  const STATUS_REJECTED = 3; // needs migration 006
+
+  /**
+   * Does this status mean the member still owes the cycle?
+   *
+   * Unpaid and rejected both do. Keeping the two together in one predicate is
+   * the point: a rejected claim is money that never arrived, so anything that
+   * chases what is still owed has to treat it the same as never having paid.
+   */
+  function isOwed(status) {
+    return status === STATUS_UNPAID || status === STATUS_REJECTED;
+  }
 
   // ---- Formatting -------------------------------------------------------
   const _pesoFmt = new Intl.NumberFormat("en-PH", {
@@ -86,7 +110,7 @@ window.Calc = (function () {
     );
   }
 
-  /** Payment status (0/1/2) for a member + cycle_number. Missing row = unpaid. */
+  /** Payment status (0/1/2/3) for a member + cycle_number. Missing row = unpaid. */
   function statusOf(contributions, memberId, cycleNumber) {
     const row = contributionFor(contributions, memberId, cycleNumber);
     return row ? row.status : STATUS_UNPAID;
@@ -185,6 +209,40 @@ window.Calc = (function () {
       return String(a.memberId) < String(b.memberId) ? -1 : 1;
     });
     return batches;
+  }
+
+  /**
+   * The member's most recent rejection, or null.
+   *
+   * A rejection covers the whole advance batch it was reviewed as, so the
+   * cycles are grouped the way pendingRun() grouped them on the way in: same
+   * screenshot, same rejection timestamp. Only the latest batch is returned —
+   * that is the one the member has to act on, and showing older refusals
+   * alongside it would just be noise once they have resubmitted.
+   *
+   * Returns { cycles, note, rejectedAt, proofUrl, amount }.
+   */
+  function latestRejection(contributions, memberId) {
+    const rows = (contributions || []).filter(
+      (c) => c.member_id === memberId && c.status === STATUS_REJECTED
+    );
+    if (!rows.length) return null;
+
+    // Newest first, so the first key we meet is the batch to report.
+    rows.sort((a, b) => String(b.rejected_at || "").localeCompare(String(a.rejected_at || "")));
+    const head = rows[0];
+    const key = (r) => (r.rejected_at || "") + "|" + (r.proof_url || "");
+    const batch = rows
+      .filter((r) => key(r) === key(head))
+      .sort((a, b) => a.cycle_number - b.cycle_number);
+
+    return {
+      cycles: batch.map((r) => r.cycle_number),
+      note: head.rejection_note || null,
+      rejectedAt: head.rejected_at || null,
+      proofUrl: head.proof_url || null,
+      amount: batch.reduce((sum, r) => sum + (Number(r.amount) || 0), 0),
+    };
   }
 
   // ---- Totals --------------------------------------------------------
@@ -418,10 +476,9 @@ window.Calc = (function () {
     const ref = startOfDay(today || new Date());
     const due = dueDateOf(cycles, cycleNumber);
     if (!due) return false;
-    return (
-      statusOf(contributions, memberId, cycleNumber) === STATUS_UNPAID &&
-      due < ref
-    );
+    // Rejected counts as overdue too — see isOwed(). A refused claim leaves
+    // the cycle unpaid, so the due date still bites.
+    return isOwed(statusOf(contributions, memberId, cycleNumber)) && due < ref;
   }
 
   function memberOverdueCount(contributions, cycles, memberId, today) {
@@ -437,6 +494,85 @@ window.Calc = (function () {
       (sum, m) => sum + memberOverdueCount(contributions, cycles, m.id, today),
       0
     );
+  }
+
+  /**
+   * How reliably one member pays on time, as { onTime, counted, rate }.
+   *
+   * Only CONFIRMED contributions are counted, and only those carrying a
+   * paid_at — a row recorded before that column existed can't be judged, and
+   * guessing would quietly punish members for a schema change. A payment
+   * counts as on time when it was paid on or before its cycle's due date.
+   * `rate` is null when nothing is countable yet, so callers can say "no data"
+   * instead of showing a misleading 0%.
+   */
+  function onTimeStats(contributions, cycles, memberId) {
+    let onTime = 0;
+    let counted = 0;
+    for (let c = 1; c <= TOTAL_CYCLES; c++) {
+      const row = contributionFor(contributions, memberId, c);
+      if (!row || row.status !== STATUS_PAID || !row.paid_at) continue;
+      const due = dueDateOf(cycles, c);
+      if (!due) continue;
+      counted++;
+      if (startOfDay(new Date(row.paid_at)) <= startOfDay(due)) onTime++;
+    }
+    return { onTime, counted, rate: counted ? (onTime / counted) * 100 : null };
+  }
+
+  /**
+   * Fund-wide on-time rate for one round, so two rounds can be compared.
+   * Same rule as onTimeStats(): a confirmed payment carrying a date, measured
+   * against its cycle's due date. Rounds nobody has paid into return null
+   * rather than 0% — no data is not the same as bad.
+   */
+  function onTimeRateForRound(contributions, cycles, round) {
+    const { startCycle, endCycle } = roundCycleRange(round);
+    let onTime = 0;
+    let counted = 0;
+    for (const c of contributions || []) {
+      if (c.status !== STATUS_PAID || !c.paid_at) continue;
+      if (c.cycle_number < startCycle || c.cycle_number > endCycle) continue;
+      const due = dueDateOf(cycles, c.cycle_number);
+      if (!due) continue;
+      counted++;
+      if (startOfDay(new Date(c.paid_at)) <= startOfDay(due)) onTime++;
+    }
+    return { onTime, counted, rate: counted ? (onTime / counted) * 100 : null };
+  }
+
+  /**
+   * Where each member stands in one round — the state of the earliest cycle of
+   * that round they have not settled. Matches what the Members roster shows, so
+   * the two screens cannot disagree about who is behind.
+   *
+   * Returns counts plus the member ids behind each, so a caller can name them
+   * rather than only counting them.
+   */
+  function roundMemberStates(contributions, cycles, members, round) {
+    const { startCycle, endCycle } = roundCycleRange(round);
+    const out = {
+      paid: [], pending: [], rejected: [], overdue: [], notDue: [],
+    };
+    for (const m of members || []) {
+      let open = null;
+      for (let c = startCycle; c <= endCycle; c++) {
+        if (statusOf(contributions, m.id, c) !== STATUS_PAID) {
+          open = c;
+          break;
+        }
+      }
+      if (open === null) {
+        out.paid.push(m.id);
+        continue;
+      }
+      const st = statusOf(contributions, m.id, open);
+      if (st === STATUS_PENDING) out.pending.push(m.id);
+      else if (st === STATUS_REJECTED) out.rejected.push(m.id);
+      else if (isOverdue(contributions, cycles, m.id, open)) out.overdue.push(m.id);
+      else out.notDue.push(m.id);
+    }
+    return out;
   }
 
   /**
@@ -490,7 +626,10 @@ window.Calc = (function () {
     const end = Math.min(maxCycle || TOTAL_CYCLES, TOTAL_CYCLES);
     let count = 0;
     for (let c = cycleNumber; c <= end; c++) {
-      if (statusOf(contributions, memberId, c) === STATUS_UNPAID) count++;
+      // Owed, not merely never-submitted: a rejected cycle is still unpaid, so
+      // it can start an advance run and be paid alongside the ones after it.
+      // Without this a resubmission would offer to pay zero cycles.
+      if (isOwed(statusOf(contributions, memberId, c))) count++;
       else break;
     }
     return count;
@@ -526,6 +665,8 @@ window.Calc = (function () {
     STATUS_UNPAID,
     STATUS_PENDING,
     STATUS_PAID,
+    STATUS_REJECTED,
+    isOwed,
 
     peso,
     startOfDay,
@@ -540,6 +681,7 @@ window.Calc = (function () {
     proofInUse,
     pendingRun,
     pendingBatches,
+    latestRejection,
 
     totalCollected,
     totalPerMember,
@@ -573,6 +715,9 @@ window.Calc = (function () {
     isOverdue,
     memberOverdueCount,
     totalOverdueCount,
+    onTimeStats,
+    onTimeRateForRound,
+    roundMemberStates,
     missedContributions,
 
     currentCycle,

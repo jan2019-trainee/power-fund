@@ -63,14 +63,14 @@ body {
   background: var(--bg-primary);
   color: var(--text-primary);
   font-family: 'Inter', sans-serif;
-  padding: 28px 16px 60px;
+  padding: 28px 16px 96px;
   min-height: 100vh;
 }
 
 .wrap { max-width: 760px; margin: 0 auto; }
 
 @media (max-width: 480px) {
-  body { padding: 20px 10px 48px; }
+  body { padding: 20px 10px 88px; }
   .battery-hero, .modal, .footer-note { padding-left: 16px; padding-right: 16px; }
   .round-body { padding-left: 10px; padding-right: 10px; }
   .title { font-size: 22px; }
@@ -81,9 +81,12 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 16px;
+  gap: 12px;
   margin-bottom: 16px;
-  flex-wrap: wrap;
+  /* No wrap: the mode pill belongs ON this row (see .unlock-btn). Allowed to
+     wrap, it dropped to its own full-width line on every mobile screen —
+     the layout the design does not have. The titles shrink instead. */
+  flex-wrap: nowrap;
 }
 
 /* ---- "My status" — personalized card for this device's remembered member ---- */
@@ -112,15 +115,48 @@ body {
   border-left: 3px solid var(--border);
   border-radius: 12px;
 }
+/* Icon tile · name + status word over a detail line · Change, all on one row,
+   as the mockup draws it. No wrap: the row was wrapping the "Change" link onto
+   its own line and stacking a long sentence, which made the state with nothing
+   to do the tallest card on the screen. */
 .my-status-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 11px;
+  flex-wrap: nowrap;
 }
-.my-status-text { font-size: 13.5px; color: var(--text-primary); line-height: 1.5; }
+.my-status-icon {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+}
+.my-status-icon .icon { display: block; }
+.my-status-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 13.5px;
+  color: var(--text-primary);
+  line-height: 1.35;
+}
+.my-status-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .my-status-text b { font-family: 'Space Grotesk', sans-serif; }
+.my-status-detail {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .my-status-change {
   flex-shrink: 0;
   background: none;
@@ -135,7 +171,10 @@ body {
 }
 .my-status-change:hover { color: var(--accent); }
 .my-status-cta {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   width: 100%;
   margin-top: 10px;
   padding: 11px 14px;
@@ -156,15 +195,57 @@ body {
 .my-status-due { border-left-color: var(--accent); }
 .my-status-overdue { border-left-color: var(--danger); }
 
-.save-error-banner {
-  margin-bottom: 16px;
-  padding: 10px 14px;
-  border-radius: 9px;
-  background: rgba(225,83,83,0.14);
-  border: 1px solid #E15353;
-  color: #E15353;
+/* The tile and the status word carry the same hue, so the state is legible
+   from the icon alone and confirmed by the word — never colour on its own. */
+.my-status-paid .my-status-icon,
+.my-status-done .my-status-icon { background: var(--success-soft); color: var(--success); }
+.my-status-pending .my-status-icon { background: var(--pending-review-soft); color: var(--pending-review); }
+.my-status-due .my-status-icon { background: var(--accent-soft); color: var(--accent); }
+.my-status-overdue .my-status-icon,
+.my-status-rejected .my-status-icon { background: var(--danger-soft); color: var(--danger); }
+.my-status-paid .my-status-line b,
+.my-status-done .my-status-line b { color: var(--success); }
+.my-status-pending .my-status-line b { color: var(--pending-review); }
+.my-status-due .my-status-line b { color: var(--accent); }
+.my-status-overdue .my-status-line b,
+.my-status-rejected .my-status-line b { color: var(--danger); }
+
+/* Paying ahead is optional, so it does not wear the primary treatment — the
+   card would otherwise shout at a member who owes nothing. */
+.my-status-cta.optional {
+  background: none;
+  box-shadow: none;
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-weight: 600;
   font-size: 12.5px;
-  text-align: center;
+  min-height: 40px;
+  padding: 9px 12px;
+}
+.my-status-cta.optional:hover {
+  filter: none;
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.my-status-rejected { border-left-color: var(--danger); }
+
+/* PINNED, and above the modal layer. This sat in normal document flow with no
+   z-index, so any error raised while a sheet was open — a failed release, a
+   rejected receipt, a member's oversized screenshot — was drawn BEHIND the
+   overlay (z-index 50, opaque) where nobody could read it, and the
+   scrollIntoView added for the last round could not help because the target
+   was occluded. On the two screens where real money moves, that is the same
+   silent-failure bug in a worse place. */
+.save-error-banner {
+  margin-bottom: 0;
+  padding: 11px 14px;
+  border-radius: 9px;
+  background: #2A1416;
+  border: 1px solid #E15353;
+  color: #F0A9A9;
+  font-size: 12.5px;
+  text-align: left;
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.7);
 }
 
 .save-warning-banner {
@@ -209,6 +290,7 @@ body {
   flex-wrap: wrap;
   gap: 4px 10px;
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .title {
@@ -216,30 +298,91 @@ body {
   font-size: 26px;
   font-weight: 700;
   margin: 0;
+  min-width: 0;
 }
+
+/* Above the 480px breakpoint the long form is the only one shown; the media
+   query below flips them. Declared HERE, before that query — after it, equal
+   specificity plus source order meant this won at every width and the short
+   subtitle never rendered at all. */
+.subtitle-short { display: none; }
 
 .subtitle {
   color: var(--text-muted);
   font-size: 14px;
   margin: 0;
+  min-width: 0;
 }
 
+/* The header repeats on every tab and never scrolls away, so its height is
+   paid on every screen. At 26px a real fund name ("ViTAMiN Fund 2027") wrapped
+   to two lines and the structural subtitle to two more — about 130px of an
+   844px viewport spent on chrome before any content. Below 480px the title
+   steps down, the subtitle is capped to one line, and neither is allowed to
+   wrap. The full subtitle stays in the DOM (title attribute + Menu's "How this
+   works"), so nothing is lost, only folded. */
+@media (max-width: 480px) {
+  .header { align-items: center; margin-bottom: 12px; }
+  /* Stacked, as the design draws it ("Power Fund" over "Group of 5 ·
+     Paluwagan") — not side by side. Sharing one row made the two compete and
+     truncated the fund's own name to "⚡ ViTAMi…". Two short lines still cost
+     far less than the 26px title + wrapping long subtitle this replaced. */
+  .header-titles {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: flex-start;
+    gap: 1px;
+  }
+  .title {
+    font-size: 20px;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+  /* The long subtitle gives up the row; the short one takes its place. Sharing
+     the row with the long form truncated BOTH — "⚡ ViTA…" beside "5-member
+     sinking fund · ₱1…" — which loses the fund's identity in order to describe
+     it. */
+  .subtitle-long { display: none; }
+  .subtitle-short {
+    display: block;
+    font-size: 11.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+  }
+}
+
+/* A PILL in the header row, not a button on its own line. The design carries
+   treasurer mode as a small header pill and the designer removed Menu's
+   "Unlock treasurer mode" row precisely because that pill already says it on
+   every screen — so a full-width control above every view's content both
+   contradicts the design and costs ~44px above the fold everywhere. Kept as
+   the unlock entry point (it is the only one), just sized as the status
+   indicator it is. */
 .unlock-btn {
   background: var(--bg-card);
   border: 1px solid var(--border);
-  color: var(--text-primary);
+  color: var(--text-muted);
   font-family: 'Inter', sans-serif;
-  font-size: 13px;
-  font-weight: 500;
-  padding: 9px 16px;
-  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 5px 11px;
+  border-radius: 999px;
   cursor: pointer;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 7px;
-  transition: border-color 0.15s ease;
+  gap: 5px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+  align-self: center;
+  transition: border-color 0.15s ease, color 0.15s ease;
 }
-.unlock-btn:hover { border-color: var(--accent); }
+.unlock-btn:hover { border-color: var(--accent); color: var(--accent); }
 .unlock-btn.unlocked { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 
 /* Battery hero */
@@ -258,12 +401,26 @@ body {
   flex-wrap: wrap;
   gap: 8px;
 }
+/* The collected figure and its "/ ₱30,000 goal" qualifier. The qualifier is
+   one phrase: it may drop to a second line as a unit, but it must never split
+   so that "goal" strands on its own — which is what happened at the funded
+   amount, where both figures are their widest. */
 .battery-amount {
   font-family: 'Space Grotesk', sans-serif;
   font-size: 30px;
   font-weight: 700;
+  line-height: 1.15;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 8px;
 }
-.battery-amount span { color: var(--text-muted); font-size: 17px; font-weight: 500; }
+.battery-amount span {
+  color: var(--text-muted);
+  font-size: 17px;
+  font-weight: 500;
+  white-space: nowrap;
+}
 .battery-meta { color: var(--text-muted); font-size: 13px; }
 
 .battery-shell {
@@ -438,8 +595,32 @@ body {
 }
 .cycle-row:last-child { border-bottom: none; }
 .cycle-row.current-row { background: var(--accent-soft); border-radius: 8px; border-bottom-color: transparent; }
-.cycle-date { font-size: 12px; color: var(--text-muted); }
-.cycle-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.cycle-date { font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+/* The date leads; the cycle number is a small reference tag beside it, per the
+   design's rounds-notes annotation. It matters because the rejection card and
+   the activity log both cite cycles by number ("Your proof for Cycle 7"), and
+   without this there was nowhere in the UI to find Cycle 7. */
+.cycle-ref {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  opacity: 0.75;
+}
+/* One column per member, so a five-person fund reads as one row instead of
+   wrapping 4 + 1 and orphaning whoever is last. minmax(0,1fr) lets the cells
+   shrink below their content width; the chip itself ellipsises. */
+.cycle-chips {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 6px;
+}
+/* A <button> since these drive every per-cycle money action, so the UA's own
+   font and appearance have to be reset back to the pill this always looked
+   like. */
 .member-chip {
   display: inline-flex;
   align-items: center;
@@ -447,16 +628,36 @@ body {
   padding: 5px 9px;
   border-radius: 20px;
   border: 1.5px solid var(--border);
+  font-family: 'Inter', sans-serif;
   font-size: 11.5px;
   font-weight: 500;
+  line-height: 1.4;
   color: var(--text-muted);
   background: transparent;
   white-space: nowrap;
+  appearance: none;
+  text-align: center;
+  justify-content: center;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
 }
+/* Not actionable for this viewer: still readable, just not a control. */
+.member-chip:disabled { cursor: default; opacity: 1; }
+.member-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .member-chip.editable { cursor: pointer; }
 .member-chip.paid { background: var(--success-soft); border-color: var(--success); color: var(--success); }
 .member-chip.pending { background: rgba(245,166,35,0.16); border-color: var(--accent); color: var(--accent); }
 .member-chip.overdue { border-color: #E15353; color: #E15353; background: rgba(225,83,83,0.1); }
+/* Rejected: same danger hue as overdue, but struck through so the two read
+   apart at a glance — one was never sent, the other was sent and refused. */
+.member-chip.rejected {
+  border-color: #E15353;
+  color: #E15353;
+  background: rgba(225, 83, 83, 0.1);
+  border-style: dashed;
+}
 
 /* Treasurer mode makes every paid/pending chip clickable (revert / review),
    not just unpaid ones — a dashed border marks those as also being buttons,
@@ -526,6 +727,17 @@ body {
 .activity-time { color: var(--text-muted); font-size: 11px; }
 .activity-text { color: var(--text-primary); }
 .activity-empty { color: var(--text-muted); font-size: 13px; text-align: center; padding: 12px 0; }
+.activity-chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 10px; align-items: center; }
+.activity-chip {
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--bg-card);
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.activity-chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 
 .how-it-works-list {
   margin: 8px 0 0;
@@ -549,13 +761,18 @@ body {
 .reset-btn:hover { border-color: #E15353; color: #E15353; }
 
 /* Destructive actions sit apart from the utility row */
+/* Its own bordered block, not a slim row tucked under the Security group —
+   the design keeps destructive actions visibly separated so they are never an
+   accidental tap away from an everyday one. */
 .danger-zone {
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px dashed var(--border);
+  margin-top: 22px;
+  padding: 14px 16px;
+  border: 1px solid var(--danger);
+  border-radius: 12px;
+  background: rgba(225, 83, 83, 0.05);
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 10px;
   flex-wrap: wrap;
 }
@@ -640,6 +857,63 @@ body {
   z-index: 50;
   padding: 20px;
 }
+@media (min-width: 900px) {
+  /* The desktop artboards draw the page behind a modal dimmed AND softened
+     (opacity .35 + blur 1.5px). Mobile keeps the plain scrim: the sheet covers
+     most of the screen anyway, and blurring a full viewport costs more on a
+     phone than it buys. */
+  .modal-overlay {
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+  }
+}
+/* ---- Bottom sheets (mobile) ----------------------------------------------
+   Contribute, Review Payment and Release Payout are drawn as bottom sheets in
+   the design — the annotation asks for the GCash/Cash App shape, where the
+   actions sit near the thumb rather than mid-screen. Only these three: the
+   rest of the app's dialogs are centered in the design too, and the desktop
+   artboards specify centered modals for all of them, so this is scoped to
+   narrow viewports. */
+@media (max-width: 640px) {
+  .modal-overlay.sheet {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .modal-overlay.sheet .modal {
+    max-width: 100%;
+    border-radius: 18px 18px 0 0;
+    border-bottom: none;
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+    max-height: 92vh;
+    animation: pfSheetUp 0.24s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  /* Scrolling to the end of a sheet used to chain into the page behind it, so
+     the sheet stayed put while the app scrolled underneath — see the -btm QA
+     captures. Contain it here; the overlay itself never scrolls. */
+  .modal-overlay.sheet { overscroll-behavior: contain; }
+  .modal-overlay.sheet .modal { overscroll-behavior: contain; }
+  /* A visual grab handle: it marks the top edge of the sheet. It is NOT a drag
+     affordance — nothing here listens for a drag, and advertising a gesture
+     that does nothing is worse than not advertising one, so it is deliberately
+     small and static rather than looking draggable. */
+  .modal-overlay.sheet .modal::before {
+    content: "";
+    display: block;
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border);
+    margin: -8px auto 14px;
+  }
+}
+@keyframes pfSheetUp {
+  from { transform: translateY(14px); opacity: 0.6; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .modal-overlay.sheet .modal { animation: none; }
+}
+
 .modal {
   background: var(--bg-card);
   border: 1px solid var(--border);
@@ -760,6 +1034,26 @@ body {
   border-radius: 9px;
   cursor: pointer;
 }
+/* Nothing styled a disabled primary button, so every gated action in the app —
+   "I've sent this" before a screenshot is attached, Release before a receipt —
+   looked fully clickable and simply did nothing when tapped. */
+/* Confirming someone else's payment is a TREASURER action and is green, kept
+   deliberately distinct from the amber "pay" colour the member side uses, so
+   the two roles never look interchangeable (design: review-notes annotation).
+   The queue card that leads here is the same green-free, accent-outlined
+   Review button — the colours only diverge once real money is being approved. */
+.modal-btn-confirm {
+  background: var(--success);
+  color: #08130E;
+}
+.modal-btn-primary:disabled,
+.modal-btn-secondary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  filter: grayscale(0.35);
+}
+.modal-btn-primary:not(:disabled):hover { filter: brightness(1.06); }
+
 .modal-btn-secondary {
   background: none;
   border: 1px solid var(--border);
@@ -791,6 +1085,16 @@ body {
   min-height: 40px;
 }
 .proof-upload:hover { border-color: var(--accent); }
+/* The camera path, offered beside the file picker rather than instead of it —
+   a phone can shoot the receipt on the spot, a desktop has nothing to shoot
+   with and still needs the file chooser above. */
+.proof-upload-camera {
+  margin-top: -8px;
+  background: transparent;
+  min-height: 34px;
+  padding: 9px 12px;
+  font-size: 12.5px;
+}
 .proof-upload-label { font-size: 12.5px; color: var(--text-muted); }
 .proof-preview { max-width: 100%; max-height: 140px; border-radius: 6px; }
 
@@ -818,8 +1122,180 @@ body {
   text-align: left;
   margin-bottom: 10px;
 }
+.name-input.invalid {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
 .edit-names-modal { text-align: left; }
 .edit-names-modal h3, .edit-names-modal .modal-sub { text-align: center; }
+
+/* --- Member sign-in (treasurer) ------------------------------------------
+   One block per member: who they are and where their login stands on the top
+   row, the address they are matched by underneath. The status has to be legible
+   at a glance because the treasurer's actual question is "who is still
+   missing?", and the answer is the whole reason for the panel. */
+.member-accounts-modal { text-align: left; }
+.member-accounts-modal h3,
+.member-accounts-modal .modal-sub { text-align: center; }
+.member-accounts-modal .modal-sub { margin-bottom: 14px; }
+
+.acct-row {
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 10px 10px 2px;
+  margin-bottom: 9px;
+}
+.acct-row-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 8px;
+}
+.acct-row-who { flex: 1; min-width: 0; }
+.acct-row-name {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.acct-tag {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 1px 6px;
+  border-radius: 20px;
+  vertical-align: 1px;
+}
+.acct-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-top: 2px;
+}
+.acct-pill.ok   { color: var(--success); }
+.acct-pill.wait { color: var(--pending-review); }
+.acct-pill.none { color: var(--text-muted); font-weight: 500; }
+.acct-unlink {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-family: 'Inter', sans-serif;
+  font-size: 11.5px;
+  padding: 5px 10px;
+  cursor: pointer;
+}
+.acct-unlink:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); }
+.acct-unlink:disabled { opacity: 0.5; cursor: default; }
+
+/* The address field: left-aligned, normal tracking — .pin-input's centred
+   4px letter-spacing is right for digits and unreadable for an email. */
+.member-accounts-modal .email-input {
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  letter-spacing: normal;
+  text-align: left;
+  padding: 10px;
+  margin-bottom: 8px;
+  background: var(--bg-card);
+}
+.member-accounts-modal .email-input.invalid {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.acct-ready {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 12px 0 10px;
+  text-align: center;
+}
+.acct-ready.ok {
+  color: var(--success);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  text-align: left;
+}
+
+/* --- Transfer treasurer role --------------------------------------------
+   A pick list, not a form: one row per member who could actually hold the
+   role, with the current holder stated above it so the direction of the
+   transfer is never ambiguous. */
+.transfer-role-modal { text-align: left; }
+.transfer-role-modal h3,
+.transfer-role-modal .modal-sub { text-align: center; }
+.transfer-role-modal .modal-sub { margin-bottom: 12px; }
+
+.transfer-current {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 9px;
+  padding: 8px 10px;
+  margin: 0 0 12px;
+}
+
+.transfer-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 9px 11px;
+  margin-bottom: 8px;
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  font-size: 13.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.transfer-row:hover { border-color: rgba(255,255,255,0.18); }
+.transfer-row.picked {
+  border-color: var(--success);
+  background: var(--success-soft);
+}
+.transfer-row-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.transfer-row-mark {
+  flex-shrink: 0;
+  display: flex;
+  color: var(--success);
+}
+
+.transfer-empty,
+.transfer-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.55;
+  margin: 0 0 12px;
+}
+.transfer-empty {
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 11px;
+}
 
 .payout-done-tag {
   font-size: 11px;
@@ -843,7 +1319,19 @@ body {
   gap: 8px;
   flex-wrap: wrap;
 }
-.payout-btn { margin-top: 12px; }
+/* Releasing a funded payout is the screen's primary action; starting the next
+   round is a secondary one that can wait. Both used the same outlined
+   .contribute-btn, so they read as equal choices — the design makes Release
+   the lead and "Start Round N while this is pending" the quieter line. */
+.payout-btn {
+  margin-top: 12px;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #14213D;
+  font-size: 13.5px;
+  padding: 11px 12px;
+}
+.payout-btn:hover { filter: brightness(1.06); }
 .payout-field-label {
   display: block;
   text-align: left;
@@ -851,12 +1339,6 @@ body {
   font-weight: 600;
   color: var(--text-muted);
   margin: 4px 0 6px;
-}
-.payout-amount-input {
-  letter-spacing: normal;
-  font-size: 16px;
-  text-align: left;
-  margin-bottom: 4px;
 }
 .payout-field-hint {
   text-align: left;
@@ -914,6 +1396,9 @@ body {
 }
 .payout-note-input:focus { border-color: var(--accent); }
 
+/* The icon and the label were two inline children of a plain block button, so
+   the SVG sat on the text baseline at the far left while the text centred
+   itself — they never lined up. Flex centres them as one unit. */
 .share-btn {
   margin-top: 14px;
   width: 100%;
@@ -923,10 +1408,16 @@ body {
   font-family: 'Inter', sans-serif;
   font-size: 13px;
   font-weight: 600;
-  padding: 10px;
+  padding: 11px 12px;
   border-radius: 8px;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
 }
+.share-btn .icon { flex-shrink: 0; }
 .share-btn:hover { border-color: var(--accent); color: var(--accent); }
 
 .share-text-area {
@@ -988,11 +1479,15 @@ body {
 }
 .zoom-link:hover { background: rgba(245,166,35,0.24); }
 
+/* Guidance, not a warning. The section label already carries the "required"
+   flag, so accent-colouring this too made a plain instruction read as an
+   error before anything had gone wrong. */
 .proof-required-hint {
   font-size: 11.5px;
-  color: var(--accent);
-  text-align: center;
-  margin: -8px 0 16px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  text-align: left;
+  margin: 8px 0 16px;
 }
 
 /* ---- Zoom lightbox ---- */
@@ -1008,25 +1503,49 @@ body {
   z-index: 100;
   padding: 20px;
 }
+/* The image is matted on white with generous rounding — a payment QR or a
+   receipt screenshot reads far better against paper than against the app's
+   near-black, and the mockup shows exactly that. */
+.lightbox-frame {
+  background: #fff;
+  border-radius: 20px;
+  padding: 16px;
+  max-width: 100%;
+  max-height: 74vh;
+  /* A small or still-loading image must not collapse the mat to a dot, which
+     also let the Close pill ride up over it. */
+  min-width: 180px;
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.8);
+}
 .lightbox-img {
   max-width: 100%;
-  max-height: 78vh;
+  max-height: calc(74vh - 32px);
   object-fit: contain;
-  border-radius: 8px;
-  background: #fff;
+  border-radius: 6px;
+  display: block;
 }
+/* A pill below the image, as the mockup draws it. */
 .lightbox-close {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   color: var(--text-primary);
   font-family: 'Inter', sans-serif;
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
-  padding: 10px 22px;
-  border-radius: 8px;
+  padding: 10px 20px;
+  border-radius: 999px;
   cursor: pointer;
+  min-height: 44px;
 }
-.lightbox-close:hover { border-color: var(--accent); color: var(--accent); }
+.lightbox-close .icon { display: block; flex: 0 0 auto; }
+.lightbox-close:hover { background: rgba(255, 255, 255, 0.14); }
 
 /* ---- Round lifecycle: status pills, previous-round card, start-next-round ---- */
 .round-state {
@@ -1120,11 +1639,16 @@ body {
 /* ==========================================================================
    Overall fund balance card (M5) — whole-fund total, above the round hero
    ========================================================================== */
+/* A strip, not a card. The round hero below is the screen's one primary
+   progress indicator (the design has no second one); this carries the
+   lifetime figure without competing for that job — no card chrome, smaller
+   numerals, scope stated in the label. */
 .fund-total {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px 18px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  padding: 0 2px 12px;
   margin-bottom: 14px;
 }
 .fund-total-label {
@@ -1136,13 +1660,15 @@ body {
   color: var(--text-muted);
   margin: 0 0 6px;
 }
+/* Deliberately smaller than the hero's round figure — this is context, the
+   hero is the headline. */
 .fund-total-amount {
   font-family: 'Space Grotesk', sans-serif;
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--text-primary);
 }
-.fund-total-amount span { color: var(--text-muted); font-size: 14px; font-weight: 500; }
+.fund-total-amount span { color: var(--text-muted); font-size: 13px; font-weight: 500; }
 .fund-total-bar {
   height: 6px;
   border-radius: 4px;
@@ -1197,6 +1723,24 @@ body {
   line-height: 1.5;
 }
 .attention-group .contribute-btn { margin-top: 0; }
+/* Count badge on the collapsed summary line — the panel's job is to say HOW
+   MANY are waiting, not to list them (see the queue-list note in home.js). */
+.attention-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #14213D;
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1;
+}
+/* Collapsed: the list is empty, so it must not add its own gap. */
+.queue-list:empty { display: none; }
 
 .queue-list { display: flex; flex-direction: column; gap: 8px; }
 .queue-card {
@@ -1260,24 +1804,24 @@ body {
   font-weight: 600;
   cursor: pointer;
 }
+/* Review is the queue card's ONLY action. Confirming a payment happens inside
+   the review sheet, after the screenshot has actually been shown — see the
+   design's review-notes annotation. A confirm button here would approve money
+   without the proof ever being looked at. */
 .queue-btn-review {
   background: var(--bg-card);
-  border: 1px solid var(--border);
-  color: var(--text-primary);
+  border: 1px solid var(--accent);
+  color: var(--accent);
 }
-.queue-btn-review:hover { border-color: var(--accent); color: var(--accent); }
-.queue-btn-confirm {
-  background: var(--success);
-  border: 1px solid var(--success);
-  color: #08130E;
-}
-.queue-btn-confirm:hover { filter: brightness(1.08); }
+.queue-btn-review:hover { background: var(--accent-soft); }
 .queue-btn:disabled { opacity: 0.5; cursor: default; }
 
 .attention-more {
   margin-top: 8px;
   background: none;
-  border: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  width: 100%;
   color: var(--accent);
   font-family: 'Inter', sans-serif;
   font-size: 12.5px;
@@ -1326,6 +1870,41 @@ textarea:focus-visible,
 }
 
 /* ---- Hero: lead with the round, then money, then "to go", then who-paid ---- */
+/* One pill carrying round, position and state — the mockup's header. */
+.hero-round-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  max-width: 100%;
+}
+.hero-round-pill > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hero-round-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+.hero-round-pill .icon { flex: 0 0 auto; display: block; }
+.hero-round-pill.collecting { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); }
+.hero-round-pill.payout_pending { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.hero-round-pill.completed { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); }
+.spark-up { color: var(--success); font-weight: 600; }
+
 .hero-round-line {
   display: flex;
   align-items: center;
@@ -1379,6 +1958,21 @@ textarea:focus-visible,
 .mini-chip.paid { border-color: var(--success); color: var(--success); background: var(--success-soft); }
 .mini-chip.pending { border-color: var(--accent); color: var(--accent); background: rgba(245,166,35,0.14); }
 .mini-chip.unpaid { border-color: var(--border); color: var(--text-primary); }
+/* Rejected and overdue share the danger hue but read apart: rejected is struck
+   through (it was sent and refused), overdue was never sent. Same distinction
+   the Rounds grid draws — one legend for the whole app. */
+.mini-chip.rejected {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: var(--danger-soft);
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+.mini-chip.overdue {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: rgba(225,83,83,0.10);
+}
 .mini-chip:not(:disabled):hover { filter: brightness(1.15); }
 .mini-chip.unpaid:not(:disabled):hover { background: var(--accent-soft); border-color: var(--accent); filter: none; }
 .mini-chip:disabled { cursor: default; }
@@ -1422,6 +2016,7 @@ textarea:focus-visible,
 .picker-row:not(:disabled):hover { border-color: var(--accent); }
 .picker-row.paid .picker-status { color: var(--success); }
 .picker-row.pending .picker-status { color: var(--accent); }
+.picker-row.rejected .picker-status { color: var(--danger); }
 .picker-row:disabled { cursor: default; opacity: 0.6; }
 
 /* ---- Previous round: clearly secondary "history", below the current round ---- */
@@ -1579,3 +2174,3460 @@ body { padding-top: calc(28px + var(--pf-bar-h, 0px)); }
    the app's own .modal-overlay / .modal / .share-text-area styling — no new
    modal styles needed. */
 
+/* ---------------------------------------------------------------------------
+ * Tab shell.
+ *
+ * Two shells with deliberately different item sets, chosen in renderTabBar()
+ * rather than hidden with CSS:
+ *   mobile  — 5 tabs: Home / Rounds / Activity / Insights / Menu.
+ *             Members is a drill-down from Home, not a tab.
+ *   desktop — 5 sidebar items incl. Members, then a mode card and a
+ *             "Menu & settings" profile row where Menu lives instead.
+ * ------------------------------------------------------------------------- */
+.tab-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border);
+  padding: 6px 4px calc(6px + env(safe-area-inset-bottom, 0px));
+}
+.tab-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: 'Inter', sans-serif;
+  font-size: 10.5px;
+  padding: 6px 2px;
+  cursor: pointer;
+}
+.tab-item .tab-icon { display: flex; line-height: 1; }
+.tab-item.active { color: var(--accent); font-weight: 600; }
+
+/* One rule drives the whole icon set: stroked, never filled, inheriting the
+   colour of whatever it sits in. */
+.icon {
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  flex-shrink: 0;
+}
+.unlock-btn { display: inline-flex; align-items: center; gap: 5px; }
+.menu-row-main { display: flex; align-items: center; gap: 11px; }
+.menu-row-main .icon { color: var(--text-muted); }
+.reset-btn.danger { display: inline-flex; align-items: center; gap: 7px; }
+/* Brand block belongs to the sidebar shell only — no room for it in the bar. */
+.tab-brand { display: none; }
+
+/* ---- Desktop shell: the same nav becomes a left sidebar ------------------
+ * Nothing about the views changes here; only the chrome around them moves,
+ * so both layouts render from one code path. */
+@media (min-width: 900px) {
+  body { padding-left: calc(232px + 40px); padding-right: 40px; padding-bottom: 48px; }
+  /* Wide enough for the two-column views to breathe, capped so text lines
+     never run to an uncomfortable measure on a very large monitor. */
+  .wrap { max-width: 1180px; margin: 0 auto; }
+
+  .tab-bar {
+    top: 0;
+    right: auto;
+    width: 232px;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: stretch;
+    gap: 2px;
+    padding: 20px 12px;
+    border-top: none;
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+  }
+  .tab-brand {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 4px 10px 20px;
+  }
+  .tab-brand-mark { font-size: 19px; line-height: 1; }
+  .tab-brand-name {
+    font-family: 'Space Grotesk', 'Inter', sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--text-primary);
+  }
+  .tab-item {
+    flex: 0 0 auto;
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 12px;
+    border-radius: 10px;
+    padding: 11px 12px;
+    font-size: 13.5px;
+  }
+  .tab-item:hover { background: rgba(255, 255, 255, 0.05); }
+  .tab-item.active { background: var(--accent-soft); }
+  .tab-item .tab-icon { font-size: 16px; }
+
+  /* Pushes the mode card and profile row to the foot of the sidebar, so the
+     navigation proper stays grouped at the top. */
+  .nav-spacer { flex: 1 1 auto; min-height: 16px; }
+
+  .nav-mode {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    width: 100%;
+    text-align: left;
+    padding: 10px 12px;
+    margin-bottom: 6px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text-muted);
+    font-family: 'Inter', sans-serif;
+    cursor: pointer;
+  }
+  .nav-mode:hover { background: rgba(255, 255, 255, 0.06); }
+  .nav-mode-label {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+  .nav-mode-state { font-size: 11.5px; line-height: 1.35; }
+  /* Unlocked is the state worth spotting from across the room. */
+  .nav-mode.on { border-color: rgba(245, 166, 35, 0.4); background: var(--accent-soft); }
+  .nav-mode.on .nav-mode-label { color: var(--accent); }
+  .nav-mode.on .nav-mode-state { color: var(--accent); }
+
+  .nav-profile .nav-profile-avatar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: var(--bg-card-alt);
+    border: 1px solid var(--border);
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-primary);
+    flex-shrink: 0;
+  }
+  .nav-profile { gap: 10px; }
+
+  /* With the width to spare, the stat tiles stop wrapping to one per row. */
+  .stat-grid { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+}
+
+/* Per-view heading, for tabs that are a screen in their own right rather than
+   a section competing for room on the old single-page layout. */
+.view-head { margin: 4px 0 14px; }
+.view-title {
+  margin: 0;
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.view-sub { margin: 3px 0 0; font-size: 12.5px; color: var(--text-muted); }
+.activity-list-tab { max-height: none; }
+
+/* Insights tab — stat tiles, per-round bars and the on-time leaderboard. All
+   plain markup sized by percentage; no charting library. */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.stat-tile {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+}
+.stat-value {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.stat-value.success { color: var(--success); }
+.stat-value.danger { color: var(--danger); }
+.stat-value.pending { color: var(--pending-review); }
+.stat-label { font-size: 11.5px; color: var(--text-muted); margin-top: 3px; }
+
+.round-bars {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 6px;
+}
+.round-bar-row {
+  display: grid;
+  grid-template-columns: 84px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+}
+.round-bar-label { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.round-bar-name {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+.round-bar-track {
+  height: 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+/* Collected money is green everywhere else in the app (fund total, leaderboard,
+   cycle chips). These bars were amber, which reads as "attention" rather than
+   "collected" and made a fully-funded round change hue for no reason. */
+.round-bar-fill {
+  height: 100%;
+  border-radius: 6px;
+  background: linear-gradient(90deg, #3E9A72, var(--success));
+}
+.round-bar-fill.full { background: var(--success); }
+.round-bar-amt { font-size: 11.5px; color: var(--text-muted); white-space: nowrap; }
+
+.leaderboard {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+.leader-row {
+  display: grid;
+  grid-template-columns: 84px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+}
+.leader-name { font-size: 12.5px; font-weight: 600; }
+.leader-track {
+  height: 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+.leader-fill { height: 100%; border-radius: 6px; background: var(--success); }
+.leader-val { font-size: 12px; color: var(--text-primary); white-space: nowrap; }
+.leader-sub { color: var(--text-muted); font-size: 10.5px; }
+.leader-nodata { color: var(--text-muted); font-size: 11.5px; }
+.insights-note {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin: 10px 2px 0;
+}
+
+/* Menu tab — settings rows, replacing the cramped button row the tools used to
+   share at the bottom of the old single page. */
+.menu-list {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+.menu-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+.menu-row:last-child { border-bottom: none; }
+.menu-row:hover { background: var(--bg-card-alt); }
+.menu-row-chevron { color: var(--text-muted); font-size: 18px; line-height: 1; }
+.menu-locked-note {
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+
+.view-placeholder {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 60px 12px;
+  font-size: 14px;
+}
+.view-placeholder p:first-child { font-size: 16px; color: var(--text-primary); margin-bottom: 8px; }
+.view-placeholder-note { font-size: 12.5px; }
+
+
+/* ===========================================================================
+ * Visual layer — the depth treatments from the design mockup.
+ *
+ * Applied as overrides at the end of the file so the structural rules above
+ * stay readable and this layer can be reasoned about (or reverted) as one
+ * unit. Colours still come from the same tokens; only surface, depth and
+ * emphasis change.
+ * ======================================================================== */
+
+/* Ambient glow behind everything. Pseudo-elements on body rather than real
+   DOM, so no view has to remember to render them. */
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: -1;
+}
+body::before {
+  top: -120px;
+  left: -140px;
+  width: 340px;
+  height: 340px;
+  background: radial-gradient(circle, rgba(245, 166, 35, 0.30), transparent 70%);
+  filter: blur(34px);
+}
+body::after {
+  top: 90px;
+  right: -150px;
+  width: 320px;
+  height: 320px;
+  background: radial-gradient(circle, rgba(76, 217, 192, 0.20), transparent 70%);
+  filter: blur(38px);
+}
+
+/* Glass hero: the one card that carries the round's headline number. */
+.battery-hero {
+  background: linear-gradient(160deg, rgba(20, 42, 66, 0.72), rgba(27, 58, 87, 0.5));
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 24px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08) inset,
+    0 24px 44px -26px rgba(0, 0, 0, 0.65);
+}
+
+/* Everything else that reads as a "card" gets the softer radius and a lift,
+   so the hero sits on a consistent family rather than alone. */
+.fund-total,
+.attention-panel,
+.round,
+.menu-list,
+.menu-locked-note,
+.stat-tile,
+.round-bars,
+.leaderboard,
+.payout-history,
+.footer-note {
+  border-radius: 18px;
+  box-shadow: 0 12px 28px -22px rgba(0, 0, 0, 0.75);
+}
+.member-card { border-radius: 14px; }
+
+/* Primary actions read as the accent, not an outline of it. */
+.contribute-btn,
+.my-status-cta {
+  background: linear-gradient(135deg, #F5A623, #FFC966);
+  border: none;
+  color: #14213D;
+  font-weight: 700;
+  border-radius: 24px;
+  box-shadow: 0 14px 26px -12px rgba(245, 166, 35, 0.55),
+    0 0 0 1px rgba(255, 255, 255, 0.10) inset;
+}
+.contribute-btn:hover,
+.my-status-cta:hover { filter: brightness(1.05); }
+.contribute-btn:active,
+.my-status-cta:active { transform: scale(0.985); }
+
+/* The nav is chrome sitting over content — give it the same glass treatment
+   rather than a flat panel. */
+.tab-bar {
+  background: rgba(13, 27, 42, 0.86);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+/* Battery-cell gauge — replaces the flat horizontal bar in the hero. The cell
+   fills bottom-up; its cap only takes the accent once the round is fully
+   funded, so a part-full cell never reads as a finished one. */
+.hero-gauge {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin: 4px 0 10px;
+}
+.hero-batt { position: relative; flex-shrink: 0; line-height: 0; }
+.hero-batt-label {
+  position: absolute;
+  inset: 9px 0 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  line-height: 1.15;
+  pointer-events: none;
+}
+.hero-batt-pct {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 19px;
+  color: var(--text-primary);
+}
+.hero-batt-cap {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.hero-gauge-meta {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.hero-gauge-meta .icon { flex: 0 0 auto; margin-top: 3px; }
+.hero-gauge-meta b { color: var(--text-primary); }
+
+/* Motion — entrance for the view's own content, plus the slow ambient drift
+   behind it. Both are decorative, so both drop out entirely under
+   prefers-reduced-motion; nothing here is load-bearing for comprehension. */
+@keyframes pfFadeUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes pfDrift1 {
+  0%, 100% { transform: translate(-8%, -6%) scale(1); }
+  50% { transform: translate(4%, 3%) scale(1.08); }
+}
+@keyframes pfDrift2 {
+  0%, 100% { transform: translate(6%, 4%) scale(1); }
+  50% { transform: translate(-4%, -6%) scale(1.1); }
+}
+@keyframes pfBattFill {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+
+body::before { animation: pfDrift1 16s ease-in-out infinite; }
+body::after { animation: pfDrift2 19s ease-in-out infinite; }
+
+/* Staggered so a view assembles rather than snapping in all at once. */
+.view-head,
+.my-status-card,
+.my-status-setup,
+.attention-panel,
+.fund-total,
+.battery-hero,
+.stat-grid,
+.section-label,
+.member-grid,
+.round-bars,
+.leaderboard,
+.menu-list,
+.menu-locked-note,
+.activity-chips,
+.activity-list,
+.payout-history,
+.footer-note {
+  animation: pfFadeUp 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.fund-total { animation-delay: 0.04s; }
+.battery-hero { animation-delay: 0.08s; }
+.stat-grid, .member-grid, .activity-list, .menu-list { animation-delay: 0.06s; }
+.round-bars, .leaderboard, .payout-history { animation-delay: 0.1s; }
+.footer-note { animation-delay: 0.12s; }
+
+/* The cell charging up, anchored at its base so it grows the way it fills. */
+.batt-fill {
+  transform-box: fill-box;
+  transform-origin: bottom;
+  animation: pfBattFill 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both;
+}
+
+.tab-item, .menu-row, .contribute-btn, .my-status-cta {
+  transition: background 0.15s ease, color 0.15s ease, filter 0.15s ease,
+    transform 0.1s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before,
+  body::after { animation: none; }
+  .view-head,
+  .my-status-card,
+  .my-status-setup,
+  .attention-panel,
+  .fund-total,
+  .battery-hero,
+  .stat-grid,
+  .section-label,
+  .member-grid,
+  .round-bars,
+  .leaderboard,
+  .menu-list,
+  .menu-locked-note,
+  .activity-chips,
+  .activity-list,
+  .payout-history,
+  .footer-note,
+  .batt-fill {
+    animation: none;
+  }
+  .tab-item, .menu-row, .contribute-btn, .my-status-cta { transition: none; }
+}
+
+/* Roster & status language — avatars carry a colour ring for standing, and
+   status pills use a dot instead of an emoji. Colour is never the only cue:
+   every avatar sits beside the member's name and figures, and every pill
+   still spells its state out in words. */
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--bg-card-alt);
+  color: var(--text-primary);
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 600;
+  line-height: 1;
+  flex-shrink: 0;
+}
+/* A profile photo (migration 009). The initial stays in the markup behind the
+   image, so a photo that fails to load falls back to the letter rather than a
+   broken-image icon — the <img> removes itself on error. */
+.avatar { position: relative; overflow: hidden; }
+.avatar-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
+.avatar-current { box-shadow: 0 0 0 2.5px var(--success), 0 0 14px 1px rgba(76, 175, 131, 0.35); }
+.avatar-overdue { box-shadow: 0 0 0 2.5px var(--danger); }
+/* A claim waiting on the treasurer is the one state on this screen that is
+   asking for something, so the design gives it the only looping animation in
+   the app — a slow ring pulse (Main.dc.html, pfPulseRing). */
+.avatar-pending {
+  box-shadow: 0 0 0 2.5px var(--pending-review);
+  animation: pfPulseRing 1.8s ease-in-out infinite;
+}
+@keyframes pfPulseRing {
+  0%, 100% {
+    box-shadow: 0 0 0 2.5px var(--pending-review),
+      0 0 0 2.5px rgba(155, 127, 224, 0);
+  }
+  50% {
+    box-shadow: 0 0 0 2.5px var(--pending-review),
+      0 0 0 8px rgba(155, 127, 224, 0.22);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .avatar-pending { animation: none; }
+}
+/* Paid THIS cycle. Home's roster ring means only this now — it used to show
+   overall standing, where "paid-out" (their round is finished) outranked
+   everything, so green could mean either "has paid" or "already received
+   their payout". One question, one colour. */
+.avatar-paid { box-shadow: 0 0 0 2.5px var(--success); }
+/* "Already received their payout" is a settled, positive state — the accent is
+   the colour the rest of the app uses for "needs action", so on a completed
+   fund every member was ringed as if something were owed. */
+.avatar-paid-out { box-shadow: 0 0 0 2.5px var(--success); }
+.avatar-idle { box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.14); color: var(--text-muted); }
+
+.member-ident { display: flex; align-items: center; gap: 11px; margin: 10px 0 2px; }
+.member-ident .member-name { margin: 0; }
+
+.round-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  margin-right: 6px;
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+.round-state { display: inline-flex; align-items: center; }
+.round-dot.pending { color: var(--accent); }
+
+.my-status-text .status-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 8px;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+.my-status-paid .status-dot { background: var(--success); }
+.my-status-due .status-dot { background: var(--accent); }
+.my-status-overdue .status-dot { background: var(--danger); }
+.my-status-rejected .status-dot { background: var(--danger); }
+.my-status-pending .status-dot { background: var(--pending-review); }
+.my-status-done .status-dot { background: var(--accent); }
+
+.overdue-badge { display: inline-flex; align-items: center; gap: 5px; }
+.payout-done-tag,
+.ph-receipt,
+.proof-upload-label { display: inline-flex; align-items: center; gap: 5px; }
+
+/* Caught-up state — the counterpart to "needs your attention". An absent
+   panel is ambiguous (all clear, or failed to load?), so the clear case says
+   so in its own right. */
+.attention-panel.caught-up {
+  border-color: rgba(76, 175, 131, 0.45);
+  border-left-color: var(--success);
+  background: rgba(76, 175, 131, 0.06);
+}
+.attention-panel.caught-up .attention-title { color: var(--success); }
+.attention-caught-up-note {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+.fund-complete-personal {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+.fund-complete-personal b { color: var(--text-primary); font-weight: 700; }
+.attention-title,
+.attention-group-label { display: inline-flex; align-items: center; gap: 7px; }
+
+/* Fund complete — the end state of the whole fund, not just another funded
+   round, so the hero takes the accent rather than staying neutral. */
+.battery-hero.fund-complete {
+  border-color: rgba(245, 166, 35, 0.45);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.08) inset,
+    0 24px 44px -26px rgba(0, 0, 0, 0.65),
+    0 0 0 1px rgba(245, 166, 35, 0.18);
+}
+.battery-hero.fund-complete .hero-round-num {
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Once the cell fills past its midpoint the readout sits on bright gradient,
+   so it flips to the dark ink the fill was designed against. */
+.hero-batt-label.on-fill .hero-batt-pct { color: #14213D; }
+.hero-batt-label.on-fill .hero-batt-cap { color: rgba(20, 33, 61, 0.75); }
+
+/* ===========================================================================
+ * Desktop layouts (≥900px)
+ *
+ * The wide screen is not the phone layout stretched: each view reflows into
+ * the shape the design called for. All of it keys off the .view-<name>
+ * wrapper, so there is still one render path — CSS decides the shape.
+ * ======================================================================== */
+@media (min-width: 900px) {
+  /* HOME — the two-column split used to be done here, by making .view-home a
+     grid and assigning each child a column. That could reflow the mobile
+     sections but could not add the panels the desktop design actually calls
+     for (greeting, recent activity, rounds overview, quick actions), so home.js
+     now composes the two shells itself and emits .home-grid. Those rules live
+     with the rest of the dashboard styles further down; keeping a grid here as
+     well would fight it for placement. */
+
+  /* MEMBERS — the roster reads as a board at this width, not a long list. */
+  .view-members .member-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+  /* ACTIVITY — timestamp and entry sit on one line instead of stacking, so
+     the eye can scan down the times. (The log stores a freeform message, not
+     typed columns, so this is two columns rather than the design's six.) */
+  .view-activity .activity-item {
+    display: grid;
+    grid-template-columns: 150px minmax(0, 1fr);
+    align-items: baseline;
+    gap: 16px;
+    padding: 11px 0;
+  }
+  .view-activity .activity-time { font-size: 12px; }
+
+  /* INSIGHTS — the bars have room for a wider label column. */
+  .view-insights .round-bar-row,
+  .view-insights .leader-row { grid-template-columns: 120px minmax(0, 1fr) auto; }
+
+  /* MENU — settings and the explainer sit side by side rather than the
+     explainer pushing the danger zone off-screen. */
+  .view-menu {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 22px;
+    align-items: start;
+  }
+  .view-menu > .view-head { grid-column: 1 / -1; }
+  .view-menu > .footer-note { grid-column: 2; grid-row: 2 / span 20; margin-bottom: 0; }
+}
+
+/* ROUNDS on desktop — master list beside the open round's detail. The list
+   stays put while the detail scrolls, so picking through rounds doesn't move
+   the thing you're clicking. */
+@media (min-width: 900px) {
+  .rounds-split {
+    display: grid;
+    grid-template-columns: minmax(240px, 0.85fr) minmax(0, 1.6fr);
+    gap: 20px;
+    align-items: start;
+  }
+  .rounds-list { position: sticky; top: 24px; }
+  .rounds-list .round { margin-bottom: 8px; cursor: pointer; }
+  .rounds-list .round.is-open {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .rounds-list .round-chevron { display: none; }
+  .rounds-detail .round-body { max-height: none; opacity: 1; overflow: visible; }
+  .rounds-detail-empty {
+    color: var(--text-muted);
+    font-size: 13px;
+    text-align: center;
+    padding: 40px 12px;
+  }
+  .rounds-detail-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  .rounds-detail-title {
+    margin: 0;
+    font-family: 'Space Grotesk', 'Inter', sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+  .rounds-detail-sub {
+    margin: 3px 0 0;
+    font-size: 12.5px;
+    color: var(--text-muted);
+  }
+}
+
+/* A header action on the desktop shell — Export CSV, Reorder payout order,
+   Export round CSV. Quiet by design: it sits beside a title, not on it. */
+.view-head-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.view-head-text { min-width: 0; }
+.head-action {
+  flex: none;
+  height: 38px;
+  padding: 0 18px;
+  border-radius: 11px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.14);
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+.head-action:hover { background: rgba(255,255,255,0.1); }
+.head-action:active { transform: scale(0.98); }
+@media (prefers-reduced-motion: reduce) {
+  .head-action:active { transform: none; }
+}
+
+/* ---------------------------------------------------------------------------
+ * Home composition — the pieces the design puts on Home that the port had
+ * left out: a growth sparkline in the hero, the roster at a glance, a link
+ * through to Rounds, and the primary action pinned where the thumb is.
+ * ------------------------------------------------------------------------- */
+.hero-spark { flex: 1; min-width: 0; }
+.hero-spark-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+.hero-spark .spark { width: 100%; height: 40px; display: block; }
+/* The growth line draws itself in rather than appearing whole (pfDash, Main.dc.html).
+   The dash length is a fixed over-estimate of the path — the design uses 260 for the
+   same 140x40 box — so any real path is fully covered. */
+.spark-line {
+  stroke-dasharray: 400;
+  stroke-dashoffset: 400;
+  animation: pfDash 1s ease-out 0.5s both;
+}
+@keyframes pfDash { to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .spark-line { animation: none; stroke-dashoffset: 0; }
+}
+.hero-spark-total { font-size: 11.5px; color: var(--success); font-weight: 600; margin-top: 4px; }
+
+.roster-strip-wrap { margin: 20px 0; }
+.roster-strip-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.roster-strip-title {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+}
+.roster-strip-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px;
+}
+/* Overflow padding is cancelled by the negative margin so the avatar rings
+   aren't clipped by the scroll container. */
+.roster-strip {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  padding: 16px 8px 8px;
+  margin: -16px -8px -8px;
+  scrollbar-width: none;
+}
+.roster-strip::-webkit-scrollbar { display: none; }
+/* Chromium and WebKit drop a flex scroll container's padding-right at the end
+   of the scrollable area, so once the strip overflows (narrow phones, longer
+   rosters) the last avatar sat flush against the edge and its status ring —
+   drawn as a box-shadow, outside the border box — was clipped. A trailing flex
+   item is honoured where the padding is not. */
+.roster-strip::after {
+  content: "";
+  flex: 0 0 8px;
+  align-self: stretch;
+}
+.roster-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  width: 58px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.roster-avatar-wrap { position: relative; line-height: 0; }
+.roster-order {
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: var(--bg-primary);
+  border: 1.5px solid rgba(255, 255, 255, 0.18);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+/* The glyph and the name are two flex items, and the ellipsis lives on the
+   NAME. Previously text-overflow sat on this flex container, where it never
+   applies to children — so a long name clipped hard instead of ellipsising,
+   and the icon (a block-level SVG with no alignment of its own) drifted off
+   the text's optical centre. That is the misalignment on the live app. */
+.roster-chip-word {
+  display: block;
+  margin-top: 2px;
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--success);
+  letter-spacing: 0.2px;
+}
+.roster-name {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  max-width: 100%;
+}
+.roster-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.roster-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  /* Nudge: the stroke-based glyphs read a touch high against 10.5px text. */
+  margin-top: -1px;
+}
+.roster-mark .icon { display: block; }
+/* rm- prefixed: a bare .check/.clock modifier collides with the legacy
+   cycle-cell classes of the same name, which carry their own 28px box. */
+.roster-mark.rm-check { color: var(--success); }
+.roster-mark.rm-clock { color: var(--pending-review); }
+.roster-mark.rm-alert { color: var(--danger); }
+.roster-mark.rm-rejected { color: var(--danger); }
+
+.rounds-link {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  cursor: pointer;
+  text-align: left;
+  margin-bottom: 16px;
+}
+.rounds-link:hover { background: var(--bg-card-alt); }
+.rounds-link-main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.rounds-link-title {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.rounds-link-meta { font-size: 12px; color: var(--text-muted); }
+.rounds-link .icon { color: var(--text-muted); }
+
+/* The primary action rides above the tab bar so it stays in reach however far
+   down the page you are. The spacer keeps it from covering the last card. */
+.floating-cta {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+  z-index: 15;
+  padding: 28px 16px 12px;
+  background: linear-gradient(to top, var(--bg-primary) 55%, transparent);
+  pointer-events: none;
+}
+.floating-cta .hero-cta {
+  pointer-events: auto;
+  max-width: 728px;
+  margin: 0 auto;
+  display: block;
+}
+.cta-spacer { height: 84px; }
+
+@media (min-width: 900px) {
+  /* With a sidebar there is no thumb zone to hug — the action returns to the
+     flow of the column it belongs to. */
+  .floating-cta {
+    position: static;
+    padding: 0;
+    background: none;
+    grid-column: 1;
+  }
+  .cta-spacer { display: none; }
+}
+
+/* ---------------------------------------------------------------------------
+ * Member detail — the drill-down behind a roster card.
+ * ------------------------------------------------------------------------- */
+.detail-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 4px 4px 0;
+  margin-bottom: 10px;
+}
+.detail-back:hover { color: var(--text-primary); }
+.detail-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+.detail-ident { flex: 1; min-width: 0; }
+/* The one action the design puts in this header: a claim is waiting and the
+   treasurer can open it from here instead of hunting for the cycle. */
+.detail-review-btn {
+  flex: none;
+  height: 38px;
+  padding: 0 16px;
+  border-radius: 11px;
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+}
+.detail-review-btn:hover { background: rgba(245, 166, 35, 0.22); }
+.detail-name {
+  margin: 0;
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-size: 21px;
+  font-weight: 700;
+}
+.detail-order { margin: 2px 0 0; font-size: 12.5px; color: var(--text-muted); }
+.detail-standing {
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.detail-standing.standing-current { background: rgba(76, 175, 131, 0.16); color: var(--success); }
+.detail-standing.standing-overdue { background: rgba(225, 83, 83, 0.16); color: var(--danger); }
+.detail-standing.standing-pending { background: rgba(155, 127, 224, 0.16); color: var(--pending-review); }
+.detail-standing.standing-paid-out { background: var(--accent-soft); color: var(--accent); }
+.detail-stats { margin-bottom: 4px; }
+
+.detail-rounds { display: flex; flex-direction: column; gap: 10px; }
+.detail-round {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+}
+.detail-round-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.detail-round-name {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.detail-round-status { font-size: 11.5px; color: var(--text-muted); text-transform: capitalize; }
+.detail-cycles { display: flex; flex-direction: column; }
+.detail-cycle {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  font-size: 12.5px;
+}
+.detail-cycle:last-child { border-bottom: none; }
+.detail-cycle-n { color: var(--text-primary); font-weight: 600; }
+.detail-cycle-date { color: var(--text-muted); }
+.detail-cycle-state {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-muted);
+}
+.detail-cycle.paid .detail-cycle-state { background: rgba(76, 175, 131, 0.16); color: var(--success); }
+.detail-cycle.pending .detail-cycle-state { background: rgba(155, 127, 224, 0.16); color: var(--pending-review); }
+.detail-cycle.rejected .detail-cycle-state { background: var(--danger-soft); color: var(--danger); }
+.detail-cycle.overdue .detail-cycle-state { background: rgba(225, 83, 83, 0.16); color: var(--danger); }
+
+.member-card { cursor: pointer; }
+.member-card:hover { border-color: rgba(255, 255, 255, 0.2); }
+
+@media (min-width: 900px) {
+  .detail-rounds { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+}
+
+/* ---------------------------------------------------------------------------
+ * Toast — transient confirmation only.
+ *
+ * Errors and warnings deliberately stay as pinned banners: a message that
+ * slides away on a timer is the wrong place for anything the user still has
+ * to act on, and in an app tracking money a failed save must not vanish.
+ * ------------------------------------------------------------------------- */
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--bg-card-alt);
+  border: 1px solid rgba(76, 175, 131, 0.45);
+  box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.8);
+  font-size: 13px;
+  color: var(--text-primary);
+  animation: pfToastIn 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes pfToastIn {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.toast-icon { display: flex; color: var(--success); flex-shrink: 0; }
+.toast-text { flex: 1; min-width: 0; line-height: 1.45; }
+.toast-x {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 4px;
+  flex-shrink: 0;
+}
+.toast-x:hover { color: var(--text-primary); }
+
+/* The stack itself does the positioning; its children are just cards in a
+   column. Failures and confirmations share it, so one never hides the other. */
+.toast-stack {
+  position: fixed;
+  z-index: 60; /* over .modal-overlay (50), under the lightbox (100) */
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  width: min(520px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  pointer-events: none;
+}
+.toast-stack > * { pointer-events: auto; width: auto; max-width: none; }
+.toast-stack.above-cta { bottom: calc(148px + env(safe-area-inset-bottom, 0px)); }
+
+.save-error-banner,
+.save-warning-banner { display: flex; align-items: center; gap: 8px; }
+
+@media (min-width: 900px) {
+  /* DesktopToastStates anchors the stack to the bottom-right corner; there is
+     no bottom bar to clear and no floating CTA at this width. */
+  .toast-stack,
+  .toast-stack.above-cta {
+    left: auto;
+    right: 32px;
+    bottom: 32px;
+    transform: none;
+    width: 360px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation: none; }
+}
+
+/* No-recovery warning on the PIN screens. Shown when a PIN is chosen, not
+   after it's forgotten, since by then it's no use. */
+.pin-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 11px 12px;
+  border-radius: 12px;
+  background: rgba(245, 166, 35, 0.08);
+  border: 1px solid rgba(245, 166, 35, 0.3);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  text-align: left;
+}
+.pin-warning .icon { color: var(--accent); margin-top: 1px; }
+
+/* ---------------------------------------------------------------------------
+ * Member payout destination — where a payout gets sent.
+ *
+ * The typed account name matters as much as the QR: a QR image is opaque, so
+ * the name is what actually lets a treasurer verify who they're about to pay.
+ * ------------------------------------------------------------------------- */
+.payout-dest {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px;
+  margin-bottom: 16px;
+}
+.payout-dest-inline { margin: 4px 0 16px; }
+.payout-dest-main { display: flex; align-items: center; gap: 14px; }
+.payout-dest-qr {
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  line-height: 0;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.payout-dest-qr img { width: 72px; height: 72px; object-fit: contain; display: block; }
+.payout-dest-lines { min-width: 0; }
+.payout-dest-label {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+}
+.payout-dest-bank { font-size: 12.5px; color: var(--text-muted); }
+.payout-dest-name {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  word-break: break-word;
+}
+.payout-dest-num { font-size: 12.5px; color: var(--text-muted); }
+.payout-dest-empty { margin: 0; font-size: 12.5px; color: var(--text-muted); line-height: 1.6; }
+.payout-dest-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 12px;
+  padding: 9px 13px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.payout-dest-edit:hover { background: var(--bg-card-alt); }
+.payout-dest-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0 16px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(245, 166, 35, 0.08);
+  border: 1px solid rgba(245, 166, 35, 0.3);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  text-align: left;
+}
+.payout-dest-warn .icon { color: var(--accent); margin-top: 1px; }
+
+.field-label {
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin: 14px 0 5px;
+  text-align: left;
+}
+.text-input {
+  width: 100%;
+  padding: 11px 12px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+}
+.text-input:focus { outline: none; border-color: var(--accent); }
+.qr-preview {
+  display: block;
+  width: 130px;
+  height: 130px;
+  object-fit: contain;
+  background: #fff;
+  border-radius: 10px;
+  padding: 6px;
+  margin: 4px 0 8px;
+}
+.qr-empty { margin: 4px 0 8px; font-size: 12.5px; color: var(--text-muted); }
+.file-input { font-size: 12.5px; color: var(--text-muted); }
+
+/* ===================================================================
+ * Rejected payment (migration 006)
+ *
+ * The member-facing half of rejection: the only Home state that asks the
+ * person to do something, so it leads the screen and carries the danger
+ * colour the roster ring also uses.
+ * =================================================================== */
+.rejected-card {
+  background: var(--danger-soft);
+  border: 1px solid rgba(225, 83, 83, 0.3);
+  border-left: 3px solid var(--danger);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+/* The identity line the status card used to carry, folded into this card so a
+   rejected member sees one red card rather than two. */
+.rejected-ident {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.rejected-who { font-size: 12.5px; color: var(--text-muted); min-width: 0; }
+.rejected-who b { color: var(--danger); font-weight: 700; }
+.rejected-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.rejected-head .icon { color: var(--danger); flex-shrink: 0; }
+.rejected-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 14.5px;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+.rejected-note {
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 8px;
+  padding: 9px 11px;
+  margin-bottom: 9px;
+}
+.rejected-note-label {
+  display: block;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 3px;
+}
+.rejected-note-text {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  /* A treasurer's note is free text: let it wrap rather than overflow. */
+  overflow-wrap: anywhere;
+}
+.rejected-hint { margin: 0 0 11px; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
+.rejected-cta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  padding: 11px;
+  border: none;
+  border-radius: 9px;
+  background: var(--danger);
+  color: #fff;
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+}
+.rejected-cta:hover { filter: brightness(1.08); }
+.rejected-cta:active { transform: scale(0.985); }
+
+/* Roster ring + detail pill for a member with a refused claim. */
+/* Dashed, so it reads apart from the solid overdue ring — the roster strip
+   has no other cue, and "sent and refused" is not "never sent". */
+.avatar-rejected { box-shadow: 0 0 0 2.5px var(--danger); outline: 2px dashed var(--danger); outline-offset: 3px; }
+.detail-standing.standing-rejected { background: var(--danger-soft); color: var(--danger); }
+
+/* Treasurer's reason, inside the review sheet's reject confirmation. */
+.reject-note-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 4px 0 5px;
+  text-align: left;
+}
+.reject-note-input {
+  width: 100%;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  font-size: 13.5px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.reject-note-input:focus { border-color: var(--accent); outline: none; }
+
+/* ===================================================================
+ * PIN keypad
+ *
+ * Replaces the text field: faster one-handed, no autofill or autocorrect
+ * to fight, and it matches how banking apps ask for a PIN. Deliberately
+ * no auto-submit — PINs here can be longer than four digits.
+ * =================================================================== */
+.pin-dots {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin: 6px 0 18px;
+  min-height: 15px;
+}
+.pin-dot {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.28);
+  background: transparent;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+.pin-dot.filled { background: var(--accent); border-color: var(--accent); }
+
+.pin-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 9px;
+  margin-bottom: 14px;
+}
+.pin-key {
+  padding: 14px 0;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--bg-card-alt);
+  color: var(--text-primary);
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 20px;
+  font-weight: 600;
+  cursor: pointer;
+  /* A mis-tap on a PIN pad is annoying; keep the targets comfortably large. */
+  min-height: 48px;
+}
+.pin-key:hover { background: rgba(255, 255, 255, 0.06); }
+.pin-key:active { transform: scale(0.96); }
+.pin-key:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.pin-key-util { font-size: 16px; color: var(--text-muted); }
+
+@media (prefers-reduced-motion: reduce) {
+  .pin-dot { transition: none; }
+  .pin-key:active, .rejected-cta:active { transform: none; }
+}
+
+/* ===================================================================
+ * Home — day one, release card, and the desktop dashboard
+ * =================================================================== */
+
+/* A fund that exists but hasn't started. Without this the screen is 0%
+   everywhere with nothing saying why, which reads as a fault. */
+.dayone-card {
+  background: var(--accent-soft);
+  border: 1px solid rgba(245, 166, 35, 0.28);
+  border-radius: 12px;
+  padding: 13px 16px;
+  margin-bottom: 14px;
+}
+.dayone-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 5px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 14.5px;
+  color: var(--text-primary);
+}
+.dayone-title .icon { color: var(--accent); }
+.dayone-note { margin: 0; font-size: 12.8px; color: var(--text-muted); line-height: 1.5; }
+
+/* Money that is ready to send outranks a payment waiting to be checked, so
+   this sits above "Needs your attention" rather than inside it. */
+.release-card {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.release-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 5px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 14.5px;
+  color: var(--text-primary);
+}
+.release-card-title .icon { color: var(--accent); flex-shrink: 0; }
+.release-card-note { margin: 0 0 11px; font-size: 12.8px; color: var(--text-muted); line-height: 1.5; }
+
+/* Sparkline stand-in before there are two points to draw a line between. */
+.hero-spark-empty { display: flex; flex-direction: column; justify-content: center; }
+.hero-spark-note { margin: 4px 0 0; font-size: 11.5px; color: var(--text-muted); line-height: 1.4; }
+
+@media (min-width: 900px) {
+  /* The dashboard: main column plus a rail, everything visible at once. */
+  .home-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 340px;
+    gap: 18px;
+    align-items: start;
+  }
+  .home-main, .home-rail { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+  /* The sections were built for a single column and carry their own bottom
+     margin; the flex gap replaces it here. */
+  .home-main > *, .home-rail > * { margin-bottom: 0; }
+
+  .home-greet {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 18px;
+  }
+  .home-greet-title {
+    margin: 0;
+    font-family: 'Space Grotesk', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+  }
+  .home-greet-sub { margin: 3px 0 0; font-size: 13px; color: var(--text-muted); }
+  .home-greet-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 11px 18px;
+    border: none;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #16202B;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .home-greet-cta:hover { filter: brightness(1.06); }
+
+  .home-panel {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 14px 16px;
+  }
+  .home-panel-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .home-panel-title {
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 700;
+    font-size: 13.5px;
+    color: var(--text-primary);
+  }
+  .home-panel-all {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--text-muted);
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .home-panel-all:hover { color: var(--accent); }
+  .home-panel-empty { margin: 0; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
+
+  .home-recent { display: flex; flex-direction: column; gap: 9px; }
+  .home-recent-row {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 12.8px;
+  }
+  .home-recent-text { color: var(--text-primary); line-height: 1.45; min-width: 0; }
+  .home-recent-time { color: var(--text-muted); font-size: 11.5px; white-space: nowrap; flex-shrink: 0; }
+
+  /* Five columns, each a little vertical gauge — the fund's whole arc. */
+  .home-rounds-strip { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .home-round-cell { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .home-round-bar {
+    width: 100%;
+    height: 54px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: flex-end;
+    overflow: hidden;
+  }
+  .home-round-fill { width: 100%; background: var(--accent); border-radius: 0 0 5px 5px; }
+  .home-round-cell.completed .home-round-fill { background: var(--success); }
+  .home-round-cell.payout_pending .home-round-fill { background: var(--pending-review); }
+  .home-round-label { font-size: 11px; color: var(--text-muted); font-family: 'Space Grotesk', sans-serif; }
+
+  .home-quick { display: flex; flex-direction: column; gap: 8px; }
+  .home-quick-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-card-alt);
+    color: var(--text-primary);
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    cursor: pointer;
+    text-align: left;
+  }
+  .home-quick-btn:hover { background: rgba(255, 255, 255, 0.06); }
+  .home-quick-btn .icon { color: var(--text-muted); flex-shrink: 0; }
+
+  /* The pinned mobile CTA has no place in a layout with a real header button. */
+  .view-home .floating-cta, .view-home .cta-spacer { display: none; }
+}
+
+/* ===================================================================
+ * Members — accordion rows (mobile) / master-detail (desktop)
+ * =================================================================== */
+.member-list { display: flex; flex-direction: column; gap: 8px; }
+
+.member-row-wrap {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.member-row-wrap.open { border-color: rgba(245, 166, 35, 0.32); }
+
+.member-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+.member-row:hover { background: rgba(255, 255, 255, 0.03); }
+
+.member-row-avatar { position: relative; flex-shrink: 0; }
+.member-row-order {
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.member-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.member-row-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.member-row-name {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--text-primary);
+}
+.member-row-sub { font-size: 11.8px; color: var(--text-muted); line-height: 1.4; }
+
+/* Payout-order language, shared with the onboarding Payout Order screen so the
+   same three words mean the same thing wherever a member appears. */
+.member-tag {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 700;
+  padding: 2.5px 7px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+.member-tag.paid-out { background: var(--accent-soft); color: var(--accent); }
+.member-tag.this-round { background: var(--success-soft); color: var(--success); }
+.member-tag.overdue, .member-tag.rejected { background: var(--danger-soft); color: var(--danger); }
+.member-tag.pending { background: var(--pending-review-soft); color: var(--pending-review); }
+.member-tag.upcoming { background: rgba(255, 255, 255, 0.06); color: var(--text-muted); }
+
+/* The chevron carries the open/closed state, so it turns rather than swapping
+   for a different glyph. */
+.member-row-chevron {
+  display: flex;
+  color: var(--text-muted);
+  transition: transform 0.18s ease;
+  flex-shrink: 0;
+}
+.member-row.open .member-row-chevron { transform: rotate(90deg); color: var(--accent); }
+
+.member-row-panel {
+  padding: 2px 14px 14px;
+  border-top: 1px solid var(--border);
+  margin-top: -1px;
+}
+
+/* One line per round: finished rounds collapse to a count, the running round
+   is spelled out, everything not started is a single line. */
+.round-lines { display: flex; flex-direction: column; gap: 7px; padding-top: 12px; }
+.round-line { font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
+.round-line b { color: var(--text-primary); font-weight: 600; }
+.round-line.muted { opacity: 0.65; }
+.round-line-state.paid { color: var(--success); }
+.round-line-state.pending-review { color: var(--pending-review); }
+.round-line-state.rejected, .round-line-state.overdue { color: var(--danger); }
+
+.payout-dest-block { margin-top: 14px; }
+
+@media (min-width: 900px) {
+  .members-split {
+    display: grid;
+    grid-template-columns: minmax(0, 360px) minmax(0, 1fr);
+    gap: 18px;
+    align-items: start;
+  }
+  .members-detail {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px 20px;
+  }
+  /* An empty pane should say what it is waiting for; blank reads as broken. */
+  .members-detail-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--text-muted);
+  }
+  .members-detail-empty p { margin: 0; font-size: 13px; max-width: 32ch; line-height: 1.5; }
+}
+
+/* ===================================================================
+ * Menu — grouped settings, mode card, member profile card
+ * =================================================================== */
+.mode-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 15px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-card);
+  margin-bottom: 6px;
+}
+.mode-card.on { border-color: rgba(245, 166, 35, 0.4); background: var(--accent-soft); }
+.mode-card-main { display: flex; align-items: center; gap: 11px; }
+.mode-card-main .icon { color: var(--accent); flex-shrink: 0; }
+.mode-card-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+.mode-card-note { font-size: 11.5px; color: var(--text-muted); margin-top: 1px; }
+.mode-card-state {
+  font-size: 10.5px;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.profile-card {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 14px 15px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-card);
+  margin-bottom: 6px;
+}
+.profile-card-main { flex: 1; min-width: 0; }
+.profile-card-label {
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.profile-card-name {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 17px;
+  color: var(--text-primary);
+  margin: 1px 0;
+}
+.profile-card-note { font-size: 11.5px; color: var(--text-muted); }
+.profile-card-change {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: 'Inter', sans-serif;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.profile-card-change:hover { color: var(--accent); }
+
+/* Rows can carry a second line now, so the label stacks rather than centring. */
+.menu-row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.menu-row-label { font-size: 14px; color: var(--text-primary); }
+.menu-row-note { font-size: 11.3px; color: var(--text-muted); line-height: 1.4; }
+.menu-row-main { align-items: flex-start; }
+.menu-row-main .icon { margin-top: 2px; }
+
+/* Reorder payout order — the Menu's Group section. */
+.reorder-list { display: flex; flex-direction: column; gap: 7px; margin-bottom: 12px; }
+.reorder-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-card-alt);
+}
+.reorder-pos {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.reorder-name { flex: 1; font-size: 14px; color: var(--text-primary); min-width: 0; }
+.reorder-btns { display: flex; gap: 5px; flex-shrink: 0; }
+.reorder-btns button {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 14px;
+  cursor: pointer;
+}
+.reorder-btns button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.07); }
+.reorder-btns button:disabled { opacity: 0.3; cursor: default; }
+.reorder-note {
+  display: flex;
+  gap: 7px;
+  margin: 0 0 4px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+.reorder-note .icon { color: var(--accent); flex-shrink: 0; margin-top: 1px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .member-row-chevron { transition: none; }
+}
+
+/* ===================================================================
+ * Activity — grouped by day, amount-forward like a transaction list
+ * =================================================================== */
+.activity-group { margin-bottom: 18px; }
+.activity-day {
+  margin: 0 0 8px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.activity-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.activity-row:last-child { border-bottom: none; }
+
+/* Icon + tone name the kind of event before the text is read. */
+.activity-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-muted);
+}
+.activity-mark.in { background: var(--success-soft); color: var(--success); }
+.activity-mark.out, .activity-mark.rejected { background: var(--danger-soft); color: var(--danger); }
+.activity-mark.pending { background: var(--pending-review-soft); color: var(--pending-review); }
+.activity-mark.payout { background: var(--accent-soft); color: var(--accent); }
+
+.activity-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.activity-row .activity-text {
+  font-size: 13.2px;
+  color: var(--text-primary);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.activity-meta { display: flex; align-items: center; gap: 7px; font-size: 11.3px; color: var(--text-muted); }
+
+.activity-chip-state {
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 20px;
+}
+.activity-chip-state.pending { background: var(--pending-review-soft); color: var(--pending-review); }
+.activity-chip-state.rejected { background: var(--danger-soft); color: var(--danger); }
+
+/* Amounts line up in their own column; tabular figures keep the digits aligned. */
+.activity-amt {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  padding-top: 1px;
+}
+.activity-amt.in { color: var(--success); }
+.activity-amt.out { color: var(--danger); }
+
+.activity-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 34px 20px;
+  text-align: center;
+  color: var(--text-muted);
+}
+.activity-empty-state p { margin: 0; font-size: 13.5px; }
+.activity-empty-state .activity-empty-note { font-size: 12.5px; max-width: 34ch; line-height: 1.5; }
+
+/* ===================================================================
+ * Insights — this round's status
+ * =================================================================== */
+.donut-card {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px 18px;
+  margin-bottom: 18px;
+}
+.donut { flex-shrink: 0; }
+/* One status across the whole round: a sentence, not a chart. */
+.donut-card-single { align-items: center; gap: 10px; }
+.donut-single-text { margin: 0; font-size: 13.5px; color: var(--text-muted); line-height: 1.5; }
+.donut-single-text b { color: var(--text-primary); font-weight: 600; }
+.donut-legend { list-style: none; margin: 0; padding: 0; flex: 1; min-width: 150px; }
+.donut-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 0;
+  font-size: 13px;
+}
+/* The swatch carries identity; the words stay in normal ink so the legend is
+   never colour-alone and never reads as coloured text. */
+.donut-swatch { width: 11px; height: 11px; border-radius: 3px; flex-shrink: 0; }
+.donut-legend-label { flex: 1; color: var(--text-primary); }
+.donut-legend-n {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===================================================================
+ * Phase 6 — telling people what happened
+ * =================================================================== */
+
+/* Shared submit/upload state: progress and failure report where the action
+   was taken, so a retry doesn't mean re-entering anything. */
+.submit-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.submit-state.working { background: var(--bg-card-alt); color: var(--text-muted); }
+.submit-state.failed {
+  background: var(--danger-soft);
+  border: 1px solid rgba(225, 83, 83, 0.32);
+  color: var(--text-primary);
+  flex-wrap: wrap;
+}
+.submit-state-main { display: flex; align-items: flex-start; gap: 8px; flex: 1; min-width: 0; }
+.submit-state-main .icon { color: var(--danger); flex-shrink: 0; margin-top: 1px; }
+.submit-retry, .banner-retry {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--danger);
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.submit-retry:hover, .banner-retry:hover { background: rgba(225, 83, 83, 0.14); }
+.banner-retry { margin-left: 8px; }
+
+.submit-spinner {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-top-color: var(--accent);
+  animation: pfSpin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+@keyframes pfSpin { to { transform: rotate(360deg); } }
+
+/* Releasing needs its receipt: the field says so, and the drop target reads as
+   waiting rather than optional. */
+.field-required {
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 700;
+  margin-left: 5px;
+}
+.proof-upload.needed { border-color: rgba(245, 166, 35, 0.45); }
+
+.copy-reminder-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 9px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-card-alt);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.copy-reminder-btn:hover { background: rgba(255, 255, 255, 0.07); }
+
+/* Restore — the three states share one shell. */
+.restore-done, .restore-invalid {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 15px;
+  margin-bottom: 6px;
+}
+.restore-done { color: var(--success); }
+.restore-invalid { color: var(--danger); }
+.restore-summary { margin: 10px 0 0; padding-left: 20px; }
+.restore-summary li { font-size: 13px; color: var(--text-muted); margin-bottom: 4px; }
+.restore-summary b { color: var(--text-primary); }
+.restore-hint {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 10px 0;
+}
+.restore-hint .icon { color: var(--text-muted); flex-shrink: 0; margin-top: 2px; }
+.restore-hint code {
+  background: var(--bg-card-alt);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+.restore-untouched { font-size: 12.5px; color: var(--success); margin: 0; }
+
+/* Undo one confirmed payment, inline in the cycle row it belongs to. */
+/* The cash path's gate. Same shell as undo, but amber-edged rather than red:
+   it is adding money on trust, not destroying a record. */
+.mark-paid-panel { border-color: var(--accent); }
+.undo-paid-panel {
+  grid-column: 1 / -1;
+  margin-top: 8px;
+  padding: 11px 13px;
+  border: 1px solid rgba(225, 83, 83, 0.32);
+  border-radius: 10px;
+  background: var(--danger-soft);
+}
+.undo-paid-text { margin: 0 0 10px; font-size: 12.5px; color: var(--text-primary); line-height: 1.5; }
+.undo-paid-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.undo-paid-btns button { flex: 1; min-width: 120px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .submit-spinner { animation: none; border-top-color: var(--text-muted); }
+}
+
+/* ==========================================================================
+   Activity — desktop table
+   The design gives desktop its own treatment rather than the phone list at a
+   wider measure. Columns cover what activity_log actually holds; see the note
+   in renderActivityView() for why Member and Round are not among them.
+   ========================================================================== */
+.activity-table-wrap {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-card);
+  overflow: hidden;
+}
+.activity-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+.activity-table thead th {
+  text-align: left;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.activity-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  vertical-align: top;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+.activity-table tbody tr:last-child td { border-bottom: 0; }
+.activity-table tbody tr:hover td { background: rgba(255, 255, 255, 0.025); }
+
+/* Date over time, so the column stays narrow and the day is what you scan. */
+.at-when { white-space: nowrap; width: 1%; }
+.at-date { display: block; font-weight: 600; }
+.at-time { display: block; font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+
+.at-type { width: 1%; }
+.at-type-tag {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.at-type-tag.payment { border-color: var(--success); color: var(--success); }
+.at-type-tag.payout { border-color: var(--accent); color: var(--accent); }
+
+.at-detail { min-width: 0; }
+/* Amounts line up as a column of figures, so they compare down the page. */
+.at-amount {
+  text-align: right;
+  white-space: nowrap;
+  width: 1%;
+  font-variant-numeric: tabular-nums;
+}
+.at-status { width: 1%; white-space: nowrap; }
+.at-dash { color: var(--text-muted); }
+.activity-chip-state.confirmed {
+  background: var(--success-soft);
+  color: var(--success);
+}
+.activity-chip-state.released {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.activity-table-wrap .activity-empty-state { border-top: 1px solid var(--border); }
+
+/* Activity table — member and round columns, and their dropdowns (007). */
+.activity-selects { display: inline-flex; gap: 8px; margin-left: auto; }
+.activity-select select {
+  appearance: none;
+  background: var(--bg-card)
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M1 1l4 4 4-4' fill='none' stroke='%238B93A7' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>")
+    no-repeat right 12px center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  font-size: 12.5px;
+  font-weight: 500;
+  padding: 7px 30px 7px 14px;
+  cursor: pointer;
+}
+.activity-select select:hover { border-color: var(--accent); }
+.activity-select select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.at-member { white-space: nowrap; width: 1%; }
+.at-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+.at-who { vertical-align: middle; }
+.at-round { white-space: nowrap; width: 1%; color: var(--text-muted); }
+
+/* Says what the filters cannot reach, rather than letting a partial view of
+   financial history look complete. */
+.activity-unattributed {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.activity-unattributed .icon { color: var(--accent); flex-shrink: 0; margin-top: 2px; }
+.activity-unattributed b { color: var(--text-primary); font-weight: 600; }
+
+/* Visible to screen readers only — the dropdowns show their current value as
+   their label, so the "what does this filter" name has to live somewhere. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Why a rejection needs a reason, said where the treasurer is deciding. */
+.reject-note-help {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  text-align: left;
+}
+
+/* Page behind an open dialog/sheet does not scroll. Set by render() from
+   isAnyModalOpen(); the dialog's own body scrolls internally instead. */
+body.modal-open {
+  overflow: hidden;
+  touch-action: none;
+}
+body.modal-open .modal-overlay,
+body.modal-open .lightbox-overlay { touch-action: auto; }
+
+/* The no-receipt fallback. Deliberately visually secondary and only rendered
+   after an upload has actually failed — it exists so a real transfer is never
+   unrepresentable, not as an easier route past the receipt requirement. */
+.release-noreceipt {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+.release-noreceipt-text {
+  margin: 0 0 8px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  text-align: left;
+}
+
+/* Not a field. Every round pays out exactly the round goal, so the amount is
+   a stated figure rather than something to type — which also removes the last
+   way to mistype a payout. */
+.payout-amount-fixed {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 15px;
+  margin-bottom: 8px;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.payout-amount-value {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.payout-amount-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.payout-amount-tag .icon { display: block; flex: 0 0 auto; }
+
+/* ==========================================================================
+   Payment sheets — Contribute / Review / Release
+   Shared pieces, laid out as the mockups draw them: a titled head with a close
+   affordance, a QR matted on white, grouped rows in one panel, and files shown
+   as chips rather than bare upload boxes.
+   ========================================================================== */
+.sheet-pay { text-align: left; }
+
+.sheet-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.sheet-head-titles { flex: 1 1 auto; min-width: 0; }
+.sheet-head h3 { margin: 0; text-align: left; }
+.sheet-head .modal-sub { margin: 3px 0 0; text-align: left; }
+.sheet-x {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.sheet-x:hover { background: rgba(255, 255, 255, 0.13); color: var(--text-primary); }
+.sheet-x .icon { display: block; }
+
+/* A QR reads against paper, not against the app's near-black. */
+.qr-card {
+  background: #fff;
+  border-radius: 16px;
+  padding: 18px 16px 14px;
+  text-align: center;
+  margin-bottom: 14px;
+}
+.qr-card-img {
+  position: relative;
+  display: block;
+  width: 100%;
+  max-width: 220px;
+  margin: 0 auto;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: zoom-in;
+}
+.qr-card-img img { display: block; width: 100%; height: auto; border-radius: 6px; }
+.qr-card-expand {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #1B2437;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.qr-card-expand .icon { display: block; }
+.qr-card-title {
+  margin: 12px 0 0;
+  font-family: 'Inter', sans-serif;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #14213D;
+}
+.qr-card-hint { margin: 2px 0 0; font-size: 11.5px; color: #6B7280; }
+.qr-card-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #B4740E;
+  text-decoration: none;
+  min-height: 32px;
+}
+.qr-card-save:hover { text-decoration: underline; }
+.qr-card-save .icon { display: block; flex: 0 0 auto; }
+
+/* One panel holding the amount and the pay-ahead control. */
+.pay-panel {
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 16px;
+}
+.pay-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 15px;
+}
+.pay-row + .pay-row { border-top: 1px solid var(--border); }
+.pay-row-label {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.pay-row-amount {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.pay-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pay-row-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.pay-row-note { font-size: 11.5px; color: var(--text-muted); }
+
+/* An attached file, named and sized, with its own way to replace it. */
+.sheet-section-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 8px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.file-chip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 13px;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 14px;
+}
+.file-chip-thumb {
+  position: relative;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  border-radius: 9px;
+  /* A screenshot that fails to decode must not spill its alt text across the
+     row — clip it and let the badge sit inside the corner instead. */
+  overflow: hidden;
+  font-size: 0;
+  border: none;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.06);
+  cursor: zoom-in;
+}
+.file-chip-thumb img {
+  width: 42px;
+  height: 42px;
+  object-fit: cover;
+  border-radius: 9px;
+  display: block;
+}
+.file-chip-badge {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: var(--success);
+  color: #08130E;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--bg-card);
+}
+.file-chip-badge .icon { display: block; }
+.file-chip-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.file-chip-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-chip-meta { font-size: 11.5px; color: var(--text-muted); }
+.file-chip-change {
+  flex: 0 0 auto;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Cancel is a way out, not a second choice competing with the action above. */
+.modal-btn-quiet {
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 11px;
+  min-height: 44px;
+  border-radius: 9px;
+  cursor: pointer;
+}
+.modal-btn-quiet:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.04); }
+
+/* Review sheet — claimant row and the proof card. */
+.claim-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.claim-row .avatar { flex: 0 0 auto; }
+.claim-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.claim-name { font-size: 14.5px; font-weight: 700; color: var(--text-primary); }
+.claim-meta { font-size: 11.5px; color: var(--text-muted); line-height: 1.4; }
+.claim-amount {
+  flex: 0 0 auto;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* The screenshot is the thing being judged, so it gets room and a real edge. */
+.proof-card {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  background: #fff;
+  cursor: zoom-in;
+}
+.proof-card img { display: block; width: 100%; max-height: 260px; object-fit: contain; }
+.proof-card-expand {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(20, 33, 61, 0.82);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.proof-card-expand .icon { display: block; }
+.proof-card-hint {
+  margin: 8px 0 14px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  text-align: center;
+}
+/* Nothing to check against is a warning, not a neutral placeholder. */
+.proof-card-empty {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 13px 14px;
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: left;
+  cursor: default;
+  margin-bottom: 14px;
+}
+.proof-card-empty .icon { flex: 0 0 auto; margin-top: 1px; }
+.modal-btn-confirm { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.modal-btn-confirm .icon { display: block; flex: 0 0 auto; }
+
+/* Release sheet — ready banner, recipient, and the destination card. */
+.ready-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 18px;
+  border-radius: 12px;
+  background: var(--success-soft);
+  border: 1px solid color-mix(in srgb, var(--success) 35%, transparent);
+  color: var(--success);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.45;
+  text-align: left;
+}
+.ready-banner-icon {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--success) 26%, transparent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.ready-banner-icon .icon { display: block; }
+
+.recipient-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 18px;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.recipient-card .avatar { flex: 0 0 auto; }
+.recipient-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.recipient-name { font-size: 14.5px; font-weight: 700; color: var(--text-primary); }
+.recipient-meta { font-size: 11.5px; color: var(--text-muted); line-height: 1.45; }
+
+/* White, because it holds a QR someone has to scan off the screen. */
+.send-to-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  background: #fff;
+  border-radius: 14px;
+  margin-bottom: 10px;
+  text-align: left;
+}
+.send-to-qr {
+  flex: 0 0 auto;
+  width: 76px;
+  height: 76px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: zoom-in;
+}
+.send-to-qr img { width: 76px; height: 76px; object-fit: contain; display: block; border-radius: 6px; }
+.send-to-lines { flex: 1 1 auto; min-width: 0; }
+.send-to-title {
+  font-family: 'Inter', sans-serif;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #14213D;
+}
+.send-to-acct { font-size: 11.5px; color: #6B7280; margin-top: 2px; }
+.send-to-zoom { font-size: 11.5px; font-weight: 600; color: #B4740E; margin-top: 5px; }
+.sheet-note {
+  margin: 0 0 18px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  text-align: left;
+}
+
+/* ==========================================================================
+   PIN wizard — step progress, wrong-entry shake, and the confirmation card
+   Setting a PIN is current → new → confirm → done. It used to be one field
+   saved on first submit, so a single mistyped digit became the group's PIN.
+   ========================================================================== */
+.pin-steps {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin: 0 0 16px;
+}
+.pin-step {
+  width: 34px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+}
+.pin-step.now { background: var(--accent); }
+.pin-step.done { background: var(--success); }
+
+/* A rejected entry has to look rejected — a cleared field on its own reads
+   as a dead button. Honours reduced motion below. */
+.pin-dots.shake { animation: pfShake 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97); }
+@keyframes pfShake {
+  10%, 90% { transform: translateX(-2px); }
+  20%, 80% { transform: translateX(4px); }
+  30%, 50%, 70% { transform: translateX(-7px); }
+  40%, 60% { transform: translateX(7px); }
+}
+
+.pin-done {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 22px 12px 8px;
+}
+.pin-master-offer {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  border: 1px solid rgba(245, 166, 35, 0.3);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  text-align: left;
+}
+.pin-done-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--success-soft);
+  color: var(--success);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.pin-done-icon .icon { display: block; }
+.pin-done-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  max-width: 30ch;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pin-dots.shake { animation: none; }
+}
+
+/* The account the payment QR belongs to, shown beside it so a member can
+   check the name before sending. Sits on the white QR card. */
+.qr-card-acct {
+  margin: 6px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+.qr-card-acct b { color: #14213D; font-size: 12.5px; font-weight: 700; }
+.qr-card-acct span { color: #6B7280; }
+.qr-account-note {
+  margin: 0 0 12px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  text-align: left;
+}
+
+/* Desktop roster: a vertical list with the status in words, as
+   DesktopHomeMember/Treasurer draw it. The mobile avatar strip conveyed
+   status by ring colour plus a 10px glyph, which on the widest surface is
+   both a design mismatch and a colour-only cue. */
+.roster-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: visible;
+  padding: 0;
+}
+.roster-list::after { content: none; }
+.roster-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 7px 8px;
+  background: none;
+  border: none;
+  border-radius: 9px;
+  cursor: pointer;
+  text-align: left;
+}
+.roster-row:hover { background: rgba(255, 255, 255, 0.04); }
+.roster-row-avatar { flex: 0 0 auto; display: inline-flex; }
+.roster-row-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.roster-row-status {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.roster-row-status.paid { color: var(--success); }
+.roster-row-status.pending { color: var(--pending-review); }
+.roster-row-status.overdue,
+.roster-row-status.rejected { color: var(--danger); }
+
+/* Boot failure — the design's NoConnection artboard. Centred in the viewport
+   because there is no shell yet: nav, header and data have all failed to load. */
+.boot-error {
+  min-height: 78vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+}
+.boot-error-card {
+  width: 100%;
+  max-width: 280px;
+  text-align: center;
+  animation: pfFadeUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.boot-error-icon {
+  width: 80px;
+  height: 80px;
+  border-radius: 22px;
+  background: rgba(255,255,255,0.04);
+  border: 1px dashed rgba(255,255,255,0.16);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 22px;
+  color: rgba(255,255,255,0.28);
+}
+.boot-error-icon svg { width: 32px; height: 32px; }
+.boot-error-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 18px;
+  margin: 0 0 8px;
+  color: var(--text-primary);
+}
+.boot-error-sub {
+  font-size: 13.5px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin: 0 0 26px;
+}
+.boot-error-detail {
+  margin: -14px 0 22px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  opacity: 0.75;
+  word-break: break-word;
+}
+.boot-error-cta {
+  width: 100%;
+  height: 52px;
+  border: none;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #F5A623, #FFC966);
+  color: #14213D;
+  font-weight: 700;
+  font-size: 14.5px;
+  cursor: pointer;
+}
+.boot-error-cta:active { transform: scale(0.97); }
+@media (prefers-reduced-motion: reduce) {
+  .boot-error-card { animation: none; }
+  .boot-error-cta:active { transform: none; }
+}
+
+/* ---------------------------------------------------------------------------
+ * Sign-in (migration 008)
+ *
+ * NO APPROVED MOCKUP — member accounts postdate the design, which states the
+ * no-auth limitation outright (canvas.json, forgot-pin-notes). This borrows
+ * OnboardingWelcome.dc.html's composition (glow, round emblem, Space Grotesk
+ * headline, fund name in accent caps, gold gradient CTA) so it belongs to the
+ * same app rather than introducing a second visual language. Flagged for QA.
+ * ------------------------------------------------------------------------- */
+/* No nav and no sidebar while the gate is up, so the shell's chrome offsets
+   are cancelled and the card centres in the actual viewport. */
+body.auth-gate {
+  padding: 0 !important;
+}
+.signin {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 24px;
+  overflow: hidden;
+}
+.signin-glow {
+  position: absolute;
+  top: 4%;
+  left: 50%;
+  width: 340px;
+  height: 340px;
+  margin-left: -170px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(245, 166, 35, 0.24), transparent 70%);
+  filter: blur(36px);
+  pointer-events: none;
+}
+.signin-card {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 320px;
+  text-align: center;
+  animation: pfFadeUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.signin-emblem {
+  width: 104px;
+  height: 104px;
+  margin: 0 auto 26px;
+  border-radius: 50%;
+  background: linear-gradient(160deg, rgba(245, 166, 35, 0.2), rgba(76, 217, 192, 0.14));
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 0 46px -10px rgba(245, 166, 35, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+.signin-title {
+  margin: 0 0 8px;
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  color: var(--text-primary);
+}
+.signin-fund {
+  margin: 0 0 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.signin-sub {
+  margin: 0 0 26px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+.signin-btn {
+  width: 100%;
+  height: 52px;
+  border: none;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #F5A623, #FFC966);
+  color: #14213D;
+  font-weight: 700;
+  font-size: 14.5px;
+  cursor: pointer;
+}
+/* A dead-end is a warning, not an invitation — the emblem drops the gold. */
+.signin-emblem-warn {
+  background: linear-gradient(160deg, rgba(225, 83, 83, 0.18), rgba(225, 83, 83, 0.06));
+  border-color: rgba(225, 83, 83, 0.3);
+  box-shadow: 0 0 46px -12px rgba(225, 83, 83, 0.35);
+  color: var(--danger);
+}
+/* Sign-out is the way out of a dead-end, not the happy path, so it does not
+   wear the gold gradient the real CTA uses. */
+.signin-btn-quiet {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: var(--text-primary);
+}
+.signin-btn:active { transform: scale(0.97); }
+.signin-btn:disabled { opacity: 0.6; cursor: default; transform: none; }
+.signin-note {
+  margin: 14px 0 0;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+@media (prefers-reduced-motion: reduce) {
+  .signin-card { animation: none; }
+  .signin-btn:active { transform: none; }
+}
+
+/* ---------------------------------------------------------------------------
+ * Edit Profile / Change Photo (EditProfile.dc.html, ProfilePhotoSheet.dc.html)
+ *
+ * Both are bottom sheets in the design, so they reuse .sheet-pay's shape and
+ * add only what is specific to them: the grabber, the avatar-with-camera-badge,
+ * the name field's live hint, and the grouped photo rows.
+ * ------------------------------------------------------------------------- */
+.profile-avatar-wrap { display: flex; justify-content: center; margin-bottom: 20px; }
+.profile-avatar-btn,
+.profile-avatar-static {
+  position: relative;
+  display: inline-flex;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+.profile-avatar-static { cursor: default; }
+/* The camera badge, notched into the ring with the page colour so it reads as
+   sitting on top rather than inside. */
+.profile-avatar-badge {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2.5px solid var(--bg-primary);
+  color: #14213D;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.profile-avatar-btn:active { transform: scale(0.95); }
+
+.profile-photo-pending {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: -8px 0 18px;
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: var(--success-soft);
+  border: 1px solid rgba(76, 175, 131, 0.3);
+  color: var(--success);
+  font-size: 12px;
+}
+.profile-name-input {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 16px;
+  margin-bottom: 6px;
+}
+.profile-name-hint {
+  margin: 0 0 20px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.profile-name-hint.is-error { color: var(--danger); }
+
+/* ---- Change Photo ---- */
+.photo-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 20px;
+}
+.profile-avatar-static { margin-bottom: 10px; }
+.photo-head h3 { margin: 0; font-size: 16px; }
+.photo-sub { margin: 2px 0 0; font-size: 12px; color: var(--text-muted); }
+
+.photo-options {
+  border-radius: 16px;
+  background: rgba(20, 42, 66, 0.5);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.photo-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-primary);
+}
+.photo-options .photo-row + .photo-row { border-top: 1px solid rgba(255, 255, 255, 0.06); }
+.photo-row:hover { background: rgba(255, 255, 255, 0.04); }
+.photo-row:disabled { opacity: 0.55; cursor: default; }
+.photo-row-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.photo-row-icon.accent { background: var(--accent-soft); color: var(--accent); }
+.photo-row-icon.teal { background: rgba(76, 217, 192, 0.14); color: #4CD9C0; }
+.photo-row-icon.danger { background: var(--danger-soft); color: var(--danger); }
+.photo-row-label { flex: 1; font-size: 14px; font-weight: 500; }
+/* Deliberately outside the grouped card and in red — removing is not another
+   way to upload, and the design styles it apart for exactly that reason. */
+.photo-row-danger {
+  border-radius: 16px;
+  background: rgba(225, 83, 83, 0.06);
+  border: 1px solid rgba(225, 83, 83, 0.25);
+  margin-bottom: 14px;
+}
+.photo-row-danger .photo-row-label { color: var(--danger); font-weight: 600; }
+.photo-cancel {
+  width: 100%;
+  padding: 13px 0;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-primary);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+@media (prefers-reduced-motion: reduce) {
+  .profile-avatar-btn:active { transform: none; }
+}
+
+/* ---------------------------------------------------------------------------
+ * Onboarding — Onboarding{Welcome,HowItWorks,HowToPay,PayoutOrder,WhoAreYou}
+ * and their Desktop* counterparts.
+ *
+ * One render path, two frames: the phone fills the viewport with Skip pinned
+ * top-right, the desktop centres a 520px column, exactly as the two artboard
+ * sets draw it.
+ * ------------------------------------------------------------------------- */
+.onboarding {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 20px 24px calc(28px + env(safe-area-inset-bottom, 0px));
+  overflow: hidden;
+}
+.ob-top { display: flex; justify-content: flex-end; }
+.ob-skip {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 8px;
+}
+.ob-skip:active { opacity: 0.6; }
+.ob-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  animation: pfFadeUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.ob-emblem {
+  width: 104px;
+  height: 104px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 26px;
+  flex: none;
+}
+.ob-emblem.gold {
+  background: linear-gradient(160deg, rgba(245,166,35,0.2), rgba(76,217,192,0.14));
+  box-shadow: 0 0 46px -10px rgba(245, 166, 35, 0.4);
+  color: var(--accent);
+}
+.ob-emblem.teal {
+  background: linear-gradient(160deg, rgba(76,217,192,0.2), rgba(245,166,35,0.12));
+  box-shadow: 0 0 46px -10px rgba(76, 217, 192, 0.35);
+  color: #4CD9C0;
+}
+.ob-title {
+  margin: 0 0 8px;
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  max-width: 300px;
+  color: var(--text-primary);
+}
+.ob-kicker {
+  margin: 0 0 14px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ob-text {
+  margin: 4px 0 26px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  max-width: 300px;
+}
+.ob-panel {
+  width: 100%;
+  max-width: 340px;
+  padding: 16px;
+  border-radius: 16px;
+  background: rgba(20, 42, 66, 0.55);
+  border: 1px solid var(--border);
+}
+.ob-cycle-bars { display: flex; gap: 5px; margin-bottom: 10px; }
+.ob-cycle-bar {
+  flex: 1;
+  height: 10px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--accent), #4CD9C0);
+}
+.ob-panel-note { margin: 0; font-size: 12.5px; color: var(--text-muted); text-align: left; }
+.ob-panel-note b {
+  color: var(--text-primary);
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+}
+
+/* How-to-pay: three steps with arrows between them. */
+.ob-steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ob-step { display: flex; flex-direction: column; align-items: center; gap: 7px; }
+.ob-step-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ob-step-icon.accent { background: var(--accent-soft); border: 1px solid rgba(245,166,35,0.3); color: var(--accent); }
+.ob-step-icon.violet { background: var(--pending-review-soft); border: 1px solid rgba(155,127,224,0.3); color: var(--pending-review); }
+.ob-step-icon.success { background: var(--success-soft); border: 1px solid rgba(76,175,131,0.3); color: var(--success); }
+.ob-step-label { font-size: 11.5px; color: var(--text-muted); }
+.ob-step-arrow { color: var(--text-muted); opacity: 0.5; font-size: 15px; margin-bottom: 18px; }
+
+/* Payout order: the REAL roster, with the live round highlighted. */
+.ob-order { display: flex; flex-direction: column; gap: 6px; padding: 12px; }
+.ob-order-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+.ob-order-row.is-now {
+  background: rgba(245, 166, 35, 0.12);
+  border: 1px solid rgba(245, 166, 35, 0.4);
+}
+.ob-order-pos {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.ob-order-name { flex: 1; text-align: left; color: var(--text-primary); }
+.ob-order-word { font-size: 11.5px; color: var(--text-muted); }
+.ob-order-word.paid { color: var(--success); }
+
+/* Who-are-you: the same grouped-rows card the design uses. */
+.ob-picker {
+  width: 100%;
+  max-width: 340px;
+  border-radius: 16px;
+  background: rgba(20, 42, 66, 0.55);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.ob-picker-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 14px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text-primary);
+}
+.ob-picker-row + .ob-picker-row { border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.ob-picker-row:hover { background: rgba(255, 255, 255, 0.04); }
+.ob-picker-name { flex: 1; font-size: 14.5px; font-weight: 600; }
+.ob-picker-chevron { color: var(--text-muted); }
+
+.ob-foot { flex: none; animation: pfFadeUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.12s both; }
+.ob-dots { display: flex; gap: 8px; justify-content: center; margin-bottom: 20px; }
+.ob-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+}
+.ob-dot.active { width: 22px; border-radius: 3px; background: var(--accent); }
+.ob-next {
+  width: 100%;
+  height: 52px;
+  border: none;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #F5A623, #FFC966);
+  color: #14213D;
+  font-weight: 700;
+  font-size: 14.5px;
+  cursor: pointer;
+}
+.ob-next:active { transform: scale(0.97); }
+.ob-skip-wide {
+  width: 100%;
+  padding: 14px 0;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Desktop: a centred column, as the Desktop* artboards draw it. */
+@media (min-width: 900px) {
+  .onboarding {
+    align-items: center;
+    justify-content: center;
+    padding: 40px;
+  }
+  .ob-top { position: absolute; top: 24px; right: 32px; }
+  .ob-body,
+  .ob-foot { width: 100%; max-width: 520px; }
+  .ob-body { flex: none; }
+  .ob-title { font-size: 30px; max-width: none; }
+  .ob-text { font-size: 15px; max-width: 440px; margin-bottom: 32px; }
+  .ob-panel, .ob-picker { max-width: 440px; }
+  .ob-foot { margin-top: 34px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ob-body, .ob-foot { animation: none; }
+  .ob-next:active { transform: none; }
+}

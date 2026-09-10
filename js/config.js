@@ -28,4 +28,19 @@ window.APP_CONFIG = {
   // auto-generated "N-member sinking fund · ₱X on the 15th & end of every
   // month" summary instead.
   SUBTITLE: "ViTAMiN Fund 2027",
+
+  // Member accounts (migration 008). Three states, so switching auth on is a
+  // decision you make AFTER checking it works — not a side effect of a deploy:
+  //
+  //   "off"       no auth anywhere. Exactly how the app behaved before 008.
+  //   "optional"  a "Sign in" row appears in Menu and signing in works, but
+  //               the app is fully usable without it. Use this to test Google
+  //               on a real phone without locking the other four members out.
+  //   "required"  no session, no app: the sign-in screen replaces everything.
+  //
+  // Leave this on "off" until Google is enabled in Supabase (Authentication ->
+  // Providers) AND this site's URL is listed under Authentication -> URL
+  // Configuration -> Redirect URLs. Turning it to "required" before both are
+  // true locks every member out, including the treasurer.
+  AUTH_MODE: "optional",
 };

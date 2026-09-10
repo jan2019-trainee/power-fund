@@ -1,0 +1,101 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    a { color: #F5A623; }
+    a:hover { color: #ffb733; }
+    .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .pf-fade { opacity: 0; animation: pfFadeUp .5s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfFadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pfDrift1 { 0%, 100% { transform: translate(-8%, -6%) scale(1); } 50% { transform: translate(6%, 4%) scale(1.1); } }
+    .pf-row:active { transform: scale(0.98); background: rgba(255,255,255,0.06) !important; }
+    .pf-skip:active { opacity: 0.6; }
+    @media (prefers-reduced-motion: reduce) {
+      .pf-fade { animation: none; opacity: 1; }
+      .pf-glow1 { animation: none; }
+    }
+  </style>
+</helmet>
+
+<div style="position:relative; width:390px; height:844px; overflow:hidden; background:#0D1B2A; border-radius:38px; border:1px solid rgba(255,255,255,0.08); font-family:'Inter',sans-serif; color:#EDEFF2;">
+
+  <div class="pf-glow1" style="position:absolute; top:20px; left:50%; margin-left:-170px; width:340px; height:340px; border-radius:50%; background:radial-gradient(circle, rgba(245,166,35,0.2), transparent 70%); filter:blur(36px); animation:pfDrift1 17s ease-in-out infinite;"></div>
+
+  <div style="position:relative; z-index:1; height:100%; padding:20px 32px 32px; display:flex; flex-direction:column;">
+
+    <div style="display:flex; justify-content:flex-end;">
+      <button class="pf-skip" style="background:none; border:none; color:#93A2B8; font-family:'Inter',sans-serif; font-size:13px; font-weight:600; cursor:pointer; padding:8px;">Skip</button>
+    </div>
+
+    <div class="pf-fade" style="flex:1; display:flex; flex-direction:column; align-items:center; animation-delay:.05s; padding-top:6px;">
+
+      <div style="width:88px; height:88px; border-radius:50%; background:linear-gradient(160deg, rgba(245,166,35,0.2), rgba(76,217,192,0.14)); border:1px solid rgba(255,255,255,0.14); display:flex; align-items:center; justify-content:center; box-shadow:0 0 40px -10px rgba(245,166,35,0.4); margin-bottom:20px;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:36px; height:36px; stroke-width:1.7; color:#F5A623;">
+          <circle cx="9" cy="8" r="3.2"/>
+          <path d="M2.8 20.2c.5-3.6 3-5.6 6.2-5.6s5.7 2 6.2 5.6"/>
+          <circle cx="17.3" cy="8.6" r="2.4"/>
+          <path d="M15.9 14.3c2.3.5 4 2.3 4.3 5.4"/>
+        </svg>
+      </div>
+
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:22px; letter-spacing:-.2px; margin-bottom:8px; text-align:center;">Which one is you?</div>
+      <div style="font-size:13.5px; line-height:1.55; color:#93A2B8; max-width:280px; text-align:center; margin-bottom:22px;">This just personalizes your dashboard with your own status. You can change it anytime.</div>
+
+      <div style="width:100%; border-radius:16px; background:rgba(20,42,66,0.55); border:1px solid rgba(255,255,255,0.1); overflow:hidden;">
+
+        <button class="pf-row" style="width:100%; display:flex; align-items:center; gap:12px; padding:13px 14px; background:none; border:none; border-bottom:1px solid rgba(255,255,255,0.08); cursor:pointer; text-align:left; transition:transform .1s ease;">
+          <div style="width:38px; height:38px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14px; flex-shrink:0; box-shadow:0 0 0 2px #4CAF83;">A</div>
+          <span style="flex:1; font-size:14.5px; font-weight:600; color:#EDEFF2;">Ana</span>
+          <svg class="icon" viewBox="0 0 24 24" style="width:15px; height:15px; color:#93A2B8; flex-shrink:0;"><polyline points="9 6 15 12 9 18"/></svg>
+        </button>
+
+        <button class="pf-row" style="width:100%; display:flex; align-items:center; gap:12px; padding:13px 14px; background:none; border:none; border-bottom:1px solid rgba(255,255,255,0.08); cursor:pointer; text-align:left; transition:transform .1s ease;">
+          <div style="width:38px; height:38px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14px; flex-shrink:0; box-shadow:0 0 0 2px #F5A623;">B</div>
+          <span style="flex:1; font-size:14.5px; font-weight:600; color:#EDEFF2;">Ben</span>
+          <svg class="icon" viewBox="0 0 24 24" style="width:15px; height:15px; color:#93A2B8; flex-shrink:0;"><polyline points="9 6 15 12 9 18"/></svg>
+        </button>
+
+        <button class="pf-row" style="width:100%; display:flex; align-items:center; gap:12px; padding:13px 14px; background:none; border:none; border-bottom:1px solid rgba(255,255,255,0.08); cursor:pointer; text-align:left; transition:transform .1s ease;">
+          <div style="width:38px; height:38px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14px; flex-shrink:0; box-shadow:0 0 0 1.5px rgba(255,255,255,0.14); color:#93A2B8;">C</div>
+          <span style="flex:1; font-size:14.5px; font-weight:600; color:#EDEFF2;">Cathy</span>
+          <svg class="icon" viewBox="0 0 24 24" style="width:15px; height:15px; color:#93A2B8; flex-shrink:0;"><polyline points="9 6 15 12 9 18"/></svg>
+        </button>
+
+        <button class="pf-row" style="width:100%; display:flex; align-items:center; gap:12px; padding:13px 14px; background:none; border:none; border-bottom:1px solid rgba(255,255,255,0.08); cursor:pointer; text-align:left; transition:transform .1s ease;">
+          <div style="width:38px; height:38px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14px; flex-shrink:0; box-shadow:0 0 0 1.5px rgba(255,255,255,0.14); color:#93A2B8;">D</div>
+          <span style="flex:1; font-size:14.5px; font-weight:600; color:#EDEFF2;">Dan</span>
+          <svg class="icon" viewBox="0 0 24 24" style="width:15px; height:15px; color:#93A2B8; flex-shrink:0;"><polyline points="9 6 15 12 9 18"/></svg>
+        </button>
+
+        <button class="pf-row" style="width:100%; display:flex; align-items:center; gap:12px; padding:13px 14px; background:none; border:none; cursor:pointer; text-align:left; transition:transform .1s ease;">
+          <div style="width:38px; height:38px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:14px; flex-shrink:0; box-shadow:0 0 0 1.5px rgba(255,255,255,0.14); color:#93A2B8;">E</div>
+          <span style="flex:1; font-size:14.5px; font-weight:600; color:#EDEFF2;">Elena</span>
+          <svg class="icon" viewBox="0 0 24 24" style="width:15px; height:15px; color:#93A2B8; flex-shrink:0;"><polyline points="9 6 15 12 9 18"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="pf-fade" style="animation-delay:.12s;">
+      <div style="display:flex; gap:8px; justify-content:center; margin-bottom:16px;">
+        <span style="width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,0.18);"></span>
+        <span style="width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,0.18);"></span>
+        <span style="width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,0.18);"></span>
+        <span style="width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,0.18);"></span>
+        <span style="width:22px; height:6px; border-radius:3px; background:#F5A623;"></span>
+      </div>
+      <button class="pf-skip" style="width:100%; text-align:center; background:none; border:none; color:#93A2B8; font-family:'Inter',sans-serif; font-size:13px; font-weight:600; cursor:pointer; padding:6px;">Skip for now &mdash; go to dashboard</button>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

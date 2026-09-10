@@ -1,0 +1,92 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .pf-fade { opacity: 0; animation: pfFadeUp .5s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfFadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .pf-back:hover { opacity: 0.8; }
+    .pf-cta:hover { filter: brightness(1.08); }
+    .pf-cta:active { transform: scale(0.98); }
+    .pf-arrow:hover { background: rgba(255,255,255,0.1) !important; }
+    .pf-arrow:active { transform: scale(0.92); }
+    @keyframes pfRowSwap { 0% { opacity: 0.4; } 100% { opacity: 1; } }
+    .pf-row-swapped { animation: pfRowSwap .3s ease both; }
+  </style>
+</helmet>
+
+<div style="position:relative; width:1440px; height:900px; overflow:hidden; background:#0D1B2A; border-radius:16px; border:1px solid rgba(255,255,255,0.08); font-family:'Inter',sans-serif; color:#EDEFF2; display:flex; align-items:center; justify-content:center;">
+
+  <button class="pf-back" style="position:absolute; top:32px; left:40px; display:flex; align-items:center; gap:6px; background:none; border:none; color:#93A2B8; font-family:'Inter',sans-serif; font-size:13.5px; font-weight:600; cursor:pointer;">
+    <svg class="icon" viewBox="0 0 24 24" style="width:16px; height:16px;"><polyline points="15 18 9 12 15 6"/></svg>
+    Back
+  </button>
+
+  <div class="pf-fade" style="position:relative; width:480px;">
+    <div style="font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:26px; margin-bottom:10px;">Set payout order</div>
+    <div style="font-size:14px; line-height:1.6; color:#93A2B8; margin-bottom:24px;">Round 1 goes to whoever's first. You can still reorder rounds that haven't started yet, later from Menu.</div>
+
+    <div id="pf-order-list" style="margin-bottom:26px;"></div>
+
+    <div style="display:flex; justify-content:center; gap:8px; margin-bottom:22px;">
+      <span style="width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,0.18);"></span>
+      <span style="width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,0.18);"></span>
+      <span style="width:22px; height:6px; border-radius:3px; background:#F5A623;"></span>
+      <span style="width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,0.18);"></span>
+    </div>
+    <button class="pf-cta" style="width:100%; height:52px; border:none; border-radius:16px; background:linear-gradient(135deg,#F5A623,#e0951d); color:#14213D; font-family:'Inter',sans-serif; font-weight:700; font-size:14.5px; cursor:pointer;">Next</button>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {
+  componentDidMount() {
+    var members = [
+      { initial: 'A', name: 'Ana' },
+      { initial: 'B', name: 'Ben' },
+      { initial: 'C', name: 'Cathy' },
+      { initial: 'D', name: 'Dan' },
+      { initial: 'E', name: 'Elena' }
+    ];
+    var list = document.getElementById('pf-order-list');
+    function render(swappedIdx) {
+      list.innerHTML = '';
+      members.forEach(function (m, i) {
+        var row = document.createElement('div');
+        row.className = (swappedIdx && (i === swappedIdx[0] || i === swappedIdx[1])) ? 'pf-row-swapped' : '';
+        row.style.cssText = 'display:flex; align-items:center; gap:12px; padding:11px 13px; border-radius:14px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); margin-bottom:8px;';
+        row.innerHTML =
+          '<span style="width:18px; font-size:12px; color:#93A2B8; font-weight:600;">#' + (i + 1) + '</span>' +
+          '<div style="width:34px; height:34px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:\'Space Grotesk\',sans-serif; font-weight:600; font-size:13px; flex-shrink:0;">' + m.initial + '</div>' +
+          '<span style="flex:1; font-size:14px; font-weight:500;">' + m.name + '</span>' +
+          '<button data-dir="up" data-i="' + i + '" class="pf-arrow" ' + (i === 0 ? 'disabled style="opacity:0.3;"' : '') + ' style="width:30px; height:30px; border-radius:8px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.14); color:#EDEFF2; cursor:pointer; display:flex; align-items:center; justify-content:center;"><svg class="icon" viewBox="0 0 24 24" style="width:13px; height:13px;"><path d="M18 15l-6-6-6 6"/></svg></button>' +
+          '<button data-dir="down" data-i="' + i + '" class="pf-arrow" ' + (i === members.length - 1 ? 'disabled style="opacity:0.3;"' : '') + ' style="width:30px; height:30px; border-radius:8px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.14); color:#EDEFF2; cursor:pointer; display:flex; align-items:center; justify-content:center; margin-left:6px;"><svg class="icon" viewBox="0 0 24 24" style="width:13px; height:13px;"><path d="M6 9l6 6 6-6"/></svg></button>';
+        list.appendChild(row);
+      });
+      Array.prototype.slice.call(list.querySelectorAll('.pf-arrow')).forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var i = parseInt(btn.getAttribute('data-i'), 10);
+          var dir = btn.getAttribute('data-dir');
+          var j = dir === 'up' ? i - 1 : i + 1;
+          if (j < 0 || j >= members.length) return;
+          var tmp = members[i]; members[i] = members[j]; members[j] = tmp;
+          render([i, j]);
+        });
+      });
+    }
+    render();
+  }
+}
+</script>
+</body>
+</html>

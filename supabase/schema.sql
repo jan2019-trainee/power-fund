@@ -195,3 +195,24 @@ create policy "payment_assets_update" on storage.objects for update to anon, aut
   using (bucket_id = 'payment-assets') with check (bucket_id = 'payment-assets');
 create policy "payment_assets_delete" on storage.objects for delete to anon, authenticated
   using (bucket_id = 'payment-assets');
+
+-- ---------------------------------------------------------------------------
+-- Storage bucket for member profile photos (see migration 009)
+-- ---------------------------------------------------------------------------
+insert into storage.buckets (id, name, public)
+values ('member-avatars', 'member-avatars', true)
+on conflict (id) do update set public = true;
+
+drop policy if exists "member_avatars_read"   on storage.objects;
+drop policy if exists "member_avatars_write"  on storage.objects;
+drop policy if exists "member_avatars_update" on storage.objects;
+drop policy if exists "member_avatars_delete" on storage.objects;
+
+create policy "member_avatars_read"   on storage.objects for select to anon, authenticated
+  using (bucket_id = 'member-avatars');
+create policy "member_avatars_write"  on storage.objects for insert to anon, authenticated
+  with check (bucket_id = 'member-avatars');
+create policy "member_avatars_update" on storage.objects for update to anon, authenticated
+  using (bucket_id = 'member-avatars') with check (bucket_id = 'member-avatars');
+create policy "member_avatars_delete" on storage.objects for delete to anon, authenticated
+  using (bucket_id = 'member-avatars');

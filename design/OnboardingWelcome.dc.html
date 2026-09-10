@@ -1,0 +1,68 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    a { color: #F5A623; }
+    a:hover { color: #ffb733; }
+    .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .pf-fade { opacity: 0; animation: pfFadeUp .5s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfFadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pfDrift1 { 0%, 100% { transform: translate(-8%, -6%) scale(1); } 50% { transform: translate(6%, 4%) scale(1.1); } }
+    .pf-cta:active { transform: scale(0.97); }
+    .pf-skip:active { opacity: 0.6; }
+    @media (prefers-reduced-motion: reduce) {
+      .pf-fade { animation: none; opacity: 1; }
+      .pf-glow1 { animation: none; }
+    }
+  </style>
+</helmet>
+
+<div style="position:relative; width:390px; height:844px; overflow:hidden; background:#0D1B2A; border-radius:38px; border:1px solid rgba(255,255,255,0.08); font-family:'Inter',sans-serif; color:#EDEFF2;">
+
+  <div class="pf-glow1" style="position:absolute; top:60px; left:50%; margin-left:-170px; width:340px; height:340px; border-radius:50%; background:radial-gradient(circle, rgba(245,166,35,0.24), transparent 70%); filter:blur(36px); animation:pfDrift1 17s ease-in-out infinite;"></div>
+
+  <div style="position:relative; z-index:1; height:100%; padding:20px 32px 32px; display:flex; flex-direction:column;">
+
+    <div style="display:flex; justify-content:flex-end;">
+      <button class="pf-skip" style="background:none; border:none; color:#93A2B8; font-family:'Inter',sans-serif; font-size:13px; font-weight:600; cursor:pointer; padding:8px;">Skip</button>
+    </div>
+
+    <div class="pf-fade" style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; animation-delay:.05s;">
+
+      <div style="width:104px; height:104px; border-radius:50%; background:linear-gradient(160deg, rgba(245,166,35,0.2), rgba(76,217,192,0.14)); border:1px solid rgba(255,255,255,0.14); display:flex; align-items:center; justify-content:center; box-shadow:0 0 46px -10px rgba(245,166,35,0.4); margin-bottom:26px;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:44px; height:44px; stroke-width:1.7; color:#F5A623;">
+          <rect x="3" y="6.5" width="18" height="13" rx="2.5"/>
+          <path d="M16.5 6.5V5.3A1.8 1.8 0 0 0 14.7 3.5H6A2.5 2.5 0 0 0 3.5 6"/>
+          <circle cx="17" cy="13" r="1.3" fill="currentColor" stroke="none"/>
+        </svg>
+      </div>
+
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:26px; letter-spacing:-.3px; margin-bottom:8px;">Welcome to Power Fund</div>
+      <div style="font-size:13.5px; font-weight:600; color:#F5A623; margin-bottom:16px; text-transform:uppercase; letter-spacing:.04em;">ViTAMiN Fund 2027</div>
+      <div style="font-size:15px; line-height:1.6; color:#93A2B8; max-width:280px;">A shared savings pot for the group. Everyone puts in a little every cycle &mdash; and takes turns receiving the whole pot.</div>
+    </div>
+
+    <div class="pf-fade" style="animation-delay:.12s;">
+      <div style="display:flex; gap:8px; justify-content:center; margin-bottom:20px;">
+        <span style="width:22px; height:6px; border-radius:3px; background:#F5A623;"></span>
+        <span style="width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,0.18);"></span>
+        <span style="width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,0.18);"></span>
+        <span style="width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,0.18);"></span>
+        <span style="width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,0.18);"></span>
+      </div>
+      <button class="pf-cta" style="width:100%; height:56px; border:none; border-radius:28px; background:linear-gradient(135deg, #F5A623, #FFC966); color:#14213D; font-family:'Inter',sans-serif; font-weight:700; font-size:15px; cursor:pointer; box-shadow:0 14px 26px -10px rgba(245,166,35,0.55), 0 0 0 1px rgba(255,255,255,0.1) inset; transition:transform .1s ease;">Next</button>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

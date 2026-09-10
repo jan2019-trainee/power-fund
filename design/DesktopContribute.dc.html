@@ -1,0 +1,112 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    a { color: #F5A623; }
+    .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .pf-modal { opacity: 0; animation: pfModalIn .32s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfModalIn { from { opacity: 0; transform: translate(-50%,-50%) translateY(10px) scale(0.98); } to { opacity: 1; transform: translate(-50%,-50%) translateY(0) scale(1); } }
+    .pf-cta:active { transform: scale(0.98); }
+    .pf-step-btn:active { transform: scale(0.9); }
+    .pf-x:hover { background: rgba(255,255,255,0.08) !important; }
+  </style>
+</helmet>
+
+<div style="position:relative; width:1440px; height:900px; overflow:hidden; background:#0D1B2A; border-radius:16px; border:1px solid rgba(255,255,255,0.08); font-family:'Inter',sans-serif; color:#EDEFF2;">
+
+  <!-- dimmed backdrop hint -->
+  <div style="opacity:0.35; filter:blur(1.5px); display:flex; height:100%;">
+    <div style="width:240px; height:100%; background:rgba(255,255,255,0.02); border-right:1px solid rgba(255,255,255,0.08);"></div>
+    <div style="flex:1; padding:32px 40px;">
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:24px;">Good evening, Cathy</div>
+    </div>
+  </div>
+  <div style="position:absolute; inset:0; background:rgba(5,10,18,0.6);"></div>
+
+  <!-- centered modal -->
+  <div class="pf-modal" style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:560px; background:linear-gradient(180deg, rgba(20,42,66,0.98), rgba(13,27,42,0.99)); border:1px solid rgba(255,255,255,0.12); border-radius:22px; box-shadow:0 30px 80px -20px rgba(0,0,0,0.7); padding:30px 32px;">
+
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:22px;">
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:19px;">Pay this cycle</div>
+      <button class="pf-x" style="width:32px; height:32px; border-radius:9px; background:none; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:16px; height:16px; color:#93A2B8;"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <div style="display:flex; gap:24px; margin-bottom:22px;">
+      <button style="width:120px; height:120px; border-radius:16px; background:#fff; border:none; padding:10px; cursor:pointer; flex-shrink:0;">
+        <svg viewBox="0 0 100 100" style="width:100%; height:100%;">
+          <rect x="0" y="0" width="28" height="28" fill="#0D1B2A"/><rect x="6" y="6" width="16" height="16" fill="#fff"/><rect x="10" y="10" width="8" height="8" fill="#0D1B2A"/>
+          <rect x="72" y="0" width="28" height="28" fill="#0D1B2A"/><rect x="78" y="6" width="16" height="16" fill="#fff"/><rect x="82" y="10" width="8" height="8" fill="#0D1B2A"/>
+          <rect x="0" y="72" width="28" height="28" fill="#0D1B2A"/><rect x="6" y="78" width="16" height="16" fill="#fff"/><rect x="10" y="82" width="8" height="8" fill="#0D1B2A"/>
+          <rect x="40" y="10" width="6" height="6" fill="#0D1B2A"/><rect x="52" y="10" width="6" height="6" fill="#0D1B2A"/><rect x="34" y="24" width="6" height="6" fill="#0D1B2A"/>
+          <rect x="46" y="34" width="6" height="6" fill="#0D1B2A"/><rect x="58" y="40" width="6" height="6" fill="#0D1B2A"/><rect x="34" y="46" width="6" height="6" fill="#0D1B2A"/>
+          <rect x="70" y="46" width="6" height="6" fill="#0D1B2A"/><rect x="46" y="58" width="6" height="6" fill="#0D1B2A"/><rect x="60" y="60" width="6" height="6" fill="#0D1B2A"/>
+          <rect x="34" y="66" width="6" height="6" fill="#0D1B2A"/><rect x="46" y="76" width="6" height="6" fill="#0D1B2A"/><rect x="58" y="82" width="6" height="6" fill="#0D1B2A"/>
+          <rect x="70" y="70" width="18" height="18" fill="#0D1B2A"/>
+        </svg>
+      </button>
+      <div style="flex:1;">
+        <div style="font-size:13px; font-weight:600; margin-bottom:2px;">GCash &middot; 09XX XXX XXXX</div>
+        <div style="font-size:12px; color:#93A2B8; margin-bottom:14px;">Scan or click to enlarge &middot; Round 2, Cycle 7</div>
+        <div style="display:flex; align-items:center; gap:12px; padding:12px 14px; border-radius:12px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08);">
+          <div style="width:36px; height:36px; border-radius:9px; background:rgba(76,217,192,0.14); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            <svg class="icon" viewBox="0 0 24 24" style="width:16px; height:16px; color:#4CD9C0;"><rect x="3" y="4" width="18" height="15" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M21 15l-5.5-5-6 5.5-2-2L3 18"/></svg>
+          </div>
+          <span style="flex:1; font-size:12.5px; font-weight:500;">proof-of-payment.jpg attached</span>
+          <span style="font-size:11px; color:#4CAF83; font-weight:600;">Ready</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="padding:16px; border-radius:14px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); margin-bottom:22px;">
+      <div style="display:flex; align-items:center; justify-content:space-between;">
+        <div>
+          <div style="font-size:12px; color:#93A2B8; margin-bottom:2px;">Pay ahead (optional)</div>
+          <div id="pf-cycles-hint" style="font-size:12.5px; color:#F5A623;">1 cycle &middot; this one only</div>
+        </div>
+        <div style="display:flex; align-items:center; gap:14px;">
+          <button id="pf-step-minus" class="pf-step-btn" style="width:32px; height:32px; border-radius:9px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.14); color:#EDEFF2; font-size:16px; cursor:pointer;">&minus;</button>
+          <span id="pf-step-count" style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:16px; width:16px; text-align:center;">1</span>
+          <button id="pf-step-plus" class="pf-step-btn" style="width:32px; height:32px; border-radius:9px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.14); color:#EDEFF2; font-size:16px; cursor:pointer;">+</button>
+        </div>
+      </div>
+    </div>
+
+    <button id="pf-pay-cta" class="pf-cta" style="width:100%; height:52px; border:none; border-radius:16px; background:linear-gradient(135deg,#F5A623,#e0951d); color:#14213D; font-family:'Inter',sans-serif; font-weight:700; font-size:14.5px; cursor:pointer;">Submit payment &middot; <span id="pf-amount">&#8369;1,000</span></button>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {
+  componentDidMount() {
+    var count = 1;
+    var minus = document.getElementById('pf-step-minus');
+    var plus = document.getElementById('pf-step-plus');
+    var countEl = document.getElementById('pf-step-count');
+    var hint = document.getElementById('pf-cycles-hint');
+    var amount = document.getElementById('pf-amount');
+    function render() {
+      countEl.textContent = count;
+      hint.textContent = count === 1 ? '1 cycle · this one only' : count + ' cycles · pays ahead';
+      amount.textContent = '₱' + (count * 1000).toLocaleString();
+      minus.disabled = count <= 1;
+      minus.style.opacity = count <= 1 ? '0.4' : '1';
+    }
+    if (minus) minus.addEventListener('click', function () { if (count > 1) { count--; render(); } });
+    if (plus) plus.addEventListener('click', function () { if (count < 6) { count++; render(); } });
+  }
+}
+</script>
+</body>
+</html>

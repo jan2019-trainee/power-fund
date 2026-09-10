@@ -1,0 +1,189 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    a { color: #F5A623; }
+    a:hover { color: #ffb733; }
+    .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .pf-fade { opacity: 0; animation: pfFadeUp .4s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfFadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pfSheetUp { from { opacity: 0; transform: translateY(28px); } to { opacity: 1; transform: translateY(0); } }
+    .pf-sheet { animation: pfSheetUp .38s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfDotPop { from { transform: scale(0.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    @keyframes pfShake { 10%,90% { transform: translateX(-2px); } 20%,80% { transform: translateX(4px); } 30%,50%,70% { transform: translateX(-8px); } 40%,60% { transform: translateX(8px); } }
+    .pf-shake { animation: pfShake .5s ease; }
+    .pf-chip:active { transform: scale(0.95); }
+    .pf-key:active { transform: scale(0.94); background: rgba(255,255,255,0.1) !important; }
+    input::placeholder { color: rgba(147,162,184,0.55); }
+    input:focus { outline: none; border-color: #E15353 !important; }
+    @media (prefers-reduced-motion: reduce) {
+      .pf-fade, .pf-sheet { animation: none; opacity: 1; }
+      .pf-shake { animation: none; }
+    }
+  </style>
+</helmet>
+
+<div style="position:relative; width:390px; height:820px; overflow:hidden; background:#0D1B2A; border-radius:38px; border:1px solid rgba(255,255,255,0.08); font-family:'Inter',sans-serif; color:#EDEFF2;">
+
+  <div class="pf-fade" style="padding:28px 20px 0; opacity:0.28; filter:blur(1.5px);">
+    <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:20px;">Power Fund</div>
+  </div>
+  <div style="position:absolute; inset:0; background:rgba(5,10,18,0.6);"></div>
+
+  <div class="pf-sheet" style="position:absolute; left:0; right:0; bottom:0; max-height:92%; overflow-y:auto; background:linear-gradient(180deg, rgba(20,42,66,0.97), rgba(13,27,42,0.99)); border-top:1px solid rgba(225,83,83,0.3); border-radius:26px 26px 0 0; box-shadow:0 -20px 50px -20px rgba(0,0,0,0.7); padding:12px 22px calc(22px + env(safe-area-inset-bottom, 0px));">
+
+    <div style="width:36px; height:4px; border-radius:3px; background:rgba(255,255,255,0.18); margin:0 auto 16px;"></div>
+
+    <!-- STEP 1: warning + type-to-confirm -->
+    <div id="pf-step-warn">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px;">
+        <div style="width:36px; height:36px; border-radius:10px; background:rgba(225,83,83,0.14); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+          <svg class="icon" viewBox="0 0 24 24" style="width:18px; height:18px; color:#E15353;"><path d="M10.3 4.6 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.6a2 2 0 0 0-3.4 0Z"/><path d="M12 9.5v4"/><circle cx="12" cy="17" r=".9" fill="currentColor" stroke="none"/></svg>
+        </div>
+        <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:18px; color:#E15353;">Forgot your PIN?</div>
+      </div>
+
+      <div style="font-size:13px; line-height:1.6; color:#93A2B8; margin-bottom:18px;">
+        There's no way to recover a forgotten treasurer PIN &mdash; this app doesn't have an account or server to verify who you are. The only way back in is to <b style="color:#EDEFF2;">erase all fund data and set a new PIN</b>.<br><br>
+        This permanently clears every contribution, the activity log, and all payout status. Members and their names are kept.<br><br>
+        <span style="color:#E15353; font-weight:600;">This cannot be undone.</span>
+      </div>
+
+      <div style="font-size:11px; color:#93A2B8; text-transform:uppercase; letter-spacing:.04em; margin-bottom:8px;">Type RESET to confirm</div>
+      <input id="pf-reset-type" placeholder="RESET" style="width:100%; padding:14px 16px; border-radius:14px; background:rgba(20,42,66,0.5); border:1.5px solid rgba(255,255,255,0.14); color:#EDEFF2; font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:15px; letter-spacing:.15em; text-transform:uppercase; margin-bottom:22px;">
+
+      <button id="pf-warn-next" disabled style="width:100%; height:54px; border:none; border-radius:16px; background:#E15353; color:#fff; font-family:'Inter',sans-serif; font-weight:700; font-size:15px; cursor:not-allowed; opacity:0.4; margin-bottom:10px;">Reset &amp; set new PIN</button>
+      <button class="pf-chip" style="width:100%; text-align:center; background:none; border:none; color:#93A2B8; font-family:'Inter',sans-serif; font-size:13px; font-weight:600; cursor:pointer; padding:10px 0 2px;">Back to PIN entry</button>
+    </div>
+
+    <!-- STEP 2: set new PIN -->
+    <div id="pf-step-pin" style="display:none;">
+      <div style="margin-bottom:6px;">
+        <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:18px;">Set a new PIN</div>
+        <div id="pf-pin-label" style="font-size:12.5px; color:#93A2B8; margin-top:2px;">Choose a new 4-digit PIN</div>
+      </div>
+
+      <div id="pf-dots" style="display:flex; justify-content:center; gap:16px; margin:22px 0 10px;">
+        <span class="pf-dot" style="width:16px; height:16px; border-radius:50%; border:1.5px solid rgba(255,255,255,0.25); background:none;"></span>
+        <span class="pf-dot" style="width:16px; height:16px; border-radius:50%; border:1.5px solid rgba(255,255,255,0.25); background:none;"></span>
+        <span class="pf-dot" style="width:16px; height:16px; border-radius:50%; border:1.5px solid rgba(255,255,255,0.25); background:none;"></span>
+        <span class="pf-dot" style="width:16px; height:16px; border-radius:50%; border:1.5px solid rgba(255,255,255,0.25); background:none;"></span>
+      </div>
+      <div id="pf-pin-error" style="text-align:center; font-size:11.5px; color:#E15353; font-weight:600; height:16px; margin-bottom:8px;"></div>
+
+      <div id="pf-keypad" style="display:grid; grid-template-columns:repeat(3, 1fr); gap:14px; max-width:280px; margin:0 auto;">
+        <button class="pf-key" data-k="1" style="height:56px; border-radius:16px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); color:#EDEFF2; font-family:'Space Grotesk',sans-serif; font-size:20px; font-weight:600; cursor:pointer;">1</button>
+        <button class="pf-key" data-k="2" style="height:56px; border-radius:16px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); color:#EDEFF2; font-family:'Space Grotesk',sans-serif; font-size:20px; font-weight:600; cursor:pointer;">2</button>
+        <button class="pf-key" data-k="3" style="height:56px; border-radius:16px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); color:#EDEFF2; font-family:'Space Grotesk',sans-serif; font-size:20px; font-weight:600; cursor:pointer;">3</button>
+        <button class="pf-key" data-k="4" style="height:56px; border-radius:16px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); color:#EDEFF2; font-family:'Space Grotesk',sans-serif; font-size:20px; font-weight:600; cursor:pointer;">4</button>
+        <button class="pf-key" data-k="5" style="height:56px; border-radius:16px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); color:#EDEFF2; font-family:'Space Grotesk',sans-serif; font-size:20px; font-weight:600; cursor:pointer;">5</button>
+        <button class="pf-key" data-k="6" style="height:56px; border-radius:16px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); color:#EDEFF2; font-family:'Space Grotesk',sans-serif; font-size:20px; font-weight:600; cursor:pointer;">6</button>
+        <button class="pf-key" data-k="7" style="height:56px; border-radius:16px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); color:#EDEFF2; font-family:'Space Grotesk',sans-serif; font-size:20px; font-weight:600; cursor:pointer;">7</button>
+        <button class="pf-key" data-k="8" style="height:56px; border-radius:16px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); color:#EDEFF2; font-family:'Space Grotesk',sans-serif; font-size:20px; font-weight:600; cursor:pointer;">8</button>
+        <button class="pf-key" data-k="9" style="height:56px; border-radius:16px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); color:#EDEFF2; font-family:'Space Grotesk',sans-serif; font-size:20px; font-weight:600; cursor:pointer;">9</button>
+        <span></span>
+        <button class="pf-key" data-k="0" style="height:56px; border-radius:16px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); color:#EDEFF2; font-family:'Space Grotesk',sans-serif; font-size:20px; font-weight:600; cursor:pointer;">0</button>
+        <button class="pf-key" data-k="back" style="height:56px; border-radius:16px; background:none; border:none; color:#93A2B8; display:flex; align-items:center; justify-content:center; cursor:pointer;">
+          <svg class="icon" viewBox="0 0 24 24" style="width:22px; height:22px;"><path d="M21 4H8l-6 8 6 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2Z"/><line x1="18" y1="9" x2="12" y2="15"/><line x1="12" y1="9" x2="18" y2="15"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- STEP 3: success -->
+    <div id="pf-step-success" style="display:none; text-align:center; padding:20px 0 8px;">
+      <div style="width:56px; height:56px; border-radius:50%; background:rgba(76,175,131,0.16); display:flex; align-items:center; justify-content:center; margin:0 auto 14px;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:26px; height:26px; color:#4CAF83; stroke-width:2.6;"><polyline points="4 12 10 18 20 6"/></svg>
+      </div>
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:16px; margin-bottom:4px;">Fund reset &middot; new PIN set</div>
+      <div style="font-size:12.5px; color:#93A2B8; margin-bottom:22px;">All rounds start fresh from Round 1. Members and names were kept.</div>
+      <button style="width:100%; height:52px; border:none; border-radius:16px; background:linear-gradient(135deg, #F5A623, #FFC966); color:#14213D; font-family:'Inter',sans-serif; font-weight:700; font-size:14.5px; cursor:pointer;">Continue to Home</button>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {
+  componentDidMount() {
+    var typeInput = document.getElementById('pf-reset-type');
+    var warnNext = document.getElementById('pf-warn-next');
+    function checkType() {
+      var ok = (typeInput.value || '').trim().toUpperCase() === 'RESET';
+      warnNext.disabled = !ok;
+      warnNext.style.opacity = ok ? '1' : '0.4';
+      warnNext.style.cursor = ok ? 'pointer' : 'not-allowed';
+    }
+    if (typeInput) typeInput.addEventListener('input', checkType);
+
+    var stepWarn = document.getElementById('pf-step-warn');
+    var stepPin = document.getElementById('pf-step-pin');
+    var stepSuccess = document.getElementById('pf-step-success');
+    var pinLabel = document.getElementById('pf-pin-label');
+    var dots = Array.prototype.slice.call(document.querySelectorAll('.pf-dot'));
+    var dotsWrap = document.getElementById('pf-dots');
+    var error = document.getElementById('pf-pin-error');
+    var keypad = document.getElementById('pf-keypad');
+
+    var pinStage = 0; // 0 = choose new, 1 = confirm
+    var newPin = '';
+    var entered = '';
+
+    function renderDots() {
+      dots.forEach(function (d, i) {
+        if (i < entered.length) { d.style.background = '#F5A623'; d.style.border = 'none'; }
+        else { d.style.background = 'none'; d.style.border = '1.5px solid rgba(255,255,255,0.25)'; }
+      });
+    }
+    function shakeAndReset(msg) {
+      error.textContent = msg;
+      dotsWrap.classList.remove('pf-shake');
+      void dotsWrap.offsetWidth;
+      dotsWrap.classList.add('pf-shake');
+      entered = '';
+      setTimeout(renderDots, 120);
+    }
+    function advancePin() {
+      if (pinStage === 0) {
+        newPin = entered;
+        pinStage = 1; entered = ''; pinLabel.textContent = 'Confirm your new PIN'; error.textContent = '';
+        renderDots();
+      } else {
+        if (entered !== newPin) {
+          shakeAndReset("PINs don't match — try again");
+          pinStage = 0; newPin = ''; pinLabel.textContent = 'Choose a new 4-digit PIN';
+          return;
+        }
+        stepPin.style.display = 'none';
+        stepSuccess.style.display = 'block';
+      }
+    }
+    if (keypad) keypad.addEventListener('click', function (e) {
+      var btn = e.target.closest('.pf-key');
+      if (!btn) return;
+      var k = btn.getAttribute('data-k');
+      if (k === 'back') { entered = entered.slice(0, -1); renderDots(); return; }
+      if (entered.length >= 4) return;
+      entered += k;
+      renderDots();
+      if (entered.length === 4) setTimeout(advancePin, 220);
+    });
+
+    if (warnNext) warnNext.addEventListener('click', function () {
+      if (warnNext.disabled) return;
+      stepWarn.style.display = 'none';
+      stepPin.style.display = 'block';
+    });
+  }
+}
+</script>
+</body>
+</html>

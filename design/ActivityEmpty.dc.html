@@ -1,0 +1,78 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    a { color: #F5A623; }
+    .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .pf-fade { opacity: 0; animation: pfFadeUp .5s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfFadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pfDrift1 { 0%, 100% { transform: translate(-8%, -6%) scale(1); } 50% { transform: translate(6%, 4%) scale(1.1); } }
+    .pf-chip:active { transform: scale(0.96); }
+  </style>
+</helmet>
+
+<div style="position:relative; width:390px; height:900px; overflow:hidden; background:#0D1B2A; border-radius:38px; border:1px solid rgba(255,255,255,0.08); font-family:'Inter',sans-serif; color:#EDEFF2;">
+
+  <div class="pf-glow1" style="position:absolute; top:-80px; right:-100px; width:280px; height:280px; border-radius:50%; background:radial-gradient(circle, rgba(76,217,192,0.18), transparent 70%); filter:blur(32px); animation:pfDrift1 18s ease-in-out infinite;"></div>
+
+  <div style="position:relative; z-index:1; padding:28px 20px 24px; height:100%; overflow:hidden; display:flex; flex-direction:column;">
+
+    <div class="pf-fade" style="margin-bottom:18px;">
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:20px; margin-bottom:3px;">Activity</div>
+      <div style="font-size:12.5px; color:#93A2B8;">Every contribution, payout &amp; admin action</div>
+    </div>
+
+    <div class="pf-fade" style="animation-delay:.04s; display:flex; gap:8px; overflow-x:auto; margin-bottom:20px; scrollbar-width:none;">
+      <span class="pf-chip" style="flex-shrink:0; padding:8px 14px; border-radius:20px; background:#F5A623; color:#14213D; font-size:12.5px; font-weight:700; cursor:pointer;">All</span>
+      <span class="pf-chip" style="flex-shrink:0; padding:8px 14px; border-radius:20px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); color:#93A2B8; font-size:12.5px; font-weight:600; cursor:pointer;">Payments</span>
+      <span class="pf-chip" style="flex-shrink:0; padding:8px 14px; border-radius:20px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); color:#93A2B8; font-size:12.5px; font-weight:600; cursor:pointer;">Payouts</span>
+      <span class="pf-chip" style="flex-shrink:0; padding:8px 14px; border-radius:20px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); color:#93A2B8; font-size:12.5px; font-weight:600; cursor:pointer;">Admin</span>
+    </div>
+
+    <div class="pf-fade" style="animation-delay:.08s; flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding-bottom:100px;">
+      <div style="width:72px; height:72px; border-radius:20px; background:rgba(255,255,255,0.04); border:1px dashed rgba(255,255,255,0.14); display:flex; align-items:center; justify-content:center; margin-bottom:18px;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:30px; height:30px; color:rgba(255,255,255,0.22);"><line x1="8" y1="7" x2="20" y2="7"/><line x1="8" y1="12" x2="20" y2="12"/><line x1="8" y1="17" x2="20" y2="17"/><circle cx="4" cy="7" r="1" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="4" cy="17" r="1" fill="currentColor" stroke="none"/></svg>
+      </div>
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:16px; margin-bottom:6px;">No activity yet</div>
+      <div style="font-size:13px; color:#93A2B8; max-width:240px; line-height:1.5;">Contributions, payouts, and admin actions will show up here once the fund gets going.</div>
+    </div>
+  </div>
+
+  <!-- bottom tab bar -->
+  <div style="position:absolute; left:0; right:0; bottom:0; height:78px; background:rgba(13,27,42,0.86); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); border-top:1px solid rgba(255,255,255,0.08); display:flex; align-items:center; justify-content:space-around; padding-bottom:10px; z-index:2;">
+    <button style="background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px 10px;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#93A2B8;"><path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9a1 1 0 0 0 1 1h3v-6h4v6h3a1 1 0 0 0 1-1v-9"/></svg>
+      <span style="font-size:10px; font-weight:600; color:#93A2B8;">Home</span>
+    </button>
+    <button style="background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px 10px;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#93A2B8;"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg>
+      <span style="font-size:10px; font-weight:600; color:#93A2B8;">Rounds</span>
+    </button>
+    <button style="background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px 10px;">
+      <div style="width:36px; height:24px; border-radius:10px; background:rgba(245,166,35,0.14); display:flex; align-items:center; justify-content:center;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#F5A623;"><line x1="8" y1="7" x2="20" y2="7"/><line x1="8" y1="12" x2="20" y2="12"/><line x1="8" y1="17" x2="20" y2="17"/><circle cx="4" cy="7" r="1" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="4" cy="17" r="1" fill="currentColor" stroke="none"/></svg>
+      </div>
+      <span style="font-size:10px; font-weight:700; color:#F5A623;">Activity</span>
+    </button>
+    <button style="background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px 12px;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#93A2B8;"><polyline points="3 16 9 10 13 14 21 5"/><polyline points="15 5 21 5 21 11"/></svg>
+      <span style="font-size:10px; font-weight:600; color:#93A2B8;">Insights</span>
+    </button>
+    <button style="background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px 12px;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#93A2B8;"><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>
+      <span style="font-size:10px; font-weight:600; color:#93A2B8;">Menu</span>
+    </button>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

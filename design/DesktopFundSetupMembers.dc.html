@@ -1,0 +1,92 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .pf-fade { opacity: 0; animation: pfFadeUp .5s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfFadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .pf-back:hover { opacity: 0.8; }
+    .pf-cta:hover { filter: brightness(1.08); }
+    .pf-cta:active { transform: scale(0.98); }
+    input { font-family:'Inter',sans-serif; }
+  </style>
+</helmet>
+
+<div style="position:relative; width:1440px; height:900px; overflow:hidden; background:#0D1B2A; border-radius:16px; border:1px solid rgba(255,255,255,0.08); font-family:'Inter',sans-serif; color:#EDEFF2; display:flex; align-items:center; justify-content:center;">
+
+  <button class="pf-back" style="position:absolute; top:32px; left:40px; display:flex; align-items:center; gap:6px; background:none; border:none; color:#93A2B8; font-family:'Inter',sans-serif; font-size:13.5px; font-weight:600; cursor:pointer;">
+    <svg class="icon" viewBox="0 0 24 24" style="width:16px; height:16px;"><polyline points="15 18 9 12 15 6"/></svg>
+    Back
+  </button>
+
+  <div class="pf-fade" style="position:relative; width:520px;">
+    <div style="font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:26px; margin-bottom:10px;">Add your members</div>
+    <div style="font-size:14px; line-height:1.6; color:#93A2B8; margin-bottom:24px;">Power Fund needs exactly 5 members &mdash; one payout per round.</div>
+
+    <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:8px;">
+      <div style="display:flex; align-items:center; gap:12px;">
+        <div style="width:34px; height:34px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:13px; color:#93A2B8; flex-shrink:0;">1</div>
+        <input class="pf-name-field" type="text" placeholder="Member 1 name" style="flex:1; height:48px; border-radius:13px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.14); color:#EDEFF2; font-size:14px; padding:0 14px;">
+      </div>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <div style="width:34px; height:34px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:13px; color:#93A2B8; flex-shrink:0;">2</div>
+        <input class="pf-name-field" type="text" placeholder="Member 2 name" style="flex:1; height:48px; border-radius:13px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.14); color:#EDEFF2; font-size:14px; padding:0 14px;">
+      </div>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <div style="width:34px; height:34px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:13px; color:#93A2B8; flex-shrink:0;">3</div>
+        <input class="pf-name-field" type="text" placeholder="Member 3 name" style="flex:1; height:48px; border-radius:13px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.14); color:#EDEFF2; font-size:14px; padding:0 14px;">
+      </div>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <div style="width:34px; height:34px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:13px; color:#93A2B8; flex-shrink:0;">4</div>
+        <input class="pf-name-field" type="text" placeholder="Member 4 name" style="flex:1; height:48px; border-radius:13px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.14); color:#EDEFF2; font-size:14px; padding:0 14px;">
+      </div>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <div style="width:34px; height:34px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:13px; color:#93A2B8; flex-shrink:0;">5</div>
+        <input class="pf-name-field" type="text" placeholder="Member 5 name (you)" style="flex:1; height:48px; border-radius:13px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.14); color:#EDEFF2; font-size:14px; padding:0 14px;">
+      </div>
+    </div>
+    <div id="pf-members-hint" style="font-size:12px; color:#93A2B8; margin-bottom:26px;">All 5 names must be filled in and unique</div>
+
+    <div style="display:flex; justify-content:center; gap:8px; margin-bottom:22px;">
+      <span style="width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,0.18);"></span>
+      <span style="width:22px; height:6px; border-radius:3px; background:#F5A623;"></span>
+      <span style="width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,0.18);"></span>
+      <span style="width:6px; height:6px; border-radius:50%; background:rgba(255,255,255,0.18);"></span>
+    </div>
+    <button id="pf-members-next" disabled class="pf-cta" style="width:100%; height:52px; border:none; border-radius:16px; background:linear-gradient(135deg,#F5A623,#e0951d); color:#14213D; font-family:'Inter',sans-serif; font-weight:700; font-size:14.5px; cursor:pointer; opacity:0.4;">Next</button>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {
+  componentDidMount() {
+    var fields = Array.prototype.slice.call(document.querySelectorAll('.pf-name-field'));
+    var hint = document.getElementById('pf-members-hint');
+    var next = document.getElementById('pf-members-next');
+    function check() {
+      var values = fields.map(function (f) { return f.value.trim(); });
+      var allFilled = values.every(function (v) { return v.length > 0; });
+      var unique = new Set(values.map(function (v) { return v.toLowerCase(); })).size === values.length;
+      var ok = allFilled && unique;
+      if (!allFilled) { hint.textContent = 'All 5 names must be filled in'; hint.style.color = '#E15353'; }
+      else if (!unique) { hint.textContent = 'Names must be unique'; hint.style.color = '#E15353'; }
+      else { hint.textContent = 'All 5 names must be filled in and unique'; hint.style.color = '#93A2B8'; }
+      next.disabled = !ok;
+      next.style.opacity = ok ? '1' : '0.4';
+    }
+    fields.forEach(function (f) { f.addEventListener('input', check); });
+  }
+}
+</script>
+</body>
+</html>

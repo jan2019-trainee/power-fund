@@ -1,0 +1,74 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .pf-fade { opacity: 0; animation: pfFadeUp .5s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfFadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pfDrift { 0%, 100% { transform: translate(-6%, -4%) scale(1); } 50% { transform: translate(5%, 3%) scale(1.08); } }
+    .pf-cta:hover { filter: brightness(1.08); }
+    .pf-cta:active { transform: scale(0.98); }
+  </style>
+</helmet>
+
+<div style="position:relative; width:1440px; height:900px; overflow:hidden; background:#0D1B2A; border-radius:16px; border:1px solid rgba(255,255,255,0.08); font-family:'Inter',sans-serif; color:#EDEFF2; display:flex; align-items:center; justify-content:center;">
+
+  <div style="position:absolute; top:-140px; left:-120px; width:460px; height:460px; border-radius:50%; background:radial-gradient(circle, rgba(245,166,35,0.18), transparent 70%); filter:blur(40px); animation:pfDrift 20s ease-in-out infinite;"></div>
+  <div style="position:absolute; bottom:-160px; right:-140px; width:460px; height:460px; border-radius:50%; background:radial-gradient(circle, rgba(76,217,192,0.14), transparent 70%); filter:blur(40px); animation:pfDrift 24s ease-in-out infinite reverse;"></div>
+
+  <div class="pf-fade" style="position:relative; width:480px; text-align:center;">
+    <div style="font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:30px; margin-bottom:10px;">Who are you?</div>
+    <div style="font-size:14.5px; color:#93A2B8; line-height:1.6; margin-bottom:28px;">Pick your name from the group to see your own status and payment history.</div>
+
+    <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:24px; text-align:left;">
+      <button style="display:flex; align-items:center; gap:14px; padding:14px 16px; border-radius:16px; background:rgba(20,42,66,0.5); border:1px solid rgba(255,255,255,0.1); cursor:pointer;">
+        <div style="width:40px; height:40px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:15px; box-shadow:0 0 0 2px #4CAF83; flex-shrink:0;">A</div>
+        <span style="flex:1; font-size:14px; font-weight:600; color:#EDEFF2;">Ana</span>
+        <svg class="icon" viewBox="0 0 24 24" style="width:15px; height:15px; color:#93A2B8;"><polyline points="9 6 15 12 9 18"/></svg>
+      </button>
+      <button style="display:flex; align-items:center; gap:14px; padding:14px 16px; border-radius:16px; background:rgba(20,42,66,0.5); border:1px solid rgba(255,255,255,0.1); cursor:pointer;">
+        <div style="width:40px; height:40px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:15px; box-shadow:0 0 0 2px #4CAF83; flex-shrink:0;">B</div>
+        <span style="flex:1; font-size:14px; font-weight:600; color:#EDEFF2;">Ben</span>
+        <svg class="icon" viewBox="0 0 24 24" style="width:15px; height:15px; color:#93A2B8;"><polyline points="9 6 15 12 9 18"/></svg>
+      </button>
+      <button style="display:flex; align-items:center; gap:14px; padding:14px 16px; border-radius:16px; background:rgba(245,166,35,0.1); border:1px solid rgba(245,166,35,0.35); cursor:pointer;">
+        <div style="width:40px; height:40px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:15px; box-shadow:0 0 0 2px #9B7FE0; flex-shrink:0;">C</div>
+        <span style="flex:1; font-size:14px; font-weight:600; color:#EDEFF2;">Cathy</span>
+        <svg class="icon" viewBox="0 0 24 24" style="width:15px; height:15px; color:#F5A623;"><polyline points="9 6 15 12 9 18"/></svg>
+      </button>
+      <button style="display:flex; align-items:center; gap:14px; padding:14px 16px; border-radius:16px; background:rgba(20,42,66,0.5); border:1px solid rgba(255,255,255,0.1); cursor:pointer;">
+        <div style="width:40px; height:40px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:15px; box-shadow:0 0 0 2px #E15353; flex-shrink:0;">D</div>
+        <span style="flex:1; font-size:14px; font-weight:600; color:#EDEFF2;">Dan</span>
+        <svg class="icon" viewBox="0 0 24 24" style="width:15px; height:15px; color:#93A2B8;"><polyline points="9 6 15 12 9 18"/></svg>
+      </button>
+      <button style="display:flex; align-items:center; gap:14px; padding:14px 16px; border-radius:16px; background:rgba(20,42,66,0.5); border:1px solid rgba(255,255,255,0.1); cursor:pointer;">
+        <div style="width:40px; height:40px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:15px; box-shadow:0 0 0 2px rgba(255,255,255,0.18); flex-shrink:0;">E</div>
+        <span style="flex:1; font-size:14px; font-weight:600; color:#EDEFF2;">Elena</span>
+        <svg class="icon" viewBox="0 0 24 24" style="width:15px; height:15px; color:#93A2B8;"><polyline points="9 6 15 12 9 18"/></svg>
+      </button>
+    </div>
+
+    <a href="#" style="font-size:13px; font-weight:600; color:#93A2B8; text-decoration:none;">Skip for now</a>
+
+    <div style="display:flex; justify-content:center; gap:8px; margin-top:24px;">
+      <div style="width:6px; height:6px; border-radius:3px; background:rgba(255,255,255,0.18);"></div>
+      <div style="width:6px; height:6px; border-radius:3px; background:rgba(255,255,255,0.18);"></div>
+      <div style="width:6px; height:6px; border-radius:3px; background:rgba(255,255,255,0.18);"></div>
+      <div style="width:6px; height:6px; border-radius:3px; background:rgba(255,255,255,0.18);"></div>
+      <div style="width:22px; height:6px; border-radius:3px; background:#F5A623;"></div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

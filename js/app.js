@@ -40,18 +40,106 @@
     }
   }
 
+  // ---- Member accounts (migration 008) ---------------------------------
+  // AUTH_MODE decides how much of this is live; see js/config.js. Reading it
+  // through helpers rather than inline so an unset/garbage value degrades to
+  // "off" — the state the app has always been in — instead of a locked door.
+  const AUTH_MODE = (function () {
+    const m = ((window.APP_CONFIG || {}).AUTH_MODE || "off").toLowerCase();
+    return m === "required" || m === "optional" ? m : "off";
+  })();
+  function authEnabled() {
+    return AUTH_MODE !== "off";
+  }
+  function authRequired() {
+    return AUTH_MODE === "required";
+  }
+  /** Is a full-screen auth screen (the gate, or an account dead-end) showing?
+   *  Both replace the whole shell, so both need the sidebar gutter cancelled. */
+  function isAuthScreenUp() {
+    // Onboarding replaces the whole shell too, at any AUTH_MODE.
+    if (onboardingStep != null) return true;
+    // So does the optional-mode first-run prompt.
+    if (promptSignIn()) return true;
+    if (!authRequired()) return false;
+    if (!session) return true;
+    return (
+      accountState === "unknown" || accountState === "taken" || accountState === "no-email"
+    );
+  }
+  let session = null; // the Supabase session, or null when signed out
+  let authReady = false; // has the first getSession() settled yet?
+  let signingIn = false; // the redirect is being started
+  // How the signed-in account relates to the roster, decided by resolveAccount()
+  // once both a session and the member list exist:
+  //   null        not applicable — auth off, or signed out
+  //   "linked"    this login owns a member row; that row IS the identity
+  //   "unknown"   signed in with an address nobody on the roster carries
+  //   "taken"     the matching row already belongs to a different login
+  //   "no-email"  the roster carries no addresses at all yet
+  let accountState = null;
+  let accountMemberId = null; // the linked member's id, when accountState === "linked"
+  let linking = false; // a first-login claim is being written
+
+  // ---- Onboarding (5 approved artboards, previously deferred) ----------
+  // Which step is showing, or null when the flow is not running. Whether it
+  // has been seen is per-device, in localStorage: the design calls it a
+  // "first-time" flow, and there is no DB column for it.
+  const ONBOARDED_KEY = "pf_onboarded";
+  let onboardingStep = null;
+
+  /* Whether this device has already stepped past the optional-mode sign-in
+   * prompt. Per-device, like pf_onboarded and for the same reason: there is no
+   * DB column for it, and there could not be one — the whole point is that
+   * nobody has identified themselves yet, so there is no row to write it to. */
+  const SIGNIN_SKIPPED_KEY = "pf_signin_skipped";
+
+  // ---- Edit Profile / Change Photo (migration 009) ---------------------
+  let profileModalOpen = false;
+  let profileNameValue = ""; // the field's live value
+  let profileError = null;
+  let photoSheetOpen = false;
+  let photoPreview = null; // object URL of the crop, shown before it is saved
+  let photoBlob = null; // the squared JPEG waiting to be uploaded
+
   // ---- Data cache (filled by loadAll) ---------------------------------
   let state = null; // { members, cycles, contributions, payouts, activityLog, settings }
   let cycleIdByNumber = {}; // cycle_number -> cycle uuid  (for writes)
 
   // ---- UI state (not persisted) -------------------------------------
+  let selectedMemberId = null; // Members tab: which member's detail is open
+  let currentView = "home"; // "home" | "rounds" | "members" | "activity" | "insights" | "menu"
+  // Some views genuinely differ on a wide screen (rounds becomes a master list
+  // plus a detail pane), which CSS alone can't express. Tracked here and passed
+  // to the views; a re-render happens only when the breakpoint actually flips.
+  const wideQuery = window.matchMedia("(min-width: 900px)");
+  let isWide = wideQuery.matches;
   let unlocked = false; // treasurer mode
   let busy = false; // a write is in flight — block double clicks
+  /**
+   * Shared submit/upload state, so a long action can say what it is doing and
+   * offer a retry where it failed rather than only in a banner at the top.
+   *
+   * The design calls for this on the contribute sheet and says it "applies to
+   * any upload/submit action in the app, not just this one screen", so it is a
+   * helper rather than one screen's markup. Shape:
+   *   { phase: "working" | "failed", label, message, retry }
+   */
+  let submitState = null;
   let appError = null; // string shown in the red banner
+  // When the failed action can simply be tried again, the banner carries a
+  // Retry button that calls this. The design shows this as an error toast with
+  // an action; the app already has a persistent banner, which suits an error
+  // better than something that slides away, so the ACTION moves onto the banner
+  // rather than the app growing a second way to report failures.
+  let appErrorRetry = null;
   let appWarning = null; // amber banner: an action succeeded but a side effect didn't
   let appSuccess = null; // green banner: confirms an action fully succeeded (auto-dismisses)
   let successTimer = null;
   let openRound = null;
+  // Set when a jump from elsewhere lands on an inline money-confirmation panel
+  // deep in the Rounds grid; cleared by the render that scrolls to it.
+  let scrollPanelIntoView = false;
   let hasAutoOpened = false;
 
   let modalTarget = null; // { memberId, cycleNumber }
@@ -60,7 +148,20 @@
   let modalProofPreview = null; // object URL for the local preview
 
   let reviewTarget = null; // { memberId, cycles: [n, ...] } — the whole advance batch
+  // Which confirmed contribution the treasurer is undoing, as an inline panel
+  // in the cycle grid: { memberId, cycleNumber }. The design asks for this
+  // rather than a dialog, "deliberately mirroring the existing inline 'Undo
+  // Release' pattern already used elsewhere in this same screen".
+  let undoPaidTarget = null;
+  // Recording a payment with no proof (the treasurer's cash path) writes money
+  // too, so it gets the same inline gate as undo rather than firing on one tap.
+  let markPaidTarget = null;
+  // Set when a receipt upload fails, so the release sheet can offer the
+  // explicit no-receipt fallback instead of trapping a real transfer.
+  let receiptUploadFailed = false;
   let rejectConfirming = false;
+  let rejectNoteValue = ""; // the treasurer's reason — shown to the member
+  let rejectError = null;
   let startRoundConfirming = false; // inline confirm for "Start Next Round"
 
   // Generic "are you sure?" gate for destructive treasurer actions. Nothing
@@ -70,34 +171,88 @@
   //     typeValue, pinValue, error, ctx }
   let confirmDialog = null;
 
-  let pinModalMode = null; // null | 'setup' | 'enter' | 'change'
+  let pinModalMode = null; // null | 'setup' | 'enter' | 'change' | 'master'
   let pinInputValue = "";
   let pinError = null;
+  // Where we are inside a PIN-setting flow: 'current' (prove you know the old
+  // one) → 'new' → 'confirm' → 'done'. 'enter' never uses these. Setting a PIN
+  // used to save the FIRST value typed, so one mistyped digit replaced the
+  // group's PIN with something nobody knew.
+  let pinStep = "new";
+  let pinNewValue = "";
+  let pinShake = false;
+  // Treasurer mode was entered with the master PIN rather than the group's own.
+  // Only used to nudge them toward setting a working PIN again — it grants no
+  // different powers, because the master PIN exists precisely so a locked-out
+  // group gets full treasurer access back.
+  let unlockedViaMaster = false;
+  /* Set only when the flagged treasurer LOCKS treasurer mode by hand. Without
+   * it the auto-unlock below would re-open on the next 30-second poll, so the
+   * admin could never look at the app the way a member sees it. Per session,
+   * deliberately: a reload is a fresh start. */
+  let treasurerLockedByChoice = false;
 
   let payoutModalRound = null;
   let payoutNoteValue = "";
-  let payoutAmountValue = ""; // string in the release modal; blank => the ₱30,000 default
   let payoutReceiptFile = null; // optional receipt image the treasurer attaches
   let payoutReceiptPreview = null; // object URL for its preview
 
-  let activityLogOpen = false;
   let activityLogLimit = 30; // grows when the treasurer taps "Show older"
+  let activityFilter = "all"; // "all" | "payment" | "payout" | "admin"
+  // Desktop-only dropdowns (migration 007). "all" or a member id / round
+  // number. Round defaults to the fund's current round, as the design does —
+  // resolved at render time, since the current round moves.
+  let activityMemberFilter = "all";
+  let activityRoundFilter = null; // null = "not chosen yet, use current round"
   let shareModalOpen = false;
   let copyFeedback = null;
 
   let attentionQueueExpanded = false; // "show N more" in the review queue
   let overdueListOpen = false; // overdue detail list in the attention panel
 
+  let reorderModalOpen = false; // "Reorder payout order", from Menu → Group
+  /**
+   * Restore's own three states — invalid file, working, done.
+   *
+   * Replacing every contribution is the most destructive thing the app does,
+   * and it used to report nothing at all: the treasurer could not tell whether
+   * it had run, was still running, or had failed silently.
+   *   { phase: "invalid" | "working" | "done", fileName, reason, n, released, exportedAt }
+   */
+  let restoreState = null;
   let editNamesModalOpen = false;
   let editNamesValues = {};
   let editNamesError = null;
 
+  /* Treasurer -> Account -> "Member sign-in". The addresses a Google login is
+   * matched against (migration 008) had no UI at all: they could only be set
+   * with a hand-written SQL update, which meant the one person who could roll
+   * accounts out was whoever had the Supabase password open. Same shape as the
+   * edit-names modal — a draft map, a live-validated error, one save. */
+  let memberAccountsModalOpen = false;
+  let memberEmailValues = {};
+  let memberAccountsError = null;
+
+  /* Transfer treasurer role. `members.is_treasurer` is what Postgres checks
+   * (010's helpers, 011's policies), and until now it could only be changed by
+   * hand in SQL — so the role could only be handed over by whoever held the
+   * Supabase password. */
+  let transferRoleModalOpen = false;
+  let transferRolePick = null;
+
   let lightboxSrc = null; // image URL shown full-screen in the zoom lightbox
 
   let qrModalOpen = false; // treasurer "Payment QR code" panel
+  let qrAccountFields = null; // { qr_bank, qr_account_name, qr_account_number }
   let qrNewFile = null; // File the treasurer picked
   let qrNewPreview = null; // object URL for the preview
   let qrUploadMsg = null; // success / info line inside the QR panel
+
+  // Payout details modal: where one member's payout should be sent.
+  let payoutQrMemberId = null;
+  let payoutQrFile = null;
+  let payoutQrPreview = null;
+  let payoutQrFields = null; // { bank, accountName, accountNumber }
 
   let contributePicker = null; // cycle number for the "who are you?" picker, or null
   let modalWasOpen = false; // for moving focus into a dialog when it opens
@@ -122,6 +277,14 @@
 
   function sortedMembers() {
     return [...state.members].sort((a, b) => a.member_order - b.member_order);
+  }
+
+  /** The fund's display name — settings first, falling back to the product
+   *  name. Sidebar, header and the share text all read this, so a renamed fund
+   *  cannot show two different names on one screen or paste the wrong one into
+   *  the group chat. */
+  function fundName() {
+    return (state.settings && state.settings.fund_name) || "Power Fund";
   }
 
   function getPayout(round) {
@@ -155,13 +318,81 @@
     return C.formatDate(C.parseDueDate(released_on));
   }
 
-  function showError(msg) {
+  /**
+   * Run a submit/upload, reporting progress and failure in place.
+   *
+   * Returns true on success, false on failure — the caller decides what to do
+   * next (close the sheet, reload, celebrate), because only it knows. On
+   * failure the state carries a retry that runs exactly the same work again,
+   * so the person does not have to re-enter anything.
+   */
+  async function runSubmit(label, fn) {
+    submitState = { phase: "working", label: label };
+    busy = true;
+    render();
+    try {
+      await fn();
+      submitState = null;
+      return true;
+    } catch (e) {
+      console.error(label + " failed:", e);
+      submitState = {
+        phase: "failed",
+        label: label,
+        message: (e && e.message) || "Something went wrong.",
+        retry: function () {
+          runSubmit(label, fn);
+        },
+      };
+      return false;
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+
+  function clearSubmitState() {
+    submitState = null;
+  }
+
+  /** The inline progress / failure block a sheet shows while submitting. */
+  function submitStateHtml() {
+    if (!submitState) return "";
+    if (submitState.phase === "working") {
+      return `<div class="submit-state working" role="status" aria-live="polite">
+        <span class="submit-spinner" aria-hidden="true"></span>
+        <span>${escapeHtml(submitState.label)}…</span>
+      </div>`;
+    }
+    return `<div class="submit-state failed" role="alert">
+      <span class="submit-state-main">${icon("alert", 15)}<span>${escapeHtml(
+      submitState.message
+    )}</span></span>
+      <button type="button" class="submit-retry" onclick="PowerFund.retrySubmit()">Retry</button>
+    </div>`;
+  }
+
+  function showError(msg, retry) {
     appError = msg || "Something went wrong. Please try again.";
+    appErrorRetry = typeof retry === "function" ? retry : null;
     appWarning = null; // a hard error supersedes a soft warning
     appSuccess = null; // ...and a stale success notice
     clearTimeout(successTimer);
     console.error("App error:", msg);
     render();
+    // The banner is a fixed-position toast now, so it is already in front of
+    // whoever triggered the failure — no scroll needed, and scrolling a fixed
+    // element would only move the page out from under them.
+  }
+
+  /** Run the failed action again, clearing the banner first so a second
+   *  failure reads as new rather than stale. */
+  function retryLastAction() {
+    const again = appErrorRetry;
+    appError = null;
+    appErrorRetry = null;
+    render();
+    if (again) again();
   }
 
   /** A softer banner: the main action worked, but something alongside it didn't. */
@@ -170,6 +401,12 @@
     if (msg) console.warn("App warning:", msg);
     render();
   }
+  function dismissError() {
+    appError = null;
+    appErrorRetry = null;
+    render();
+  }
+
   function dismissWarning() {
     appWarning = null;
     render();
@@ -185,7 +422,7 @@
       successTimer = setTimeout(() => {
         appSuccess = null;
         render();
-      }, 6000);
+      }, 4500);
     }
   }
   function dismissSuccess() {
@@ -208,8 +445,8 @@
     return escapeHtml(String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'"));
   }
 
-  async function logActivity(message) {
-    const ok = await window.DB.addActivityLog(message);
+  async function logActivity(message, meta) {
+    const ok = await window.DB.addActivityLog(message, meta);
     if (ok === false) {
       // The action itself succeeded; make sure the missing audit line is seen.
       appWarning =
@@ -247,8 +484,15 @@
   }
 
   async function reload() {
+    // Signed out with auth required: there is nothing this may read. The
+    // 30-second poll, the realtime callback and the visibility handler all
+    // land here, so guarding the one choke point stops all three from firing
+    // doomed requests at the sign-in screen and painting an error over it.
+    if (authRequired() && !session) return;
     try {
       await loadAll();
+      await resolveAccount();
+      applyAdminAutoUnlock();
       render();
     } catch (e) {
       showError(e.message);
@@ -277,6 +521,686 @@
     render();
   }
 
+  // ===================================================================
+  // Onboarding — OnboardingWelcome / HowItWorks / HowToPay / PayoutOrder /
+  // WhoAreYou, plus their Desktop* counterparts.
+  //
+  // TWO CONFLICTS WITH THE DESIGN, both resolved deliberately:
+  //
+  //  1. The final step is the "Which one is you?" picker, which writes the
+  //     per-device preference. That predates member accounts: once a login
+  //     owns a member row the identity comes from the database and cannot be
+  //     switched (openWhoAmIPicker refuses). So the step is DROPPED for a
+  //     linked member and the flow is four steps long, with four dots.
+  //
+  //  2. The artboards hardcode "Ana / Ben / Cathy…", "Paid out / This round /
+  //     Upcoming" and "GCash". Those are mockup placeholders; showing them
+  //     would be fake data (rule 4). Every figure and name below comes from
+  //     the real roster, the real round state and the real QR bank.
+  // ===================================================================
+
+  /** Whole pesos, for prose. C.peso() keeps two decimals because it prints
+   *  money the fund actually owes or holds; the intro's "₱1,000 each cycle" is
+   *  a sentence, and the artboards write it without decimals. Presentation
+   *  only — no money rule reads this. */
+  function pesoWhole(amount) {
+    return "₱" + Math.round(Number(amount) || 0).toLocaleString("en-PH");
+  }
+
+  function onboardingSeen() {
+    return lsGet(ONBOARDED_KEY) === "1";
+  }
+  /** Should the sign-in screen front the app on THIS load?
+   *
+   *  Only in "optional" mode — "required" has its own gate above, and "off"
+   *  has no accounts at all. It exists because the alternative is telling five
+   *  people, one at a time, to find Menu → Account: a sharable link has to
+   *  explain itself. Skippable, and the skip is remembered, so it asks once
+   *  per device rather than nagging.
+   *
+   *  Waits for `authReady`: asking someone to sign in while their session is
+   *  still being read from storage would flash a login at somebody who is
+   *  already signed in. */
+  function promptSignIn() {
+    return (
+      AUTH_MODE === "optional" &&
+      authReady &&
+      !session &&
+      lsGet(SIGNIN_SKIPPED_KEY) !== "1"
+    );
+  }
+  /** "Not now". Remembered, or the next reload would ask again. */
+  function skipSignInPrompt() {
+    lsSet(SIGNIN_SKIPPED_KEY, "1");
+    render();
+  }
+  function finishOnboarding() {
+    lsSet(ONBOARDED_KEY, "1");
+    onboardingStep = null;
+    render();
+  }
+  function onboardingNext() {
+    const last = onboardingSteps().length - 1;
+    if (onboardingStep == null) return;
+    if (onboardingStep >= last) return finishOnboarding();
+    onboardingStep += 1;
+    render();
+  }
+  function onboardingPick(memberId) {
+    // Same write the who-am-I picker makes, then straight to the dashboard.
+    myMemberId = memberId || null;
+    lsSet(MY_MEMBER_KEY, myMemberId);
+    finishOnboarding();
+  }
+  /** Menu → "Replay the intro". The design has no way back into this flow
+   *  once it is dismissed, which makes it unreachable and untestable for
+   *  everyone after the first run. */
+  function replayOnboarding() {
+    onboardingStep = 0;
+    render();
+  }
+
+  /** The steps, built from real data each render. */
+  function onboardingSteps() {
+    const members = sortedMembers();
+    const fund = (state && state.settings && state.settings.fund_name) || fundName();
+    const wallet =
+      (state && state.settings && state.settings.qr_bank) || "e-wallet or bank";
+    const curRound = C.currentRound(state.payouts, state.contributions);
+
+    const steps = [
+      {
+        key: "welcome",
+        emblem: "wallet",
+        tone: "gold",
+        title: "Welcome to Power Fund",
+        kicker: fund,
+        body:
+          `A shared savings pot for the group. Everyone puts in a little every ` +
+          `cycle — and takes turns receiving the whole pot.`,
+      },
+      {
+        key: "how",
+        emblem: "rounds",
+        tone: "teal",
+        title: "Every cycle, everyone chips in",
+        body:
+          `You contribute ${pesoWhole(C.CONTRIBUTION_AMOUNT)} each cycle. ` +
+          `${C.CYCLES_PER_ROUND} cycles make one round — ${pesoWhole(
+            C.GOAL_PER_ROUND
+          )} collected per round, across ${C.TOTAL_ROUNDS} rounds in total.`,
+        extra: `<div class="ob-panel">
+          <div class="ob-cycle-bars">${Array.from(
+            { length: C.CYCLES_PER_ROUND },
+            () => `<span class="ob-cycle-bar"></span>`
+          ).join("")}</div>
+          <p class="ob-panel-note"><b>${C.CYCLES_PER_ROUND} cycles</b> = 1 round = <b>${pesoWhole(
+          C.GOAL_PER_ROUND
+        )}</b></p>
+        </div>`,
+      },
+      {
+        key: "pay",
+        emblem: "qr",
+        tone: "gold",
+        title: "Paying is simple",
+        body:
+          `Scan the treasurer's ${escapeHtml(wallet)} QR, send ${pesoWhole(
+            C.CONTRIBUTION_AMOUNT
+          )}, then upload your screenshot as proof. The treasurer verifies it ` +
+          `and you're marked paid.`,
+        extra: `<div class="ob-steps">
+          ${[
+            ["qr", "accent", "Scan &amp; pay"],
+            ["upload", "violet", "Upload proof"],
+            ["check", "success", "Confirmed"],
+          ]
+            .map(
+              ([ic, tone, label]) => `<div class="ob-step">
+                 <span class="ob-step-icon ${tone}">${icon(ic, 18)}</span>
+                 <span class="ob-step-label">${label}</span>
+               </div>`
+            )
+            .join('<span class="ob-step-arrow" aria-hidden="true">→</span>')}
+        </div>`,
+      },
+      {
+        key: "order",
+        emblem: "members",
+        tone: "teal",
+        title: "Everyone gets a turn",
+        body:
+          `Each round, the full ${pesoWhole(C.GOAL_PER_ROUND)} goes to one member ` +
+          `— in a fixed order. Once your round is funded, it's yours.`,
+        // The REAL roster and the REAL round states, not the mockup's names.
+        extra: `<div class="ob-panel ob-order">${members
+          .map((m) => {
+            const released = getPayout(m.member_order).released;
+            const isNow = m.member_order === curRound && !released;
+            const word = released
+              ? "Paid out"
+              : isNow
+              ? "This round"
+              : "Upcoming";
+            return `<div class="ob-order-row${isNow ? " is-now" : ""}">
+              <span class="ob-order-pos">${m.member_order}</span>
+              <span class="ob-order-name">${escapeHtml(m.name)}</span>
+              <span class="ob-order-word${released ? " paid" : ""}">${word}</span>
+            </div>`;
+          })
+          .join("")}</div>`,
+      },
+    ];
+
+    // The picker, unless a login already answers the question.
+    if (accountState !== "linked") {
+      steps.push({
+        key: "who",
+        picker: true,
+        title: "Which one is you?",
+        body:
+          "This just personalises your dashboard with your own status. You can " +
+          "change it anytime.",
+      });
+    }
+    return steps;
+  }
+
+  function onboardingHtml() {
+    const steps = onboardingSteps();
+    const i = Math.min(onboardingStep || 0, steps.length - 1);
+    const step = steps[i];
+    const dots = steps
+      .map(
+        (_, n) => `<span class="ob-dot${n === i ? " active" : ""}"></span>`
+      )
+      .join("");
+
+    const body = step.picker
+      ? `<div class="ob-picker">${sortedMembers()
+          .map(
+            (m) => `<button type="button" class="ob-picker-row" onclick="PowerFund.onboardingPick('${inlineArg(
+              m.id
+            )}')">
+              ${memberAvatar(m.name, "idle", 38, m.avatar_url)}
+              <span class="ob-picker-name">${escapeHtml(m.name)}</span>
+              <span class="ob-picker-chevron">›</span>
+            </button>`
+          )
+          .join("")}</div>`
+      : `<div class="ob-emblem ${step.tone}" aria-hidden="true">${icon(
+          step.emblem,
+          42
+        )}</div>`;
+
+    return `<div class="onboarding">
+      <div class="ob-top">
+        <button type="button" class="ob-skip" onclick="PowerFund.onboardingSkip()">Skip</button>
+      </div>
+      <div class="ob-body">
+        ${step.picker ? "" : body}
+        <h1 class="ob-title">${escapeHtml(step.title)}</h1>
+        ${step.kicker ? `<p class="ob-kicker">${escapeHtml(step.kicker)}</p>` : ""}
+        <p class="ob-text">${step.body}</p>
+        ${step.picker ? body : step.extra || ""}
+      </div>
+      <div class="ob-foot">
+        <div class="ob-dots" role="img" aria-label="Step ${i + 1} of ${
+      steps.length
+    }">${dots}</div>
+        ${
+          step.picker
+            ? `<button type="button" class="ob-skip-wide" onclick="PowerFund.onboardingSkip()">Skip for now — go to dashboard</button>`
+            : `<button type="button" class="ob-next" onclick="PowerFund.onboardingNext()">${
+                i === 0 ? "Get started" : "Next"
+              }</button>`
+        }
+      </div>
+    </div>`;
+  }
+
+  // ===================================================================
+  // Profile: display name and photo (migration 009)
+  // ===================================================================
+
+  const AVATAR_PX = 512; // stored size; every surface renders it at 34-60px
+  const AVATAR_MAX_BYTES = 8 * 1024 * 1024; // reject before decoding
+
+  /** Centre-crop to a square and downscale, so a 4 MB phone photo does not get
+   *  stored and re-downloaded by five devices to be drawn 34px wide. Returns a
+   *  JPEG Blob.
+   *
+   *  The design's CropPhoto.dc.html offers drag-to-reposition and pinch-to-zoom
+   *  before saving. That is DEFERRED, not done: it is a real gesture surface,
+   *  and a centre crop of a phone portrait already frames a face acceptably at
+   *  these sizes. Recorded as a deviation for QA rather than left implied. */
+  function squareAvatarBlob(file) {
+    return new Promise((resolve, reject) => {
+      if (!file) return reject(new Error("No photo was chosen."));
+      if (!/^image\//.test(file.type || "")) {
+        return reject(new Error("That file isn't an image. Choose a photo."));
+      }
+      if (file.size > AVATAR_MAX_BYTES) {
+        return reject(new Error("That photo is over 8 MB. Choose a smaller one."));
+      }
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const side = Math.min(img.naturalWidth, img.naturalHeight);
+          if (!side) throw new Error("empty image");
+          const out = Math.min(AVATAR_PX, side);
+          const canvas = document.createElement("canvas");
+          canvas.width = out;
+          canvas.height = out;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(
+            img,
+            (img.naturalWidth - side) / 2, // centre crop
+            (img.naturalHeight - side) / 2,
+            side,
+            side,
+            0,
+            0,
+            out,
+            out
+          );
+          canvas.toBlob(
+            (blob) => {
+              URL.revokeObjectURL(url);
+              if (blob) resolve(blob);
+              else reject(new Error("Couldn't process that photo. Try another."));
+            },
+            "image/jpeg",
+            0.85
+          );
+        } catch (e) {
+          URL.revokeObjectURL(url);
+          reject(new Error("Couldn't read that photo. Try another."));
+        }
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("Couldn't read that photo. Try another."));
+      };
+      img.src = url;
+    });
+  }
+
+  /** The member this viewer is allowed to edit: only their OWN row, and only
+   *  when a login proves which row that is.
+   *
+   *  Gated on a linked account rather than on the who-am-I preference on
+   *  purpose. That preference is unverified and per-device, so honouring it
+   *  here would let anyone holding the site URL pick any member and rename
+   *  them — and names are stamped into the activity log and payout records.
+   *  A PERMISSION DECISION, taken conservatively; the treasurer's own
+   *  Edit-member-names path is unchanged and still covers every renaming need.
+   *  With AUTH_MODE "off" this surface is therefore inert, by design. */
+  function editableMember() {
+    if (accountState !== "linked" || !accountMemberId || !state) return null;
+    return state.members.find((m) => m.id === accountMemberId) || null;
+  }
+
+  /** THE ADMIN TEST — a Google-verified login that owns a member row carrying
+   *  `is_treasurer`. Not the same thing as `unlocked`.
+   *
+   *  `unlocked` means somebody typed the treasurer PIN, and that PIN is shared
+   *  with the whole group by design: any of the five can unlock treasurer mode.
+   *  That is fine for the day-to-day treasurer tools — the group trusts each
+   *  other with the fund — but it is the wrong gate for administering WHO CAN
+   *  SIGN IN, because a member could add their own address to somebody else's
+   *  row. This is checked against the database instead.
+   *
+   *  It is also the flag migration 011's policies key off, so it is the same
+   *  authority Postgres will use once the lockdown is applied.
+   *
+   *  THE BOOTSTRAP ESCAPE HATCH: with nobody flagged at all, fall back to the
+   *  PIN. Otherwise a fund whose 008 one-off was never run could never reach
+   *  the panel that sets the addresses — a permanent dead end. It grants
+   *  nothing new: with no treasurer flagged, 011's readiness check refuses the
+   *  lockdown anyway, so the PIN is the only authority that exists yet. */
+  function isTreasurerAccount() {
+    const mine = editableMember();
+    if (mine && mine.is_treasurer) return true;
+    const anyFlagged = ((state && state.members) || []).some((m) => m.is_treasurer);
+    return !anyFlagged && unlocked;
+  }
+
+  /** The flagged treasurer should not have to type a PIN they already out-rank:
+   *  a Google login that owns a row carrying `is_treasurer` is strictly
+   *  stronger proof than a four-digit code the whole group shares. Applied
+   *  after every resolve, so it survives a reload and a token refresh.
+   *
+   *  `unlockedViaMaster` is cleared on purpose — this is not the recovery path,
+   *  and leaving it set would put the recovery banner up for no reason. */
+  /** Should the header offer treasurer mode at all?
+   *
+   *  Hidden from a member the app can POSITIVELY IDENTIFY as somebody other
+   *  than the treasurer. That is the only case it is hidden in, and the
+   *  direction matters: every uncertain case shows the button.
+   *
+   *  Why so cautious — the button is the only route to the PIN modal, and the
+   *  PIN modal is the only route to the MASTER PIN, which is the fund's
+   *  recovery path. Hiding it from someone we merely cannot identify (auth
+   *  off, signed out, a link that broke, nobody flagged yet) would take the
+   *  fund's own way back in away with it. So: hide it when we know it is not
+   *  their button, show it whenever we do not know.
+   *
+   *  Under migration 011 this stops being cosmetic — a non-treasurer's writes
+   *  are refused by Postgres regardless — but hiding it first means they meet
+   *  a button that is not theirs, rather than an error that looks like a bug. */
+  function canUnlockTreasurer() {
+    if (unlocked) return true; // never strand somebody inside the mode
+    const mine = editableMember();
+    if (!mine) return true; // not linked: no identity to judge them by
+    if (mine.is_treasurer) return true;
+    // A linked member who is not flagged — but with NOBODY flagged, the fund
+    // has no treasurer account yet and the PIN is still the only authority
+    // that exists. Same bootstrap escape hatch as isTreasurerAccount().
+    return !((state && state.members) || []).some((m) => m.is_treasurer);
+  }
+
+  function applyAdminAutoUnlock() {
+    if (treasurerLockedByChoice || unlocked) return;
+    const mine = editableMember();
+    if (mine && mine.is_treasurer) {
+      unlocked = true;
+      unlockedViaMaster = false;
+    }
+  }
+
+  function openProfileModal() {
+    const me = editableMember();
+    if (!me) {
+      return showError("Sign in first — your profile belongs to your account.");
+    }
+    profileNameValue = me.name || "";
+    profileError = null;
+    profileModalOpen = true;
+    clearPhotoDraft();
+    render();
+  }
+  function closeProfileModal() {
+    profileModalOpen = false;
+    profileNameValue = "";
+    profileError = null;
+    clearPhotoDraft();
+    render();
+  }
+
+  /** The same rule the treasurer's Edit-names modal enforces, scoped to one
+   *  member: non-empty, and unique across everybody else. One rule, two
+   *  screens — a name that Save accepts here must not be one the treasurer's
+   *  screen would reject. */
+  function profileNameProblem() {
+    const me = editableMember();
+    if (!me) return "Sign in first.";
+    const v = String(profileNameValue || "").trim();
+    if (!v) return "Name can't be empty.";
+    const clash = state.members.some(
+      (m) => m.id !== me.id && String(m.name || "").trim().toLowerCase() === v.toLowerCase()
+    );
+    if (clash) return "That name is already taken by another member.";
+    return null;
+  }
+
+  /** Live validation that patches the hint and the button by hand. render()
+   *  reassigns innerHTML, which would destroy the input being typed into. */
+  function refreshProfileValidity() {
+    const problem = profileNameProblem();
+    const hint = document.getElementById("profileNameHint");
+    if (hint) {
+      hint.textContent = problem || "Visible to the rest of the group. Must be unique.";
+      hint.classList.toggle("is-error", !!problem);
+    }
+    const save = document.getElementById("profileSave");
+    if (save) save.disabled = busy || !!problem;
+  }
+
+  async function saveProfile() {
+    if (busy) return;
+    const me = editableMember();
+    if (!me) return;
+    const problem = profileNameProblem();
+    if (problem) {
+      profileError = problem;
+      return render();
+    }
+    const nextName = String(profileNameValue).trim();
+    const nameChanged = nextName !== me.name;
+    if (!nameChanged && !photoBlob) return closeProfileModal();
+
+    busy = true;
+    render();
+    try {
+      let photoUrl = null;
+      if (photoBlob) {
+        photoUrl = await window.DB.uploadMemberAvatar(photoBlob, me.id);
+      }
+      const fields = {};
+      if (nameChanged) fields.name = nextName;
+      if (photoUrl) fields.avatar_url = photoUrl;
+      await window.DB.updateMember(me.id, fields);
+      // One line per real change, and the rename records both names — the log
+      // is the only place the old one survives once the row is updated.
+      if (nameChanged) {
+        await logActivity(`${me.name} changed their display name to ${nextName}`, {
+          type: "admin",
+          memberId: me.id,
+        });
+      }
+      if (photoUrl) {
+        await logActivity(`${nextName} updated their profile photo`, {
+          type: "admin",
+          memberId: me.id,
+        });
+      }
+      busy = false;
+      closeProfileModal();
+      showSuccess("Profile updated.");
+      await reload();
+    } catch (e) {
+      busy = false;
+      profileError = e.message;
+      render();
+    }
+  }
+
+  // ---- Change Photo sheet ----------------------------------------------
+  function openPhotoSheet() {
+    if (!editableMember()) return;
+    photoSheetOpen = true;
+    render();
+  }
+  function closePhotoSheet() {
+    photoSheetOpen = false;
+    render();
+  }
+  function clearPhotoDraft() {
+    if (photoPreview) {
+      try {
+        URL.revokeObjectURL(photoPreview);
+      } catch (e) {
+        /* already revoked */
+      }
+    }
+    photoPreview = null;
+    photoBlob = null;
+  }
+
+  /** Chosen from the camera or the library. Cropped and previewed here; not
+   *  uploaded until Save Changes, so backing out costs nothing and no orphan
+   *  file is left in the bucket. */
+  async function onAvatarSelected(input) {
+    const file = input && input.files && input.files[0];
+    if (input) input.value = ""; // let the same file be re-picked
+    if (!file) return;
+    try {
+      const blob = await squareAvatarBlob(file);
+      clearPhotoDraft();
+      photoBlob = blob;
+      photoPreview = URL.createObjectURL(blob);
+      photoSheetOpen = false;
+      render();
+    } catch (e) {
+      showError(e.message);
+    }
+  }
+
+  async function removeAvatar() {
+    if (busy) return;
+    const me = editableMember();
+    if (!me) return;
+    // Nothing stored yet: this is only discarding the unsaved crop.
+    if (!me.avatar_url) {
+      clearPhotoDraft();
+      photoSheetOpen = false;
+      return render();
+    }
+    busy = true;
+    render();
+    try {
+      await window.DB.removeMemberAvatar(me.id, me.avatar_url);
+      await logActivity(`${me.name} removed their profile photo`, {
+        type: "admin",
+        memberId: me.id,
+      });
+      clearPhotoDraft();
+      photoSheetOpen = false;
+      busy = false;
+      showSuccess("Photo removed.");
+      await reload();
+    } catch (e) {
+      busy = false;
+      showError(e.message);
+    }
+  }
+
+  // ===================================================================
+  // Sign in / sign out / claim (migration 008)
+  // ===================================================================
+
+  /** Work out how the signed-in account relates to the roster, linking it on a
+   *  first login. Runs after every load, because it needs both a session and
+   *  the member list, and either can arrive first.
+   *
+   *  Matching is by email because that is the only thing Google gives us that
+   *  the treasurer can know in advance — it means nobody can claim a row that
+   *  is not theirs, and there is no picker to get wrong. */
+  async function resolveAccount() {
+    if (!authEnabled() || !session || !state || !Array.isArray(state.members)) {
+      accountState = null;
+      accountMemberId = null;
+      return;
+    }
+    const user = session.user || {};
+    const email = String(user.email || "").trim().toLowerCase();
+
+    // Already linked? That wins over any email match — the link is the record,
+    // and an address can be changed on the roster after the fact.
+    const mine = state.members.find((m) => m.auth_user_id && m.auth_user_id === user.id);
+    if (mine) {
+      accountState = "linked";
+      accountMemberId = mine.id;
+      return;
+    }
+
+    // A roster with no addresses at all is a setup step that was skipped, not
+    // a rejection of this person — say which, because the fix is different.
+    const anyEmail = state.members.some((m) => m.email);
+    if (!anyEmail) {
+      accountState = "no-email";
+      accountMemberId = null;
+      return;
+    }
+
+    const match = email
+      ? state.members.find((m) => String(m.email || "").trim().toLowerCase() === email)
+      : null;
+    if (!match) {
+      accountState = "unknown";
+      accountMemberId = null;
+      return;
+    }
+    if (match.auth_user_id && match.auth_user_id !== user.id) {
+      accountState = "taken";
+      accountMemberId = null;
+      return;
+    }
+
+    // First login for this member: claim the row.
+    if (linking) return;
+    linking = true;
+    try {
+      const linked = await window.DB.linkMemberAccount(match.id, user.id);
+      if (!linked) {
+        // The `is null` guard matched nothing, so somebody else claimed it
+        // between the load and this write.
+        accountState = "taken";
+        accountMemberId = null;
+        return;
+      }
+      accountState = "linked";
+      accountMemberId = linked.id;
+      await logActivity(`${linked.name} signed in for the first time`, {
+        type: "admin",
+        memberId: linked.id,
+      });
+      await loadAll(); // pick up auth_user_id so a re-resolve short-circuits
+    } catch (e) {
+      // Don't strand them on a blank screen: they are signed in and the fund
+      // is loaded, so fall back to "unknown", which explains itself and
+      // offers a way out.
+      console.error("Linking failed:", e);
+      accountState = "unknown";
+      accountMemberId = null;
+      showError(e.message);
+    } finally {
+      linking = false;
+    }
+  }
+
+  async function signIn() {
+    if (signingIn) return;
+    signingIn = true;
+    render();
+    try {
+      // This navigates away on success, so nothing after it normally runs.
+      await window.DB.signInWithGoogle();
+    } catch (e) {
+      signingIn = false;
+      showError(e.message);
+    }
+  }
+
+  async function signOut() {
+    if (busy) return;
+    busy = true;
+    render();
+    try {
+      await window.DB.signOut();
+      // Don't hand the next person a warm treasurer session.
+      unlocked = false;
+      unlockedViaMaster = false;
+      treasurerLockedByChoice = false;
+      // Signing out is a deliberate act. Fronting the app with the sign-in
+      // prompt one render later would read as the app refusing to let them.
+      lsSet(SIGNIN_SKIPPED_KEY, "1");
+      session = null;
+      accountState = null;
+      accountMemberId = null;
+      // When auth is only optional the app stays usable, so the data has to
+      // stay loaded; when it is required the gate takes over on the next
+      // render and state is no longer reachable.
+      busy = false;
+      render();
+    } catch (e) {
+      busy = false;
+      showError(e.message);
+    }
+  }
+
   /** "Record a contribution" → pick which member you are for a given cycle. */
   function openContributePicker(cycleNumber) {
     contributePicker = cycleNumber;
@@ -290,6 +1214,19 @@
     const cyc = contributePicker;
     contributePicker = null;
     if (cyc == null) return render();
+    // A treasurer's confirmation for "record as cash" and "undo a confirmed
+    // payment" is an inline panel inside the Rounds cycle grid — deliberately,
+    // because both write money and belong next to the row they change. Picked
+    // from Home, that panel had nowhere to draw: the picker closed and nothing
+    // happened. Take them to the grid first, with the round open, so the
+    // confirmation lands where it lives. Reviewing a pending claim opens a
+    // modal and needs no such move, so Home stays put for that one.
+    const status = C.statusOf(state.contributions, memberId, cyc);
+    if (unlocked && status !== C.STATUS_PENDING) {
+      currentView = "rounds";
+      openRound = C.roundOfCycle(cyc);
+      scrollPanelIntoView = true;
+    }
     // Route through the same handler the cycle grid uses, so a treasurer gets
     // the review / mark-paid behaviour and a member gets the contribute modal.
     cellClicked(memberId, cyc);
@@ -299,6 +1236,13 @@
   // "Which member are you?" — this device's remembered member (display only)
   // ===================================================================
   function openWhoAmIPicker() {
+    // Hidden in the UI when linked, but this is an exported handler, so it
+    // refuses here too rather than trusting the caller.
+    if (accountState === "linked") {
+      return showError(
+        "You're signed in, so your member profile is already set. Sign out from Menu to switch accounts."
+      );
+    }
     whoAmIPickerOpen = true;
     render();
   }
@@ -319,6 +1263,7 @@
   function closeModal() {
     modalTarget = null;
     clearProofSelection();
+    clearSubmitState();
     render();
   }
 
@@ -376,9 +1321,7 @@
       return showError("Please attach your proof of payment before submitting.");
     }
 
-    busy = true;
-    render();
-    try {
+    const ok = await runSubmit("Uploading proof", async () => {
       const proofUrl = await window.DB.uploadProof(
         modalProofFile,
         memberId,
@@ -405,21 +1348,27 @@
       await logActivity(
         `${memberName(memberId)} marked ${range} as sent — ${C.peso(
           count * C.CONTRIBUTION_AMOUNT
-        )}`
+        )}`,
+        {
+          type: "payment",
+          amount: count * C.CONTRIBUTION_AMOUNT,
+          refStatus: C.STATUS_PENDING,
+          memberId: memberId,
+          round: C.roundOfCycle(cycleNumber),
+        }
       );
-      closeModal();
-      await reload();
-      showSuccess(
-        `✅ Payment submitted — ${C.peso(
-          count * C.CONTRIBUTION_AMOUNT
-        )} is waiting for treasurer verification.`
-      );
-    } catch (e) {
-      showError(e.message);
-    } finally {
-      busy = false;
-      render();
-    }
+    });
+
+    // The sheet stays open on failure, holding the attachment and the cycle
+    // count, so Retry re-sends exactly what was already entered.
+    if (!ok) return;
+    closeModal();
+    await reload();
+    showSuccess(
+      `Payment submitted — ${C.peso(
+        count * C.CONTRIBUTION_AMOUNT
+      )} is waiting for treasurer verification.`
+    );
   }
 
   // ===================================================================
@@ -430,7 +1379,9 @@
     const status = C.statusOf(state.contributions, memberId, cycleNumber);
 
     if (!unlocked) {
-      if (status === C.STATUS_UNPAID) {
+      // Rejected behaves like unpaid here: the cycle is still owed, and
+      // tapping it is how the member sends a fresh screenshot.
+      if (C.isOwed(status)) {
         // With migration 002 active, members can only pay into a round the
         // treasurer has started, so a new round always begins at ₱0. Without it
         // this check is a no-op (currentRound == first unfunded round).
@@ -458,23 +1409,38 @@
       // Reverting a confirmed contribution destroys a financial record — never
       // do it on the first tap.
       const due = C.dueDateOf(state.cycles, cycleNumber);
-      openConfirm({
-        kind: "revert",
-        title: "Mark this contribution as unpaid?",
-        bodyHtml:
-          `Move <b>${escapeHtml(memberName(memberId))}</b>'s ` +
-          `<b>${due ? escapeHtml(C.formatDate(due)) : "cycle " + cycleNumber}</b> ` +
-          `contribution back to unpaid?<br><br>` +
-          `This removes <b>${C.peso(C.CONTRIBUTION_AMOUNT)}</b> from Round ` +
-          `${C.roundOfCycle(cycleNumber)}'s total. Any payment screenshot is ` +
-          `kept in the archive, not deleted.`,
-        confirmLabel: "Yes, mark unpaid",
-        ctx: { memberId, cycleNumber },
-      });
+      // Undoing a confirmed payment removes money from a round, so it is never
+      // a single tap — but it stays in the grid, next to the pill that was
+      // tapped, instead of throwing a dialog over the whole screen.
+      undoPaidTarget = { memberId: memberId, cycleNumber: cycleNumber };
+      render();
       return;
     }
 
-    // Unpaid → treasurer records it as paid directly (cash). Not destructive.
+    // Unpaid or rejected → treasurer records it as paid directly (cash).
+    // Rejected lands here too, and should: a refused screenshot is often
+    // followed by the member simply handing over cash. The rejection note
+    // stays on the row as history; the member's banner clears because it only
+    // reads rows still in the rejected state.
+    //
+    // This is a money write with no proof attached — the one payment path the
+    // design removed entirely and this project deliberately kept. Keeping it
+    // does not mean keeping it un-gated, so it confirms inline in the row,
+    // exactly like undo.
+    markPaidTarget = { memberId: memberId, cycleNumber: cycleNumber };
+    render();
+  }
+
+  function cancelMarkPaid() {
+    markPaidTarget = null;
+    render();
+  }
+
+  /** The actual direct (cash) record, after the inline confirmation. */
+  async function confirmMarkPaid() {
+    if (busy || !markPaidTarget) return;
+    const { memberId, cycleNumber } = markPaidTarget;
+    markPaidTarget = null;
     busy = true;
     render();
     try {
@@ -488,7 +1454,14 @@
       await logActivity(
         `Treasurer recorded ${memberName(memberId)}'s cycle ${cycleNumber} as paid (direct) — ${C.peso(
           C.CONTRIBUTION_AMOUNT
-        )}`
+        )}`,
+        {
+          type: "payment",
+          amount: C.CONTRIBUTION_AMOUNT,
+          refStatus: C.STATUS_PAID,
+          memberId: memberId,
+          round: C.roundOfCycle(cycleNumber),
+        }
       );
       await reload();
     } catch (e) {
@@ -514,7 +1487,14 @@
 
       await logActivity(
         `Treasurer reverted ${memberName(memberId)}'s cycle ${cycleNumber} to unpaid` +
-          outcome.logSuffix
+          outcome.logSuffix,
+        {
+          type: "payment",
+          amount: -C.CONTRIBUTION_AMOUNT,
+          refStatus: C.STATUS_UNPAID,
+          memberId: memberId,
+          round: C.roundOfCycle(cycleNumber),
+        }
       );
       await reload();
       if (outcome.warning) {
@@ -570,30 +1550,34 @@
   function openReviewModal(memberId, cycleNumber) {
     // Review the whole advance batch (contiguous pending cycles, same proof)
     // in one go, not cycle by cycle.
+    const batch = C.pendingRun(state.contributions, memberId, cycleNumber);
+    // When it was sent, so the sheet can say so — the mockup shows
+    // "submitted 10:42 AM" beside the cycle.
+    const firstRow = batch.length
+      ? C.contributionFor(state.contributions, memberId, batch[0])
+      : null;
     reviewTarget = {
       memberId,
-      cycles: C.pendingRun(state.contributions, memberId, cycleNumber),
+      cycles: batch,
+      submittedAt: (firstRow && firstRow.created_at) || null,
     };
     rejectConfirming = false;
+    rejectNoteValue = "";
+    rejectError = null;
     render();
   }
 
   function closeReviewModal() {
     reviewTarget = null;
     rejectConfirming = false;
+    rejectNoteValue = "";
+    rejectError = null;
     render();
   }
 
   async function confirmReview() {
     if (!reviewTarget || busy) return;
     const { memberId, cycles } = reviewTarget;
-    await confirmCycles(memberId, cycles);
-  }
-
-  /** Confirm a batch straight from the review queue (skips opening the modal). */
-  async function confirmBatch(memberId, firstCycle) {
-    if (busy) return;
-    const cycles = C.pendingRun(state.contributions, memberId, firstCycle);
     await confirmCycles(memberId, cycles);
   }
 
@@ -618,7 +1602,14 @@
       await logActivity(
         `Treasurer confirmed ${memberName(memberId)}'s ${cycleRangeLabel(
           cycles
-        )} as paid — ${C.peso(total)}`
+        )} as paid — ${C.peso(total)}`,
+        {
+          type: "payment",
+          amount: total,
+          refStatus: C.STATUS_PAID,
+          memberId: memberId,
+          round: cycles.length ? C.roundOfCycle(cycles[0]) : null,
+        }
       );
       closeReviewModal();
       await reload();
@@ -634,14 +1625,35 @@
     rejectConfirming = true;
     render();
   }
+  function cancelUndoPaid() {
+    undoPaidTarget = null;
+    render();
+  }
+  async function confirmUndoPaid() {
+    if (!undoPaidTarget || busy) return;
+    const { memberId, cycleNumber } = undoPaidTarget;
+    undoPaidTarget = null;
+    await doRevertContribution(memberId, cycleNumber);
+  }
+
   function cancelRejectConfirm() {
     rejectConfirming = false;
+    rejectNoteValue = "";
+    rejectError = null;
     render();
   }
 
   async function doRejectReview() {
     if (!reviewTarget || busy) return;
     const { memberId, cycles } = reviewTarget;
+    const note = rejectNoteValue.trim();
+    if (!note) {
+      // A rejection the member can't understand is the thing this whole flow
+      // exists to fix, so the reason is required here even though the column
+      // is nullable.
+      rejectError = "Say why it wasn't accepted — the member sees this.";
+      return render();
+    }
     busy = true;
     render();
     try {
@@ -651,27 +1663,55 @@
       const proof =
         (rows[0] && rows[0].proof_url) ||
         C.proofOf(state.contributions, memberId, cycles[0]);
-      const removedIds = rows.map((r) => r.id);
+      const ids = rows.map((r) => r.id);
 
-      for (const c of cycles) {
-        await window.DB.deleteContribution(memberId, cycleIdByNumber[c]);
+      // Preferred path: keep the rows and mark them rejected, so the member
+      // sees the reason and can resubmit. The screenshot stays where it is —
+      // the surviving rows still point at it.
+      const kept = await window.DB.rejectContributions(ids, note);
+
+      let logSuffix = "";
+      let warning = false;
+      if (!kept) {
+        // Migration 006 hasn't been run. Fall back to the old behaviour rather
+        // than blocking the treasurer: delete the rows and archive the proof.
+        for (const c of cycles) {
+          await window.DB.deleteContribution(memberId, cycleIdByNumber[c]);
+        }
+        const outcome = await preserveProof(proof, ids);
+        logSuffix = outcome.logSuffix;
+        warning = outcome.warning;
       }
-
-      // The batch shares one screenshot — keep it (archive), don't delete it.
-      const outcome = await preserveProof(proof, removedIds);
 
       await logActivity(
         `Treasurer rejected ${memberName(memberId)}'s ${cycleRangeLabel(
           cycles
-        )} claim` + outcome.logSuffix
+        )} claim — "${note}"` + logSuffix,
+        {
+          type: "payment",
+          amount: cycles.length * C.CONTRIBUTION_AMOUNT,
+          refStatus: C.STATUS_REJECTED,
+          memberId: memberId,
+          round: cycles.length ? C.roundOfCycle(cycles[0]) : null,
+        }
       );
       closeReviewModal();
       await reload();
-      if (outcome.warning) {
+      if (!kept) {
+        showWarning(
+          "The claim was rejected, but this database hasn't had " +
+            "supabase/migrations/006_redesign_foundation.sql run yet, so the " +
+            "record was removed instead of kept and " +
+            memberName(memberId) +
+            " won't see the reason in the app."
+        );
+      } else if (warning) {
         showWarning(
           "The claim was rejected, but its payment screenshot could not be " +
             "archived — it is still at its original URL. See the activity log."
         );
+      } else {
+        showSuccess("Claim rejected — " + memberName(memberId) + " can resubmit.");
       }
     } catch (e) {
       showError(e.message);
@@ -708,7 +1748,8 @@
         { id: b.id, member_order: a.member_order },
       ]);
       await logActivity(
-        `Payout order: ${a.name} swapped positions with ${b.name}`
+        `Payout order: ${a.name} swapped positions with ${b.name}`,
+        { type: "admin" }
       );
       await reload();
     } catch (e) {
@@ -743,7 +1784,7 @@
     render();
     try {
       await window.DB.resetAll();
-      await logActivity("Fund was reset — all contributions cleared");
+      await logActivity("Fund was reset — all contributions cleared", { type: "admin" });
       // Reset keeps the PIN; the current session re-locks so treasurer mode
       // can only be re-entered with it.
       unlocked = false;
@@ -805,23 +1846,71 @@
       const row = [c, due ? C.formatDate(due) : ""];
       members.forEach((m) => {
         const s = C.statusOf(state.contributions, m.id, c);
-        row.push(s === 2 ? "Paid" : s === 1 ? "Pending" : "Unpaid");
+        // Rejected is its own state — reporting it as "Unpaid" hides that the
+        // member submitted and the treasurer turned it down.
+        row.push(s === 2 ? "Paid" : s === 1 ? "Pending" : s === 3 ? "Rejected" : "Unpaid");
       });
       row.push(C.cycleTotal(state.contributions, c));
       rows.push(row);
     }
     const csv = rows.map((r) => r.map(csvEscape).join(",")).join("\r\n");
     downloadFile(csv, `power-fund-summary-${todayStamp()}.csv`, "text/csv");
+    showSuccess("Summary CSV saved to your downloads.");
+  }
+
+  /** One round's cycles only — the same columns as the full summary, scoped to
+   *  the round the detail pane is showing (DesktopRounds' "Export round CSV"). */
+  function exportRoundCsv(round) {
+    const r = Number(round);
+    if (!(r >= 1 && r <= C.TOTAL_ROUNDS)) return;
+    const members = sortedMembers();
+    const { startCycle, endCycle } = C.roundCycleRange(r);
+    const rows = [["Cycle", "Due Date", ...members.map((m) => m.name), "Cycle Total"]];
+    for (let c = startCycle; c <= endCycle; c++) {
+      const due = C.dueDateOf(state.cycles, c);
+      const row = [c, due ? C.formatDate(due) : ""];
+      members.forEach((m) => {
+        const st = C.statusOf(state.contributions, m.id, c);
+        row.push(st === 2 ? "Paid" : st === 1 ? "Pending" : st === 3 ? "Rejected" : "Unpaid");
+      });
+      row.push(C.cycleTotal(state.contributions, c));
+      rows.push(row);
+    }
+    const csv = rows.map((x) => x.map(csvEscape).join(",")).join("\r\n");
+    downloadFile(csv, `power-fund-round-${r}-${todayStamp()}.csv`, "text/csv");
+    showSuccess(`Round ${r} CSV saved to your downloads.`);
   }
 
   function downloadBackup() {
     const backup = {
       app: "power-fund",
-      version: 1,
+      version: 2,
       exported_at: new Date().toISOString(),
+      // KEEP THIS FILE PRIVATE. It contains members' email addresses, links to
+      // their payment screenshots, and the account numbers their payouts are
+      // sent to.
+      _note:
+        "Power Fund backup. Contains member emails, payout account details and " +
+        "links to payment proofs — treat it like the fund's ledger.",
       members: state.members.map((m) => ({
         member_order: m.member_order,
         name: m.name,
+        // Where this member RECEIVES their round (migration 005). Left out of
+        // v1 backups, which meant a restore silently lost every account number
+        // the fund pays out to — the most consequential data here after the
+        // contributions themselves.
+        payout_bank: m.payout_bank,
+        payout_account_name: m.payout_account_name,
+        payout_account_number: m.payout_account_number,
+        payout_qr_url: m.payout_qr_url,
+        payout_updated_at: m.payout_updated_at,
+        avatar_url: m.avatar_url,
+        // Fund configuration (migration 008). auth_user_id is DELIBERATELY
+        // absent: it is a foreign key into this specific Supabase project's
+        // auth.users, so restoring it would either dangle or re-point who owns
+        // a row. Members re-link by signing in, which is the only safe way.
+        email: m.email,
+        is_treasurer: m.is_treasurer,
       })),
       cycles: state.cycles.map((c) => ({
         cycle_number: c.cycle_number,
@@ -835,6 +1924,10 @@
         proof_url: c.proof_url,
         notes: c.notes,
         paid_at: c.paid_at,
+        // The treasurer's verdict on a refused claim (migration 006). Without
+        // these a restored status-3 row says it was rejected but not why.
+        rejection_note: c.rejection_note,
+        rejected_at: c.rejected_at,
       })),
       payouts: (state.payouts || []).map((p) => ({
         round_number: p.round_number,
@@ -851,13 +1944,36 @@
       activityLog: (state.activityLog || []).map((a) => ({
         message: a.message,
         created_at: a.created_at,
+        // The typed columns (006) and the attribution (007). Captured now, so
+        // a restored log can still be filtered by type, member and round
+        // instead of collapsing to plain text.
+        event_type: a.event_type,
+        amount: a.amount,
+        ref_status: a.ref_status,
+        member_order: a.member_id != null ? memberOrderOf(a.member_id) : null,
+        round_number: a.round_number,
       })),
+      // Never captured before at all: the fund's name, the payment QR and the
+      // account details shown beside it. The PINs are NOT here and must not be
+      // — they live in app_secrets, which the browser cannot read.
+      settings: (function () {
+        const st = state.settings || {};
+        return {
+          fund_name: st.fund_name,
+          qr_code_url: st.qr_code_url,
+          qr_updated_at: st.qr_updated_at,
+          qr_bank: st.qr_bank,
+          qr_account_number: st.qr_account_number,
+          qr_account_name: st.qr_account_name,
+        };
+      })(),
     };
     downloadFile(
       JSON.stringify(backup, null, 2),
       `power-fund-backup-${todayStamp()}.json`,
       "application/json"
     );
+    showSuccess("Backup file saved to your downloads.");
   }
 
   function pickRestoreFile() {
@@ -877,10 +1993,20 @@
     try {
       data = JSON.parse(await file.text());
     } catch (e) {
-      return showError("That file isn't valid JSON.");
+      restoreState = {
+        phase: "invalid",
+        fileName: file.name || "that file",
+        reason: "It isn't valid JSON, so it can't be read at all.",
+      };
+      return render();
     }
     if (!data || !Array.isArray(data.contributions)) {
-      return showError("That file doesn't look like a Power Fund backup.");
+      restoreState = {
+        phase: "invalid",
+        fileName: file.name || "that file",
+        reason: "It doesn't match the format this app exports.",
+      };
+      return render();
     }
     const n = data.contributions.length;
     const released = Array.isArray(data.payouts)
@@ -899,8 +2025,10 @@
       title: "Replace all data with this backup?",
       bodyHtml:
         `<b>${escapeHtml(summary)}</b><br><br>` +
-        `This <b>replaces every current contribution and all payout status</b> ` +
-        `with the file's contents. Anything not in the file is lost. This cannot be undone.`,
+        `This <b>replaces every current contribution, all payout status and the ` +
+        `whole activity log</b> with the file's contents, and overwrites member ` +
+        `names, payout account details and the fund's settings wherever the file ` +
+        `carries them. Anything not in the file is lost. This cannot be undone.`,
       confirmLabel: "Replace everything",
       requireType: "REPLACE",
       ctx: { data },
@@ -910,14 +2038,31 @@
   /** The actual restore, after the confirmation dialog. */
   async function doRestoreBackup(data) {
     if (busy) return;
+    const n = data.contributions.length;
+    const released = Array.isArray(data.payouts)
+      ? data.payouts.filter((p) => p && p.released).length
+      : 0;
+    restoreState = { phase: "working" };
     busy = true;
     render();
     try {
       await window.DB.restoreFromBackup(data);
-      await logActivity("Fund data restored from a backup file");
+      await logActivity("Fund data restored from a backup file", { type: "admin" });
       await reload();
+      // Positive proof it finished, and of exactly what is now on screen —
+      // after replacing everything, silence is the one thing that leaves the
+      // numbers untrustworthy.
+      restoreState = {
+        phase: "done",
+        n,
+        released,
+        exportedAt: data.exported_at || null,
+      };
     } catch (e) {
-      showError(e.message);
+      restoreState = null;
+      showError(e.message, function () {
+        doRestoreBackup(data);
+      });
     } finally {
       busy = false;
       render();
@@ -958,8 +2103,16 @@
       return render();
     }
     if (d.requirePin) {
-      const pin = state.settings && state.settings.treasurer_pin;
-      if (!pin || d.pinValue !== pin) {
+      // Verified by the database (migration 010); the digits never come here.
+      let pinOk = false;
+      try {
+        pinOk = await window.DB.verifyPin("treasurer", d.pinValue, state.pins);
+      } catch (e) {
+        d.error = e.message;
+        d.pinValue = "";
+        return render();
+      }
+      if (!pinOk) {
         d.error = "Incorrect PIN.";
         d.pinValue = "";
         return render();
@@ -974,20 +2127,32 @@
     if (kind === "undoRelease") return doUnmarkPayoutReleased(ctx.round);
     if (kind === "reset") return doReset();
     if (kind === "restore") return doRestoreBackup(ctx.data);
+    if (kind === "unlink") return doUnlinkMember(ctx.memberId);
+    if (kind === "transferRole") return doTransferRole(ctx.toId);
   }
 
   // ===================================================================
   // Treasurer PIN
   // ===================================================================
   function toggleUnlock() {
+    // Exported on PowerFund, so hiding the button is not the gate.
+    if (!canUnlockTreasurer()) return;
     if (unlocked) {
       unlocked = false;
+      unlockedViaMaster = false;
+      // Remember the choice, or the next poll's auto-unlock would undo it.
+      treasurerLockedByChoice = true;
       render();
       return;
     }
+    // Unlocking by hand cancels the lock-out, so a later reload auto-unlocks
+    // again rather than making the admin re-enter a PIN it does not need.
+    treasurerLockedByChoice = false;
     pinInputValue = "";
     pinError = null;
-    pinModalMode = state.settings && state.settings.treasurer_pin ? "enter" : "setup";
+    pinNewValue = "";
+    pinStep = "new";
+    pinModalMode = hasTreasurerPin() ? "enter" : "setup";
     render();
   }
 
@@ -995,66 +2160,249 @@
     pinModalMode = null;
     pinInputValue = "";
     pinError = null;
+    pinNewValue = "";
+    pinStep = "new";
+    render();
+  }
+
+  /** Does a treasurer PIN exist? From migration 010's status booleans, never
+   *  from the digits. Absent `state.pins` means the load failed, and the safe
+   *  reading of "we don't know" is "a PIN exists" — the alternative offers to
+   *  create a new one, which is how a network blip becomes a takeover. */
+  function hasTreasurerPin() {
+    if (!state || !state.pins) return true;
+    return !!state.pins.hasTreasurer;
+  }
+
+  function hasMasterPin() {
+    return !!(state.pins && state.pins.hasMaster);
+  }
+
+  /** Set or rotate the group's recovery PIN. Until now this existed only as a
+   *  one-off SQL statement, so a fund deployed without running it had no
+   *  recovery path and nothing in the app said so. */
+  function openMasterPin() {
+    // Treasurer-only, checked here and again in submitPin(). The Menu row that
+    // opens this already sits behind `unlocked`, but the function is on the
+    // PowerFund global — a UI-only gate on the recovery credential is not a
+    // gate, it is decoration.
+    if (!unlocked) {
+      return showError("Unlock treasurer mode before changing the master PIN.");
+    }
+    pinInputValue = "";
+    pinError = null;
+    pinNewValue = "";
+    pinStep = "new";
+    pinModalMode = "master";
     render();
   }
 
   function openChangePin() {
     pinInputValue = "";
     pinError = null;
+    pinNewValue = "";
+    // Changing an existing PIN starts by proving you know it — otherwise
+    // anyone who finds an unlocked phone can lock the group out of its own
+    // treasurer mode.
+    pinStep = hasTreasurerPin() ? "current" : "new";
     pinModalMode = "change";
     render();
   }
 
+  /** Wrong entry: bounce the dots and clear, rather than silently doing
+   *  nothing. The shake clears itself on the next render pass. */
+  function pinReject(message) {
+    pinError = message;
+    pinInputValue = "";
+    pinShake = true;
+    render();
+    setTimeout(() => {
+      pinShake = false;
+      if (pinModalMode) render();
+    }, 420);
+  }
+
   async function submitPin() {
-    if (pinModalMode === "setup" || pinModalMode === "change") {
-      if (!pinInputValue || pinInputValue.length < 4) {
-        pinError = "PIN must be at least 4 digits.";
+    // ---- Setting or changing a PIN: current → new → confirm → done -------
+    // Never saves the first value typed. A confirm step is the whole point:
+    // one mistyped digit used to become the group's PIN, and the only way
+    // back was a master PIN that may never have been set.
+    if (
+      pinModalMode === "setup" ||
+      pinModalMode === "change" ||
+      pinModalMode === "master"
+    ) {
+      if (pinModalMode === "master" && !unlocked) {
+        pinError = "Treasurer mode must be unlocked to change the master PIN.";
         return render();
       }
-      const wasChange = pinModalMode === "change";
-      try {
-        await window.DB.updateTreasurerPin(pinInputValue);
-        await logActivity(
-          wasChange
-            ? "Treasurer PIN was changed"
-            : "Treasurer PIN was set for the first time"
-        );
-        unlocked = true;
-        closePinModal();
-        await reload();
-      } catch (e) {
-        pinError = e.message;
-        render();
-      }
-    } else {
-      // enter
-      if (pinInputValue === (state.settings && state.settings.treasurer_pin)) {
-        unlocked = true;
-        closePinModal();
-      } else {
-        pinError = "Incorrect PIN. Try again.";
+
+      if (pinStep === "current") {
+        let ok = false;
+        try {
+          ok = await window.DB.verifyPin("treasurer", pinInputValue, state.pins);
+        } catch (e) {
+          return pinReject(e.message);
+        }
+        if (!ok) {
+          return pinReject("That isn't the current PIN.");
+        }
+        pinStep = "new";
         pinInputValue = "";
-        render();
+        pinError = null;
+        return render();
       }
+
+      if (pinStep === "new") {
+        if (!pinInputValue || pinInputValue.length < 4) {
+          pinError = "PIN must be at least 4 digits.";
+          return render();
+        }
+        // "Is this the treasurer PIN?" asked without ever holding it — the
+        // same verify primitive, which works either side of migration 010.
+        let sameAsTreasurer = false;
+        if (pinModalMode === "master") {
+          try {
+            sameAsTreasurer = await window.DB.verifyPin(
+              "treasurer",
+              pinInputValue,
+              state.pins
+            );
+          } catch (e) {
+            pinError = e.message;
+            return render();
+          }
+        }
+        if (sameAsTreasurer) {
+          // Same digits for both defeats the point: the master PIN exists to
+          // be usable when the treasurer PIN is the thing that has been lost.
+          pinError = "Use different digits from the treasurer PIN.";
+          return render();
+        }
+        pinNewValue = pinInputValue;
+        pinStep = "confirm";
+        pinInputValue = "";
+        pinError = null;
+        return render();
+      }
+
+      if (pinStep === "confirm") {
+        if (pinInputValue !== pinNewValue) {
+          // Back one step, not back to the start — retyping the current PIN
+          // to recover from a typo is punishment, not safety.
+          pinStep = "new";
+          pinNewValue = "";
+          return pinReject("Those didn't match. Choose the new PIN again.");
+        }
+        const isMaster = pinModalMode === "master";
+        const wasChange = pinModalMode === "change";
+        const rotating = isMaster && hasMasterPin();
+        try {
+          // setPin goes through migration 010's pf_set_pin, which enforces the
+          // length minimum, the treasurer-only rule and the two-PINs-differ
+          // rule server-side; it falls back to the plaintext column pre-010.
+          await window.DB.setPin(isMaster ? "master" : "treasurer", pinNewValue, state.pins);
+          // The digits are never logged — only that it changed.
+          await logActivity(
+            isMaster
+              ? rotating
+                ? "Master PIN was changed"
+                : "Master PIN was set"
+              : wasChange
+              ? "Treasurer PIN was changed"
+              : "Treasurer PIN was set for the first time",
+            { type: "admin" }
+          );
+          if (!isMaster) unlocked = true;
+          pinStep = "done";
+          pinInputValue = "";
+          pinNewValue = "";
+          pinError = null;
+          render();
+          await reload();
+        } catch (e) {
+          pinError = e.message;
+          render();
+        }
+        return;
+      }
+
+      if (pinStep === "done") return closePinModal();
+      return;
     }
+
+    {
+      // enter
+      const entered = pinInputValue;
+      let isTreasurerPin = false;
+      let isMasterPin = false;
+      try {
+        isTreasurerPin = await window.DB.verifyPin("treasurer", entered, state.pins);
+        if (!isTreasurerPin) {
+          isMasterPin = await window.DB.verifyPin("master", entered, state.pins);
+        }
+      } catch (e) {
+        // A failure to CHECK is not a wrong PIN, and must not read as one.
+        return pinReject(e.message);
+      }
+      if (isTreasurerPin) {
+        unlocked = true;
+        unlockedViaMaster = false;
+        closePinModal();
+        return;
+      }
+      // The master PIN (migration 006) is the way back in when the group's own
+      // PIN has been forgotten. It is set by hand in the database and never
+      // shown, changed or removed from inside the app. Absent = not configured,
+      // and the lockout behaves exactly as it did before.
+      if (isMasterPin) {
+        unlocked = true;
+        unlockedViaMaster = true;
+        closePinModal();
+        // Logged so a master-PIN entry is visible after the fact, the same way
+        // migration 005 makes payout-QR changes auditable.
+        try {
+          await logActivity("Treasurer mode unlocked with the master PIN", { type: "admin" });
+          await reload();
+        } catch (e) {
+          console.warn("Could not log the master-PIN unlock:", e.message);
+        }
+        showWarning(
+          "Unlocked with the master PIN. Set a new treasurer PIN from " +
+            "Menu → Change PIN so the group can use their own again."
+        );
+        return;
+      }
+      // Same shake-and-clear as the wizard's wrong-PIN step, so a rejected
+      // entry looks rejected rather than looking like a dead button.
+      pinReject("Incorrect PIN. Try again.");
+    }
+  }
+
+  /** Numeric-keypad entry: append one digit, or clear/backspace. */
+  function pinKey(key) {
+    if (key === "clear") pinInputValue = "";
+    else if (key === "back") pinInputValue = pinInputValue.slice(0, -1);
+    else if (/^[0-9]$/.test(key) && pinInputValue.length < 12) pinInputValue += key;
+    pinError = null;
+    render();
   }
 
   // ===================================================================
   // Payout release
   // ===================================================================
   function openPayoutModal(round) {
+    receiptUploadFailed = false;
     payoutModalRound = round;
     const existing = getPayout(round);
     payoutNoteValue = existing.note || "";
-    payoutAmountValue =
-      existing.amount != null ? String(existing.amount) : String(C.GOAL_PER_ROUND);
     clearPayoutReceipt();
     render();
   }
   function closePayoutModal() {
+    receiptUploadFailed = false;
     payoutModalRound = null;
     payoutNoteValue = "";
-    payoutAmountValue = "";
     clearPayoutReceipt();
     render();
   }
@@ -1084,14 +2432,22 @@
 
   /** Parse the release-modal amount field. Blank => the ₱30,000 default.
    *  This is a historical record only — it never touches round funding. */
-  function parsePayoutAmount(v) {
-    if (v == null || String(v).trim() === "") return C.GOAL_PER_ROUND;
-    const n = Number(String(v).replace(/[₱,\s]/g, ""));
-    return isFinite(n) ? n : null;
+
+  /** Release, but explicitly WITHOUT a receipt, after an upload has failed.
+   *  The break-glass: refusing outright is right for a transient failure, but
+   *  if the storage bucket is missing the treasurer can never record a payout
+   *  at all — money has moved in the real world and the app would be unable to
+   *  represent it, leaving the round Payout Pending forever. So this exists,
+   *  behind a second deliberate tap, and is loud about what it is: the log
+   *  says the receipt is missing and why, and a warning stays on screen. */
+  async function releaseWithoutReceipt() {
+    if (!payoutModalRound || busy) return;
+    await markPayoutReleased({ skipReceipt: true });
   }
 
-  async function markPayoutReleased() {
+  async function markPayoutReleased(opts) {
     if (!payoutModalRound || busy) return;
+    const skipReceipt = !!(opts && opts.skipReceipt === true);
     const round = payoutModalRound;
     // Guard at the action level: a payout can only be released once the round
     // has actually reached its ₱30,000 target in confirmed contributions. The
@@ -1107,10 +2463,22 @@
       );
     }
 
-    const amount = parsePayoutAmount(payoutAmountValue);
-    if (amount == null || amount < 0) {
-      return showError("Enter a valid payout amount (₱0 or more).");
+    // The receipt is the only evidence the payout was actually sent, so it is
+    // required (decision D4, matching the design). The button is disabled
+    // without one; this makes the rule hold even if the handler is reached
+    // another way, the same way the funded check above does.
+    if (!payoutReceiptFile && !skipReceipt) {
+      return showError(
+        "Attach the receipt photo before releasing — it is the record that the payout was sent."
+      );
     }
+
+    // FIXED at the round goal. Every round collects exactly
+    // CYCLES_PER_ROUND × members × CONTRIBUTION_AMOUNT and pays out exactly
+    // that, so there is no amount to choose — the field is a read-only figure
+    // in the sheet and this is the single source of the number. Nothing here
+    // reads a typed value any more, so a stale one cannot be recorded.
+    const amount = C.GOAL_PER_ROUND;
 
     // Snapshot the recipient NOW so the history stays correct even if members
     // are later renamed, reordered, or removed.
@@ -1118,17 +2486,33 @@
     busy = true;
     render();
     try {
-      // The receipt image is optional — if its upload fails (e.g. the storage
-      // bucket isn't set up), the payout must STILL be releasable. Degrade to
-      // a warning, don't abort.
+      // The receipt is REQUIRED (decision D4), and "required" has to survive a
+      // failed upload too. This used to catch the error and release anyway with
+      // receipt_url null, which recorded a real payout with no evidence and no
+      // way to attach any afterwards — the guard above says the receipt is the
+      // record that the payout was sent, so releasing without one contradicts
+      // it. Abort instead: the round stays Payout Pending, which is the honest
+      // state when the app holds no proof, and the treasurer can retry.
       let receiptUrl = null;
-      let receiptWarning = false;
-      if (payoutReceiptFile) {
+      if (!skipReceipt) {
         try {
           receiptUrl = await window.DB.uploadPayoutReceipt(payoutReceiptFile, round);
         } catch (e) {
-          receiptWarning = true;
           console.warn("Payout receipt upload failed:", e.message);
+          busy = false;
+          receiptUploadFailed = true;
+          // Report the REAL reason. The generic string this used to substitute
+          // threw away database.js's actionable one ("run migration 003"),
+          // making the abort less useful than the failure it wrapped. Shown
+          // inside the sheet, where the treasurer is looking.
+          submitState = {
+            phase: "failed",
+            message:
+              (e && e.message ? e.message : "The receipt photo could not be uploaded.") +
+              " The payout was NOT released — nothing has been recorded.",
+            retry: () => markPayoutReleased(),
+          };
+          return render();
         }
       }
 
@@ -1160,16 +2544,29 @@
           recipient ? recipient.name : "—"
         }) · ${C.peso(amount)}` +
           (payoutNoteValue ? ": " + payoutNoteValue : "") +
-          (receiptWarning ? " — receipt image was NOT saved" : "")
+          (skipReceipt ? " — NO RECEIPT ON FILE (upload failed)" : ""),
+        {
+          type: "payout",
+          // NEGATIVE: a released payout is money leaving the fund. Storing it
+          // positive forced the renderers to infer direction from the event
+          // type, which is how a ₱30,000 outflow ended up unsigned on mobile
+          // and a reversal ended up indistinguishable from a release.
+          amount: -Math.abs(amount),
+          memberId: recipient ? recipient.id : null,
+          round: round,
+        }
       );
       closePayoutModal();
       await reload();
 
+      // A failed receipt upload no longer reaches this point — it aborts the
+      // release above rather than recording an unevidenced payout.
       const problems = [];
-      if (receiptWarning) {
+      if (skipReceipt) {
         problems.push(
-          "the receipt image could not be uploaded — the 'payment-assets' " +
-            "storage bucket isn't set up (run supabase/migrations/003)"
+          "this payout has NO receipt on file — the upload failed, so there is " +
+            "no image proving it was sent. Attach one to the round's record " +
+            "later if you can"
         );
       }
       if (accWarning) {
@@ -1196,8 +2593,10 @@
       title: "Undo payout release?",
       bodyHtml:
         `Undo the Round ${round} payout release?<br><br>` +
-        `The round returns to <b>🟡 Payout Pending</b>. The recorded release date, ` +
-        `note, amount and recipient are cleared.`,
+        `The round returns to <b>Payout Pending</b>. The recorded release date, ` +
+        `note, amount, recipient and <b>the receipt photo</b> are cleared from ` +
+        `the payout. The receipt's link is written to the activity log first, ` +
+        `so the evidence is not lost.`,
       confirmLabel: "Yes, undo release",
       ctx: { round },
     });
@@ -1206,6 +2605,17 @@
   async function doUnmarkPayoutReleased(round) {
     if (busy) return;
     const recipient = sortedMembers().find((m) => m.member_order === round);
+    // The receipt is the only proof a real transfer happened. Undoing the
+    // release nulls receipt_url, so capture it BEFORE the write and put it in
+    // the activity log — otherwise a reversible-sounding confirmation quietly
+    // destroys the evidence for money that actually moved.
+    const prior = getPayout(round) || {};
+    const priorReceipt = prior.receipt_url || null;
+    // The amount that was actually released, not the round goal. Logging
+    // -GOAL_PER_ROUND meant undoing an edited ₱32,000 release recorded
+    // -₱30,000, so the release and its reversal never netted out.
+    const priorAmount =
+      prior.amount != null ? Number(prior.amount) : C.GOAL_PER_ROUND;
     busy = true;
     render();
     try {
@@ -1227,7 +2637,18 @@
         console.warn("Payout accountability fields not cleared:", e.message);
       }
       await logActivity(
-        `Payout release undone — Round ${round} (${recipient ? recipient.name : "—"})`
+        `Payout release undone — Round ${round} (${recipient ? recipient.name : "—"})` +
+          (priorReceipt ? ` — receipt kept on record: ${priorReceipt}` : ""),
+        {
+          type: "payout",
+          // POSITIVE: an undo returns the money to the fund. Logging it
+          // negative made the reversal render identically to the release it
+          // reverses — red, "−₱30,000.00" — so a release-then-undo read as
+          // ₱60,000 leaving the fund.
+          amount: priorAmount,
+          memberId: recipient ? recipient.id : null,
+          round: round,
+        }
       );
       await reload();
     } catch (e) {
@@ -1240,7 +2661,7 @@
 
   // ===================================================================
   // Start next round (while the previous round's payout is still pending).
-  // This is a SEPARATE action from "Mark payout released" — starting round
+  // This is a SEPARATE action from "Release payout" — starting round
   // N+1 never releases round N's payout.
   // ===================================================================
   function askStartNextRound() {
@@ -1271,7 +2692,10 @@
       // updated is [] when the round was already started on another device —
       // that is fine, we just refresh to show the real state.
       if (Array.isArray(updated) && updated.length > 0) {
-        await logActivity(`Treasurer started Round ${next}`);
+        await logActivity(`Treasurer started Round ${next}`, {
+          type: "admin",
+          round: next,
+        });
       }
       await reload();
     } catch (e) {
@@ -1285,6 +2709,26 @@
   // ===================================================================
   // Edit names
   // ===================================================================
+  function closeRestoreState() {
+    restoreState = null;
+    render();
+  }
+  /** Straight from the invalid-file state back to the picker. */
+  function chooseAnotherBackup() {
+    restoreState = null;
+    render();
+    pickRestoreFile();
+  }
+
+  function openReorderModal() {
+    reorderModalOpen = true;
+    render();
+  }
+  function closeReorderModal() {
+    reorderModalOpen = false;
+    render();
+  }
+
   function openEditNamesModal() {
     editNamesValues = {};
     state.members.forEach((m) => (editNamesValues[m.id] = m.name));
@@ -1299,21 +2743,51 @@
     render();
   }
 
+  /** The one rule set for member names, shared by the live check and the save.
+   *  Returns a message, or null when the current values are savable. */
+  function editNamesProblem() {
+    if (!state || !state.members) return null;
+    const trimmed = state.members.map((m) => (editNamesValues[m.id] || "").trim());
+    if (trimmed.some((v) => !v)) return "All names must be filled in.";
+    const lower = trimmed.map((n) => n.toLowerCase());
+    if (new Set(lower).size !== lower.length) return "Names must be unique.";
+    return null;
+  }
+
+  /** Validate as the treasurer types. This patches the two affected nodes by
+   *  hand rather than calling render(): render() reassigns innerHTML, which
+   *  would destroy the input being typed into and lose the caret. */
+  function refreshEditNamesValidity() {
+    editNamesError = editNamesProblem();
+    const box = document.getElementById("editNamesError");
+    if (box) {
+      box.textContent = editNamesError || "";
+      box.hidden = !editNamesError;
+    }
+    const save = document.getElementById("editNamesSave");
+    if (save) save.disabled = busy || !!editNamesError;
+    // Flag the duplicates themselves, so "Names must be unique" points somewhere.
+    const seen = {};
+    state.members.forEach((m) => {
+      const v = (editNamesValues[m.id] || "").trim().toLowerCase();
+      seen[v] = (seen[v] || 0) + 1;
+    });
+    document.querySelectorAll(".edit-names-modal .name-input").forEach((el) => {
+      const v = (el.value || "").trim().toLowerCase();
+      el.classList.toggle("invalid", !v || seen[v] > 1);
+    });
+  }
+
   async function saveEditNames() {
     if (busy) return;
+    const problem = editNamesProblem();
+    if (problem) {
+      editNamesError = problem;
+      return render();
+    }
     const trimmed = {};
     for (const m of state.members) {
-      const v = (editNamesValues[m.id] || "").trim();
-      if (!v) {
-        editNamesError = "All names must be filled in.";
-        return render();
-      }
-      trimmed[m.id] = v;
-    }
-    const lower = Object.values(trimmed).map((n) => n.toLowerCase());
-    if (new Set(lower).size !== lower.length) {
-      editNamesError = "Names must be unique.";
-      return render();
+      trimmed[m.id] = (editNamesValues[m.id] || "").trim();
     }
     const changes = [];
     state.members.forEach((m) => {
@@ -1329,7 +2803,7 @@
           await window.DB.updateMember(m.id, { name: trimmed[m.id] });
         }
       }
-      await logActivity(`Name(s) updated: ${changes.join(", ")}`);
+      await logActivity(`Name(s) updated: ${changes.join(", ")}`, { type: "admin" });
       closeEditNamesModal();
       await reload();
     } catch (e) {
@@ -1342,18 +2816,1302 @@
   }
 
   // ===================================================================
+  // Member sign-in (treasurer)
+  //
+  // Migration 008 links a Google login to a member row BY EMAIL: the treasurer
+  // records the address, and a first login carrying it claims that row. The
+  // addresses had no UI, so rolling accounts out meant a hand-written SQL
+  // update per member — and every address had to travel to whoever held the
+  // Supabase password. This panel is the treasurer typing them in on their own
+  // phone instead.
+  //
+  // NOT a new permission. The database has always decided this: 010's
+  // members_guard lets the treasurer "reorder, flag and re-address anyone" and
+  // refuses a member `Only the treasurer can change a member's email`. This is
+  // the missing presentation, not a new capability.
+  // ===================================================================
+
+  /** Where the group stands on accounts — the same three things migration 011's
+   *  preflight refuses to lock down without, computed from rows we already
+   *  hold so the treasurer can see it without opening the SQL editor. */
+  function signInReadiness() {
+    const ms = (state && state.members) || [];
+    const withEmail = ms.filter((m) => String(m.email || "").trim()).length;
+    const linked = ms.filter((m) => m.auth_user_id).length;
+    const treasurerFlagged = ms.some((m) => m.is_treasurer);
+    return {
+      total: ms.length,
+      withEmail,
+      linked,
+      treasurerFlagged,
+      ready: ms.length > 0 && withEmail === ms.length && linked === ms.length && treasurerFlagged,
+    };
+  }
+
+  function openMemberAccountsModal() {
+    // Exported, so reachable from a console by anyone. Same reasoning as
+    // openWhoAmIPicker()'s refusal: the render guard alone is not the gate.
+    if (!isTreasurerAccount()) return;
+    memberEmailValues = {};
+    state.members.forEach((m) => (memberEmailValues[m.id] = m.email || ""));
+    memberAccountsError = null;
+    memberAccountsModalOpen = true;
+    render();
+  }
+  function closeMemberAccountsModal() {
+    memberAccountsModalOpen = false;
+    memberEmailValues = {};
+    memberAccountsError = null;
+    render();
+  }
+  function setMemberEmail(id, v) {
+    memberEmailValues[id] = v;
+    refreshMemberEmailsValidity();
+  }
+
+  /** Deliberately loose: something@something.something, no TLD list, no length
+   *  games. A typo'd address cannot be detected here anyway — it simply never
+   *  matches a login, which the panel then shows as "hasn't signed in yet".
+   *  What this does catch is the paste that lost its @ or arrived with a name
+   *  attached. */
+  function emailLooksValid(v) {
+    return /^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]{2,}$/.test(v);
+  }
+
+  /** One rule set, shared by the live check and the save. Returns a message, or
+   *  null when the draft is savable. Blank is allowed — that clears an address. */
+  function memberEmailsProblem() {
+    if (!state || !state.members) return null;
+    const vals = state.members.map((m) => String(memberEmailValues[m.id] || "").trim());
+    const filled = vals.filter((v) => v);
+    const bad = filled.find((v) => !emailLooksValid(v));
+    if (bad) return `"${bad}" doesn't look like an email address.`;
+    // Uniqueness is not cosmetic: resolveAccount() matches with .find(), so two
+    // members sharing an address would silently hand the row to whichever came
+    // first in payout order.
+    const lower = filled.map((v) => v.toLowerCase());
+    if (new Set(lower).size !== lower.length) {
+      return "Two members can't share an email address.";
+    }
+    return null;
+  }
+
+  /** Patches the two affected nodes by hand instead of re-rendering — render()
+   *  reassigns innerHTML, which would destroy the input being typed into and
+   *  lose the caret. Same reason as refreshEditNamesValidity(). */
+  function refreshMemberEmailsValidity() {
+    memberAccountsError = memberEmailsProblem();
+    const box = document.getElementById("memberEmailsError");
+    if (box) {
+      box.textContent = memberAccountsError || "";
+      box.hidden = !memberAccountsError;
+    }
+    const save = document.getElementById("memberEmailsSave");
+    if (save) save.disabled = busy || !!memberAccountsError;
+    const seen = {};
+    state.members.forEach((m) => {
+      const v = String(memberEmailValues[m.id] || "").trim().toLowerCase();
+      if (v) seen[v] = (seen[v] || 0) + 1;
+    });
+    document.querySelectorAll(".member-accounts-modal .email-input").forEach((el) => {
+      const v = String(el.value || "").trim().toLowerCase();
+      el.classList.toggle("invalid", !!v && (!emailLooksValid(v) || seen[v] > 1));
+    });
+  }
+
+  async function saveMemberEmails() {
+    if (busy || !isTreasurerAccount()) return;
+    const problem = memberEmailsProblem();
+    if (problem) {
+      memberAccountsError = problem;
+      return render();
+    }
+    // Stored lowercased because that is how resolveAccount() compares them; a
+    // Google address that arrives capitalised would otherwise never match.
+    const next = {};
+    for (const m of state.members) {
+      const v = String(memberEmailValues[m.id] || "").trim().toLowerCase();
+      next[m.id] = v || null;
+    }
+    const changed = state.members.filter(
+      (m) => (m.email || null) !== next[m.id]
+    );
+    if (!changed.length) return closeMemberAccountsModal();
+
+    busy = true;
+    render();
+    try {
+      for (const m of changed) {
+        await window.DB.updateMember(m.id, { email: next[m.id] });
+      }
+      // The addresses themselves are NOT logged. The activity log is readable
+      // by every member and goes into the CSV export and the backup file, so
+      // writing five personal addresses into it would spread them further than
+      // the roster row that actually needs them. Names only.
+      const added = changed.filter((m) => next[m.id]).map((m) => m.name);
+      const cleared = changed.filter((m) => !next[m.id]).map((m) => m.name);
+      const parts = [];
+      if (added.length) parts.push(`set for ${added.join(", ")}`);
+      if (cleared.length) parts.push(`removed for ${cleared.join(", ")}`);
+      await logActivity(`Sign-in email ${parts.join("; ")}`, { type: "admin" });
+      closeMemberAccountsModal();
+      await reload();
+    } catch (e) {
+      memberAccountsError = e.message;
+      busy = false;
+      return render();
+    }
+    busy = false;
+    render();
+  }
+
+  /** Unlinking frees the row for the next matching login — the recovery path
+   *  when somebody claimed the wrong member, or signed in with the wrong
+   *  Google account. It removes no contribution and no history. */
+  function unlinkMember(memberId) {
+    if (!isTreasurerAccount()) return;
+    const m = (state.members || []).find((x) => String(x.id) === String(memberId));
+    if (!m) return;
+    openConfirm({
+      kind: "unlink",
+      ctx: { memberId: m.id },
+      title: `Unlink ${m.name}'s account?`,
+      bodyHtml:
+        `${escapeHtml(m.name)} will be signed out of this fund's data on their next load, ` +
+        `and the next Google login using the address on file will claim this member again.` +
+        `<br><br>Nothing else changes: their payments, proofs and history all stay.`,
+      confirmLabel: "Unlink",
+    });
+  }
+  async function doUnlinkMember(memberId) {
+    if (busy || !isTreasurerAccount()) return;
+    busy = true;
+    render();
+    try {
+      const m = (state.members || []).find((x) => String(x.id) === String(memberId));
+      await window.DB.unlinkMemberAccount(memberId);
+      await logActivity(`Account unlinked for ${(m && m.name) || "a member"}`, {
+        type: "admin",
+        memberId: memberId,
+      });
+      await reload();
+      showSuccess("Account unlinked.");
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+
+  // ===================================================================
+  // Transfer treasurer role
+  //
+  // `members.is_treasurer` is the real permission: 010's pf_is_treasurer()
+  // reads it, and after 011 every treasurer-only policy in Postgres keys off
+  // it. The PIN cannot do this job — RLS runs inside the database on a request
+  // that carries a Google session and nothing else, so no policy can ask
+  // whether somebody typed a PIN.
+  //
+  // Which is why handing over the PIN does NOT hand over the role once 011 is
+  // applied: the new person gets treasurer mode in the UI and is refused every
+  // write. This screen moves the flag, so the role actually moves.
+  //
+  // No migration needed. 010's guard already says the treasurer "may reorder,
+  // flag and re-address anyone", so the treasurer changing somebody's
+  // is_treasurer is permitted today.
+  // ===================================================================
+
+  function openTransferRole() {
+    if (!isTreasurerAccount()) return; // exported handler; see openWhoAmIPicker
+    transferRolePick = null;
+    transferRoleModalOpen = true;
+    render();
+  }
+  function closeTransferRole() {
+    transferRoleModalOpen = false;
+    transferRolePick = null;
+    render();
+  }
+  function pickTransferRole(memberId) {
+    transferRolePick = memberId || null;
+    render();
+  }
+
+  /** Only a member who could actually hold the role: linked (the flag is
+   *  meaningless on a row no login owns — pf_is_treasurer() matches on
+   *  auth_user_id, so flagging an unlinked row would create a fund with a
+   *  treasurer nobody can be) and not already the treasurer. */
+  function transferCandidates() {
+    return sortedMembers().filter((m) => m.auth_user_id && !m.is_treasurer);
+  }
+
+  function confirmTransferRole() {
+    if (!isTreasurerAccount() || !transferRolePick) return;
+    const to = state.members.find((m) => String(m.id) === String(transferRolePick));
+    if (!to) return;
+    const me = editableMember();
+    openConfirm({
+      kind: "transferRole",
+      ctx: { toId: to.id },
+      title: `Make ${to.name} the treasurer?`,
+      bodyHtml:
+        `<b>${escapeHtml(to.name)}</b> will be able to confirm payments, reject them, ` +
+        `release payouts and change fund settings.<br><br>` +
+        `<b>You will not.</b> ${escapeHtml(
+          (me && me.name) || "You"
+        )} keeps every payment and all history, but stops being the treasurer ` +
+        `the moment this saves — including losing this screen.<br><br>` +
+        `Tell ${escapeHtml(to.name)} the treasurer PIN, or ask them to change it ` +
+        `from Menu → Security once they are in.`,
+      confirmLabel: `Make ${to.name} treasurer`,
+      // The PIN is not the authority here — the flag is — but this is a
+      // permission change, and every other irreversible action in the app
+      // asks for it. Being the odd one out would be the surprise.
+      requirePin: true,
+    });
+  }
+
+  async function doTransferRole(toId) {
+    if (busy || !isTreasurerAccount()) return;
+    const to = state.members.find((m) => String(m.id) === String(toId));
+    const me = editableMember();
+    if (!to || !me) return;
+
+    busy = true;
+    render();
+    try {
+      // ORDER IS NOT ARBITRARY. Grant first, then resign.
+      //
+      // Both directions can fail half-way — two network calls, no transaction
+      // across them — so the question is which half-state to be left in:
+      //
+      //   grant then resign : fails -> TWO treasurers. Visible in the panel,
+      //                       flagged by 011's preflight, and either of them
+      //                       can finish the job. Self-healing.
+      //   resign then grant : fails -> NOBODY is treasurer. Nobody can confirm
+      //                       a payment, release a payout, or set the flag
+      //                       back, because setting it requires being the
+      //                       treasurer. Only recoverable in SQL.
+      //
+      // So: grant first, always.
+      await window.DB.updateMember(to.id, { is_treasurer: true });
+      await window.DB.updateMember(me.id, { is_treasurer: false });
+      await logActivity(`Treasurer role transferred from ${me.name} to ${to.name}`, {
+        type: "admin",
+        memberId: to.id,
+      });
+      closeTransferRole();
+      await reload();
+
+      // Not the treasurer any more: drop treasurer mode rather than leaving
+      // the buttons up. After 011 they would be refused by Postgres anyway,
+      // and before it they would work — which is worse, not better.
+      unlocked = false;
+      unlockedViaMaster = false;
+      treasurerLockedByChoice = false;
+
+      // Verify rather than assume. If the second write did not land we are in
+      // the two-treasurer state above, and saying "done" would hide it.
+      const flagged = (state.members || []).filter((m) => m.is_treasurer);
+      if (flagged.length === 1 && String(flagged[0].id) === String(to.id)) {
+        showSuccess(`${to.name} is now the treasurer.`);
+      } else {
+        showError(
+          `${to.name} is now a treasurer, but ${me.name} still is too — the second ` +
+            `change didn't save. Either of you can finish it from Menu → Security.`
+        );
+      }
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+
+  // ===================================================================
   // Rounds accordion + activity log
   // ===================================================================
   function toggleRound(roundNum) {
     openRound = openRound === roundNum ? null : roundNum;
     render();
   }
-  function toggleActivityLog() {
-    activityLogOpen = !activityLogOpen;
+  function setActivityFilter(type) {
+    activityFilter = type;
     render();
   }
+  function setActivityMember(id) {
+    activityMemberFilter = id;
+    render();
+  }
+  function setActivityRound(round) {
+    activityRoundFilter = round;
+    render();
+  }
+
+  // ===================================================================
+  // Icons — one stroke-based set, drawn in currentColor so a single
+  // definition works on any background at any accent. Emoji were only ever a
+  // placeholder: they render differently on every platform and can't inherit
+  // colour or stroke weight.
+  // ===================================================================
+  const ICON_PATHS = {
+    // Stroked, 24x24, no fill — see the .icon rule in style.css.
+    plus: '<path d="M12 5v14"/><path d="M5 12h14"/>',
+    share:
+      '<path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M12 15V4"/><path d="M8 8l4-4 4 4"/>',
+    home: '<path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9a1 1 0 0 0 1 1h3v-6h4v6h3a1 1 0 0 0 1-1v-9"/>',
+    rounds:
+      '<path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/>',
+    members:
+      '<circle cx="9" cy="8" r="3.2"/><path d="M2.8 20.2c.5-3.6 3-5.6 6.2-5.6s5.7 2 6.2 5.6"/><circle cx="17.3" cy="8.6" r="2.4"/><path d="M15.9 14.3c2.3.5 4 2.3 4.3 5.4"/>',
+    activity:
+      '<line x1="8" y1="7" x2="20" y2="7"/><line x1="8" y1="12" x2="20" y2="12"/><line x1="8" y1="17" x2="20" y2="17"/><circle cx="4" cy="7" r="1" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="4" cy="17" r="1" fill="currentColor" stroke="none"/>',
+    insights: '<polyline points="3 16 9 10 13 14 21 5"/><polyline points="15 5 21 5 21 11"/>',
+    menu: '<circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/>',
+    lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    unlocked: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.4-2"/>',
+    qr: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="15" y="15" width="5" height="5"/>',
+    users:
+      '<circle cx="9" cy="8" r="3.2"/><path d="M2.8 20.2c.5-3.6 3-5.6 6.2-5.6s5.7 2 6.2 5.6"/><circle cx="17.3" cy="8.6" r="2.4"/><path d="M15.9 14.3c2.3.5 4 2.3 4.3 5.4"/>',
+    key: '<circle cx="8" cy="12" r="3.2"/><path d="M11.2 12H21"/><path d="M17 12v3"/><path d="M20 12v2"/>',
+    download: '<path d="M12 3v13"/><polyline points="7 11 12 16 17 11"/><path d="M4 20h16"/>',
+    upload: '<path d="M12 21V8"/><polyline points="7 13 12 8 17 13"/><path d="M4 4h16"/>',
+    sheet: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h3"/>',
+    alert:
+      '<path d="M10.3 4.6 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.6a2 2 0 0 0-3.4 0Z"/><path d="M12 9.5v4"/><circle cx="12" cy="17" r=".9" fill="currentColor" stroke="none"/>',
+    check: '<polyline points="4 12 10 18 20 6"/>',
+    close: '<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>',
+    expand: '<polyline points="9 3 3 3 3 9"/><polyline points="15 3 21 3 21 9"/><polyline points="21 15 21 21 15 21"/><polyline points="3 15 3 21 9 21"/>',
+    chevron: '<polyline points="9 6 15 12 9 18"/>',
+    chevronLeft: '<polyline points="15 6 9 12 15 18"/>',
+    bell: '<path d="M6 8a6 6 0 0 1 12 0c0 4 1.5 5.5 2 6H4c.5-.5 2-2 2-6Z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+    party: '<path d="M4 20l4.5-11L19 19.5 4 20Z"/><path d="M14 4.5v2M18.5 8h2M16.8 6.2l1.4-1.4"/>',
+    clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
+    trash:
+      '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/><path d="M9 7V4h6v3"/>',
+    // From OnboardingWelcome.dc.html's emblem.
+    wallet:
+      '<rect x="3" y="6.5" width="18" height="13" rx="2.5"/><path d="M16.5 6.5V5.3A1.8 1.8 0 0 0 14.7 3.5H6A2.5 2.5 0 0 0 3.5 6"/><circle cx="17" cy="13" r="1.3" fill="currentColor" stroke="none"/>',
+    // Taken verbatim from ProfilePhotoSheet.dc.html / EditProfile.dc.html.
+    camera:
+      '<path d="M4 8h3l1.6-2.4A2 2 0 0 1 10.3 4.6h3.4a2 2 0 0 1 1.7 1L17 8h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z"/><circle cx="12" cy="14" r="3.6"/>',
+    // The "Choose from Library" glyph, likewise from the artboard.
+    photos:
+      '<rect x="3" y="4" width="18" height="15" rx="2"/><circle cx="9" cy="10" r="1.8"/><path d="M21 15l-5.5-5-6 5.5-2-2L3 18"/>',
+  };
+  /**
+   * The fund's battery-cell progress visual: a cell that fills bottom-up.
+   *
+   * The terminal cap stays grey until the cell is actually full, so a
+   * part-charged battery never reads as a finished one at a glance — the
+   * colour only means "done" when it is.
+   */
+  function batteryCell(pct, size) {
+    const p = Math.max(0, Math.min(100, pct || 0));
+    const px = size || 96;
+    const full = p >= 100;
+    // Inner (clipped) area of the cell body, in the 96x96 viewBox.
+    const top = 13;
+    const bottom = 92;
+    const fillH = ((bottom - top) * p) / 100;
+    const fillY = bottom - fillH;
+    const capFill = full ? "#F5A623" : "rgba(255,255,255,0.16)";
+    return `<svg class="batt" viewBox="0 0 96 96" width="${px}" height="${px}" aria-hidden="true" focusable="false">
+      <defs>
+        <linearGradient id="battGrad" x1="0%" y1="100%" x2="0%" y2="0%">
+          <stop offset="0%" stop-color="#4CD9C0"/>
+          <stop offset="100%" stop-color="#F5A623"/>
+        </linearGradient>
+        <clipPath id="battClip"><rect x="22" y="${top}" width="52" height="${
+      bottom - top
+    }" rx="12"/></clipPath>
+      </defs>
+      <rect x="32" y="0" width="32" height="9" rx="4" fill="${capFill}"/>
+      <rect x="18" y="9" width="60" height="87" rx="16" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.1)" stroke-width="3"/>
+      <g clip-path="url(#battClip)">
+        <rect class="batt-fill" x="22" y="${fillY}" width="52" height="${fillH}" fill="url(#battGrad)"/>
+      </g>
+    </svg>`;
+  }
+
+  /**
+   * Member avatar: initial in a circle, ringed in the colour of that member's
+   * standing. The ring is a redundant cue, never the only one — every card
+   * that shows one also states the same thing in words, so the roster stays
+   * readable without relying on colour.
+   *
+   * status: "paid-out" | "overdue" | "pending" | "current" | "idle"
+   */
+  /** The ring keeps meaning what it meant; `avatarUrl` (migration 009) just
+   *  swaps the initial for a photo. The initial stays in the markup underneath
+   *  so a photo that 404s — a deleted object, a dead bucket — degrades to the
+   *  letter instead of a broken-image icon. */
+  function memberAvatar(name, status, size, avatarUrl) {
+    const px = size || 44;
+    const initial = (name || "?").trim().charAt(0).toUpperCase();
+    const inner = avatarUrl
+      ? `<img class="avatar-img" src="${escapeHtml(
+          avatarUrl
+        )}" alt="" onerror="this.remove()">${escapeHtml(initial)}`
+      : escapeHtml(initial);
+    return `<span class="avatar avatar-${status}${
+      avatarUrl ? " has-photo" : ""
+    }" style="width:${px}px;height:${px}px;font-size:${Math.round(
+      px * 0.36
+    )}px" aria-hidden="true">${inner}</span>`;
+  }
+
+  /** One member's standing, used for the avatar ring and the card's wording. */
+  function memberStanding(memberId, cyclesDueSoFar, paidOut) {
+    if (paidOut) return "paid-out";
+    // A refused claim outranks the rest: it is the one state the member has to
+    // act on, and it should read that way even before the cycle falls due.
+    if (C.latestRejection && C.latestRejection(state.contributions, memberId))
+      return "rejected";
+    if (C.memberOverdueCount(state.contributions, state.cycles, memberId) > 0)
+      return "overdue";
+    for (let c = 1; c <= C.TOTAL_CYCLES; c++) {
+      if (C.statusOf(state.contributions, memberId, c) === C.STATUS_PENDING)
+        return "pending";
+    }
+    if (cyclesDueSoFar > 0) {
+      let paid = 0;
+      for (let c = 1; c <= cyclesDueSoFar; c++) {
+        if (C.statusOf(state.contributions, memberId, c) === C.STATUS_PAID) paid++;
+      }
+      if (paid >= cyclesDueSoFar) return "current";
+    }
+    return "idle";
+  }
+
+  /**
+   * Fund-growth sparkline: cumulative confirmed money over time.
+   *
+   * Built from the payments themselves (paid_at on confirmed contributions),
+   * so it reflects when money actually arrived rather than a schedule. Rows
+   * without a paid_at can't be placed on a timeline and are skipped; if fewer
+   * than two points survive there is no trend to draw and it renders nothing
+   * rather than an invented straight line.
+   */
+  function sparkline(contributions, Calc) {
+    const paid = (contributions || [])
+      .filter((c) => c.status === Calc.STATUS_PAID && c.paid_at)
+      .map((c) => ({ t: new Date(c.paid_at).getTime(), amt: c.amount || Calc.CONTRIBUTION_AMOUNT }))
+      .filter((c) => !isNaN(c.t))
+      .sort((a, b) => a.t - b.t);
+    if (paid.length < 2) return "";
+
+    let running = 0;
+    const pts = paid.map((p) => {
+      running += p.amt;
+      return { t: p.t, total: running };
+    });
+    const t0 = pts[0].t;
+    const tSpan = pts[pts.length - 1].t - t0 || 1;
+    const max = pts[pts.length - 1].total || 1;
+    const W = 140;
+    const H = 40;
+    const xy = pts.map((p) => {
+      const x = ((p.t - t0) / tSpan) * W;
+      const y = H - (p.total / max) * (H - 4) - 2;
+      return `${x.toFixed(1)} ${y.toFixed(1)}`;
+    });
+
+    return `<div class="hero-spark">
+      <div class="hero-spark-label">Fund growth</div>
+      <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="spark" aria-hidden="true" focusable="false">
+        <defs>
+          <linearGradient id="sparkStroke" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0%" stop-color="#F5A623"/>
+            <stop offset="100%" stop-color="#4CD9C0"/>
+          </linearGradient>
+          <linearGradient id="sparkFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#4CD9C0" stop-opacity="0.3"/>
+            <stop offset="100%" stop-color="#4CD9C0" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <path d="M${xy[0]} L${xy.join(" L")} L${W} ${H} L0 ${H} Z" fill="url(#sparkFill)"/>
+        <polyline class="spark-line" points="${xy.join(
+          " "
+        )}" fill="none" stroke="url(#sparkStroke)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+      </svg>
+      <div class="hero-spark-total">${(function () {
+        // The mockup's caption is momentum ("↗ +₱4,500 this week"), not a
+        // running total the ₱ figure above already states. Real money: the
+        // sum of confirmed contributions whose paid_at falls in the last 7
+        // days. Falls back to the total when nothing landed this week, so a
+        // quiet week reads as quiet rather than as zero.
+        const now = Date.now();
+        const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+        // Bounded at both ends. paid_at is written at confirm time so it should
+        // never be in the future, but a clock skew or an imported row would
+        // otherwise land inside "this week" forever and inflate the figure.
+        const week = paid.reduce(
+          (n, p) => (p.t >= weekAgo && p.t <= now ? n + p.amt : n),
+          0
+        );
+        return week > 0
+          ? `<span class="spark-up">↗ +${Calc.peso(week)}</span> this week`
+          : `${Calc.peso(max)} collected to date`;
+      })()}</div>
+    </div>`;
+  }
+
+  /** Inline SVG for one icon, sized in px and inheriting the caller's colour. */
+  function icon(name, size) {
+    const d = ICON_PATHS[name];
+    if (!d) return "";
+    const px = size || 18;
+    return `<svg class="icon" viewBox="0 0 24 24" width="${px}" height="${px}" aria-hidden="true" focusable="false">${d}</svg>`;
+  }
+
+  // ===================================================================
+  // Tab shell (Home / Rounds / Members / Activity / Insights / Menu)
+  // ===================================================================
+  // Every view the router can reach. Which of them appear in the nav, and in
+  // what order, differs by shell — see NAV_MOBILE / NAV_DESKTOP below.
+  const TAB_VIEWS = [
+    { id: "home", label: "Home", icon: "home" },
+    { id: "rounds", label: "Rounds", icon: "rounds" },
+    { id: "members", label: "Members", icon: "members" },
+    { id: "activity", label: "Activity", icon: "activity" },
+    { id: "insights", label: "Insights", icon: "insights" },
+    { id: "menu", label: "Menu", icon: "menu" },
+  ];
+
+  // The two shells navigate differently, and deliberately so.
+  //
+  // MOBILE — five tabs. Members is NOT one of them: it is a drill-down from
+  // Home's roster ("See all", or tapping an avatar), which is why it carries a
+  // back chevron and lights no tab. Six targets across a 390px bar would cost
+  // about a fifth of each tab's width for a screen that already has an entry
+  // point.
+  //
+  // DESKTOP — a persistent sidebar has the room, so Members returns to the nav.
+  // Menu leaves it instead, becoming the profile affordance at the foot of the
+  // sidebar ("Menu & settings"), under a card showing which mode you are in.
+  const NAV_MOBILE = ["home", "rounds", "activity", "insights", "menu"];
+  const NAV_DESKTOP = ["home", "rounds", "members", "activity", "insights"];
+  const navItems = (ids) =>
+    ids.map((id) => TAB_VIEWS.find((t) => t.id === id)).filter(Boolean);
+  function setView(view) {
+    if (currentView === view) return;
+    // Leaving Members drops the drill-down, so coming back lands on the
+    // roster rather than whoever was open several taps ago.
+    if (currentView === "members") selectedMemberId = null;
+    undoPaidTarget = null;
+    markPaidTarget = null;
+    currentView = view;
+    render();
+    // A new screen starts at its top. render() replaces innerHTML but leaves
+    // the window scrolled where the last view was, so switching from a
+    // scrolled Rounds to Activity landed mid-list.
+    window.scrollTo(0, 0);
+  }
+  /**
+   * Open one member's record.
+   *
+   * The same state drives two presentations: on mobile it is the row expanded
+   * inline (the design rejected a full detail screen as overkill for a few
+   * lines of history), on desktop it is which member the detail pane shows.
+   * Tapping the open row again closes it, which is what an accordion has to do
+   * and what the master-detail pane can do harmlessly.
+   */
+  function openMemberDetail(memberId) {
+    selectedMemberId = selectedMemberId === memberId ? null : memberId;
+    currentView = "members";
+    render();
+  }
+  function closeMemberDetail() {
+    selectedMemberId = null;
+    render();
+  }
+  /** Fallback when a view can't be found on window.PFViews. Every tab has a
+   * view now, so reaching this means its script didn't load — say that,
+   * rather than implying the feature was never built. */
+  function renderPlaceholderView(view) {
+    const meta = TAB_VIEWS.find((t) => t.id === view);
+    const label = meta ? meta.label : view;
+    return `<div class="view-placeholder">
+      <p>${meta ? icon(meta.icon, 18) : ""} <b>${escapeHtml(label)}</b></p>
+      <p class="view-placeholder-note">This screen didn't load. Check your connection and reload — if it keeps happening, the app may need updating.</p>
+    </div>`;
+  }
+  /** Activity tab. The log used to be a collapsed accordion competing for
+   * room on the old single-page layout; on its own tab it is the whole screen,
+   * so it renders expanded with the filter chips always in reach. */
+  /**
+   * Activity — grouped by date, "amount-forward like a bank transaction list"
+   * (canvas.json, activity-analytics-notes).
+   *
+   * Rows carry typed columns from migration 006. Entries written before it, or
+   * on a database without it, have none — those fall back to inferring a
+   * category from the message text and simply show no amount or chip, rather
+   * than an empty column that looks like missing data.
+   */
+  function renderActivityView() {
+    const log = state.activityLog || [];
+    const filterLabels = { all: "All", payment: "Payments", payout: "Payouts", admin: "Admin" };
+
+    // event_type when the row has one; the old regex otherwise.
+    const typeOf = (e) => e.event_type || activityCategory(e.message);
+
+    // Member and round come from real columns (migration 007), never from
+    // parsing `message` — see the note above the table markup below. Rows
+    // written before 007 carry null and are shown, unattributed, only in the
+    // unfiltered view; a filter that silently swallowed them would be a
+    // filtered view of financial history that omits records without saying so.
+    const roundChoice =
+      activityRoundFilter === null
+        ? C.currentRound(state.payouts, state.contributions)
+        : activityRoundFilter;
+
+    const matches = (e) =>
+      (activityFilter === "all" || typeOf(e) === activityFilter) &&
+      (!isWide ||
+        ((activityMemberFilter === "all" || e.member_id === activityMemberFilter) &&
+          (roundChoice === "all" || Number(e.round_number) === Number(roundChoice))));
+
+    const visible = log.filter(matches);
+    // Everything the current filters exclude, split by WHY. The notice used to
+    // count only untagged rows, so with the round filter defaulting to the
+    // current round a released ₱30,000 payout simply disappeared from a
+    // financial log with nothing said about it.
+    const hiddenTotal = log.length - visible.length;
+    const unattributed = log.filter(
+      (e) => e.member_id == null && e.round_number == null
+    ).length;
+
+    // Group by calendar day, newest first. The log already arrives in that
+    // order, so a single pass keeps it.
+    const groups = [];
+    let current = null;
+    for (const e of visible) {
+      const key = activityDayKey(e.created_at);
+      if (!current || current.key !== key) {
+        current = { key, label: activityDayLabel(e.created_at), rows: [] };
+        groups.push(current);
+      }
+      current.rows.push(e);
+    }
+
+    const rowHtml = (e) => {
+      const type = typeOf(e);
+      const st = e.ref_status == null ? null : Number(e.ref_status);
+      const amt = e.amount == null ? null : Number(e.amount);
+
+      // Icon and tone say what KIND of thing happened before the text is read.
+      let mark = { icon: "key", tone: "admin" };
+      if (type === "payout") mark = { icon: "party", tone: "payout" };
+      else if (type === "payment") {
+        mark =
+          st === C.STATUS_PAID
+            ? { icon: "check", tone: "in" }
+            : st === C.STATUS_PENDING
+            ? { icon: "clock", tone: "pending" }
+            : st === C.STATUS_REJECTED
+            ? { icon: "alert", tone: "rejected" }
+            : st === C.STATUS_UNPAID
+            ? { icon: "alert", tone: "out" }
+            : { icon: "check", tone: "admin" };
+      }
+
+      const amountHtml = activityAmountHtml(amt, st);
+
+      const chip =
+        st === C.STATUS_PENDING
+          ? `<span class="activity-chip-state pending">Pending review</span>`
+          : st === C.STATUS_REJECTED
+          ? `<span class="activity-chip-state rejected">Rejected</span>`
+          : "";
+
+      return `<div class="activity-row">
+        <span class="activity-mark ${mark.tone}">${icon(mark.icon, 14)}</span>
+        <span class="activity-body">
+          <span class="activity-text">${escapeHtml(e.message)}</span>
+          <span class="activity-meta">${escapeHtml(activityClockLabel(e.created_at))}${
+        chip ? " " + chip : ""
+      }</span>
+        </span>
+        ${amountHtml}
+      </div>`;
+    };
+
+    // Title and filter chips are shared; the body below differs per shell.
+    const head = `<div class="view-head${isWide ? " view-head-row" : ""}">
+      <div class="view-head-text">
+      <h2 class="view-title">Activity</h2>
+      <p class="view-sub">${"Every contribution, payout &amp; admin action"} · ${
+        // Don't print a total the table isn't showing: with the round filter
+        // defaulting to the current round, "8 entries loaded" above 3 rows
+        // reads as a fault.
+        visible.length === log.length
+          ? `${log.length} ${log.length === 1 ? "entry" : "entries"} loaded`
+          : `showing ${visible.length} of ${log.length} loaded`
+      }</p>
+      </div>
+      ${
+        // The design puts Export CSV in the desktop header; the phone shell
+        // keeps it in Menu, where there is room for it.
+        isWide
+          ? `<button type="button" class="head-action" onclick="PowerFund.exportCsv()">Export CSV</button>`
+          : ""
+      }
+    </div>
+    <div class="activity-chips">${Object.entries(filterLabels)
+      .map(
+        ([type, label]) => `
+      <button type="button" class="activity-chip ${
+        activityFilter === type ? "active" : ""
+      }" onclick="PowerFund.setActivityFilter('${type}')">${label}</button>`
+      )
+      .join("")}${
+      // The two dropdowns are desktop-only, as in the design — the phone
+      // shell has no room for them and its list is date-grouped instead.
+      isWide
+        ? `<span class="activity-selects">
+            <label class="activity-select">
+              <span class="sr-only">Filter by member</span>
+              <select onchange="PowerFund.setActivityMember(this.value)">
+                <option value="all"${
+                  activityMemberFilter === "all" ? " selected" : ""
+                }>All members</option>
+                ${sortedMembers()
+                  .map(
+                    (m) =>
+                      `<option value="${escapeHtml(m.id)}"${
+                        activityMemberFilter === m.id ? " selected" : ""
+                      }>${escapeHtml(m.name)}</option>`
+                  )
+                  .join("")}
+              </select>
+            </label>
+            <label class="activity-select">
+              <span class="sr-only">Filter by round</span>
+              <select onchange="PowerFund.setActivityRound(this.value === 'all' ? 'all' : Number(this.value))">
+                <option value="all"${
+                  roundChoice === "all" ? " selected" : ""
+                }>All rounds</option>
+                ${Array.from({ length: C.TOTAL_ROUNDS }, (_, i) => i + 1)
+                  .map(
+                    (r) =>
+                      `<option value="${r}"${
+                        Number(roundChoice) === r ? " selected" : ""
+                      }>Round ${r}</option>`
+                  )
+                  .join("")}
+              </select>
+            </label>
+          </span>`
+        : ""
+    }</div>`;
+
+    const listHtml = `${
+      log.length === 0
+        ? `<div class="activity-empty-state">${icon("activity", 22)}
+             <p><b>No activity yet</b></p>
+             <p class="activity-empty-note">Actions show up here as your group uses the tracker.</p>
+           </div>`
+        : groups.length === 0
+        ? `<div class="activity-empty-state">${icon("activity", 22)}
+             <p><b>Nothing matches this filter</b></p>
+             <p class="activity-empty-note">No ${filterLabels[
+               activityFilter
+             ].toLowerCase()} in the loaded history — try "Show older entries" or switch filters.</p>
+           </div>`
+        : groups
+            .map(
+              (g) => `<div class="activity-group">
+                <p class="activity-day">${escapeHtml(g.label)}</p>
+                <div class="activity-list activity-list-tab">${g.rows
+                  .map(rowHtml)
+                  .join("")}</div>
+              </div>`
+            )
+            .join("")
+    }
+    ${
+      log.length >= activityLogLimit
+        ? `<button type="button" class="attention-more activity-more" onclick="PowerFund.loadMoreActivity()">Show older entries</button>`
+        : ""
+    }`;
+
+    // Desktop gets a real table rather than the phone list stretched wide —
+    // the design's own desktop treatment. Member and Round are real columns
+    // (migration 007), not names scraped out of `message`: those messages
+    // snapshot the name at write time, so after a rename a text-matched filter
+    // would silently drop that member's older rows. Rows written before 007
+    // have no attribution and say so.
+    const memberNameById = (id) => {
+      const m = state.members.find((x) => x.id === id);
+      return m ? m.name : null;
+    };
+    const tableHtml = `<div class="activity-table-wrap">
+      <table class="activity-table">
+        <thead>
+          <tr>
+            <th class="at-when">When</th>
+            <th class="at-member">Member</th>
+            <th class="at-type">Type</th>
+            <th class="at-round">Round</th>
+            <th class="at-detail">Detail</th>
+            <th class="at-amount">Amount</th>
+            <th class="at-status">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${visible
+            .map((e) => {
+              const type = typeOf(e);
+              const st = e.ref_status == null ? null : Number(e.ref_status);
+              const amt = e.amount == null ? null : Number(e.amount);
+              const typeLabel =
+                type === "payout"
+                  ? "Payout"
+                  : type === "payment"
+                  ? "Contribution"
+                  : "Admin";
+              const amountHtml = activityAmountHtml(amt, st) || "—";
+              const statusHtml =
+                st === C.STATUS_PAID
+                  ? `<span class="activity-chip-state confirmed">Confirmed</span>`
+                  : st === C.STATUS_PENDING
+                  ? `<span class="activity-chip-state pending">In review</span>`
+                  : st === C.STATUS_REJECTED
+                  ? `<span class="activity-chip-state rejected">Rejected</span>`
+                  : type === "payout"
+                  ? `<span class="activity-chip-state released">Released</span>`
+                  : `<span class="at-dash">—</span>`;
+              const who = memberNameById(e.member_id);
+              return `<tr class="at-row at-${type}">
+                <td class="at-when"><span class="at-date">${escapeHtml(
+                  activityDayLabel(e.created_at)
+                )}</span><span class="at-time">${escapeHtml(
+                activityClockLabel(e.created_at)
+              )}</span></td>
+                <td class="at-member">${
+                  who
+                    ? `<span class="at-avatar">${escapeHtml(
+                        who.trim().charAt(0).toUpperCase()
+                      )}</span><span class="at-who">${escapeHtml(who)}</span>`
+                    : `<span class="at-dash">—</span>`
+                }</td>
+                <td class="at-type"><span class="at-type-tag ${type}">${typeLabel}</span></td>
+                <td class="at-round">${
+                  e.round_number == null
+                    ? `<span class="at-dash">—</span>`
+                    : `Round ${Number(e.round_number)}`
+                }</td>
+                <td class="at-detail">${escapeHtml(e.message)}</td>
+                <td class="at-amount">${amountHtml}</td>
+                <td class="at-status">${statusHtml}</td>
+              </tr>`;
+            })
+            .join("")}
+        </tbody>
+      </table>
+      ${
+        visible.length === 0
+          ? `<div class="activity-empty-state">${icon("activity", 22)}
+               <p><b>${
+                 log.length === 0 ? "No activity yet" : "Nothing matches these filters"
+               }</b></p>
+               <p class="activity-empty-note">${
+                 log.length === 0
+                   ? "Actions show up here as your group uses the tracker."
+                   : "Try a different member, round or type."
+               }</p>
+             </div>`
+          : ""
+      }
+    </div>
+    ${
+      // Account for every row the filters are holding back, not just the
+      // untagged ones — a partial view of financial history must never look
+      // whole.
+      hiddenTotal > 0
+        ? `<p class="activity-unattributed">${icon("alert", 13)}<span><b>${hiddenTotal} ${
+            hiddenTotal === 1 ? "entry is" : "entries are"
+          } hidden by the current filters.</b>${
+            unattributed > 0
+              ? ` ${unattributed} of them ${
+                  unattributed === 1 ? "was" : "were"
+                } recorded before entries carried a member and round, so ${
+                  unattributed === 1 ? "it" : "they"
+                } can only appear unfiltered.`
+              : ""
+          } Choose <b>All</b>, <b>All members</b> and <b>All rounds</b> to see the full log.</span></p>`
+        : ""
+    }
+    ${
+      log.length >= activityLogLimit
+        ? `<button type="button" class="attention-more activity-more" onclick="PowerFund.loadMoreActivity()">Show older entries</button>`
+        : ""
+    }`;
+
+    return head + (isWide ? tableHtml : listHtml);
+  }
+
+  /** One signing rule for both shells. The mobile list and the desktop table
+   *  had drifted apart: the same released payout rendered flat and unsigned in
+   *  one and red "−₱30,000.00" in the other. Sign is DIRECTION of cash, taken
+   *  from the stored amount, so nothing has to infer it from the event type.
+   *  Unsettled money (a claim in review, a rejected claim) is deliberately
+   *  unsigned — nothing has changed hands. */
+  function activityAmountHtml(amt, st) {
+    if (amt == null || amt === 0) return "";
+    const settled = st == null || Number(st) === C.STATUS_PAID;
+    const abs = C.peso(Math.abs(amt));
+    if (!settled) return `<span class="activity-amt flat">${escapeHtml(abs)}</span>`;
+    const out = amt < 0;
+    return `<span class="activity-amt ${out ? "out" : "in"}">${
+      out ? "−" : "+"
+    }${escapeHtml(abs)}</span>`;
+  }
+
+  /** Calendar-day identity, so entries group by the day they happened. */
+  function activityDayKey(iso) {
+    const d = new Date(iso);
+    return isNaN(d) ? "?" : `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  }
+
+  /** "Today" / "Yesterday" / "Sep 3" — a date heading a person reads quickly. */
+  function activityDayLabel(iso) {
+    const d = new Date(iso);
+    if (isNaN(d)) return "Earlier";
+    const today = new Date();
+    const key = (x) => `${x.getFullYear()}-${x.getMonth()}-${x.getDate()}`;
+    if (key(d) === key(today)) return "Today";
+    const yest = new Date(today);
+    yest.setDate(today.getDate() - 1);
+    if (key(d) === key(yest)) return "Yesterday";
+    return d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: d.getFullYear() === today.getFullYear() ? undefined : "numeric",
+    });
+  }
+
+  /** Time of day only — the group heading already carries the date. */
+  function activityClockLabel(iso) {
+    const d = new Date(iso);
+    if (isNaN(d)) return "";
+    return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  }
+
+  /** Insights tab — read-only summary of what the fund data already says.
+   * Every number here is derived from confirmed contributions via Calc; this
+   * view never writes and never gates an action. */
+  /** Label for the rounds-completed tile — says what is happening, not just N/5. */
+  function allDoneLabel(contributions, payouts, curRound) {
+    if (C.allRoundsComplete(contributions, payouts)) return "rounds completed · fund closed";
+    return `rounds completed · Round ${curRound} in progress`;
+  }
+
+  /**
+   * Where the group stands in the current round, as a donut.
+   *
+   * A STATUS chart, not a categorical one: the four slices are reserved states
+   * that mean the same thing everywhere else in the app, so they reuse the
+   * app's own semantic colours rather than a chart palette. Identity is never
+   * carried by colour alone — every slice is named with its count in the legend
+   * beside it, and the legend text stays in normal ink with a small colour chip
+   * doing the matching. A 2px gap of the card's own background separates
+   * neighbouring arcs so they read as distinct segments.
+   */
+  function renderRoundStatusDonut(members, round) {
+    const st = C.roundMemberStates(state.contributions, state.cycles, members, round);
+    const slices = [
+      { key: "paid", label: "Paid", n: st.paid.length, color: "#4CAF83" },
+      { key: "pending", label: "In review", n: st.pending.length, color: "#9B7FE0" },
+      { key: "rejected", label: "Rejected", n: st.rejected.length, color: "#E15353" },
+      { key: "overdue", label: "Overdue", n: st.overdue.length, color: "#E15353" },
+      { key: "notdue", label: "Not due yet", n: st.notDue.length, color: "rgba(255,255,255,0.16)" },
+    ].filter((x) => x.n > 0);
+
+    const total = slices.reduce((sum, x) => sum + x.n, 0);
+    if (!total) return "";
+
+    // A donut of ONE slice is a full ring and a single legend row: it carries
+    // nothing the number alone doesn't, and an unbroken circle reads as a
+    // loading spinner. Say it in a line instead.
+    if (slices.length === 1) {
+      const only = slices[0];
+      return `<p class="section-label">This round's status</p>
+      <div class="donut-card donut-card-single">
+        <span class="donut-swatch" style="background:${only.color}"></span>
+        <p class="donut-single-text">All <b>${total}</b> ${
+        total === 1 ? "member is" : "members are"
+      } <b>${only.label.toLowerCase()}</b> for Round ${round}.</p>
+      </div>`;
+    }
+
+    // One ring, drawn with stroke-dasharray so each arc is a plain circle.
+    const R = 42;
+    const CIRC = 2 * Math.PI * R;
+    const GAP = slices.length > 1 ? 2 : 0; // px of surface between arcs
+    let offset = 0;
+    const arcs = slices
+      .map((x) => {
+        const len = (x.n / total) * CIRC;
+        const draw = Math.max(0, len - GAP);
+        const el = `<circle cx="60" cy="60" r="${R}" fill="none" stroke="${
+          x.color
+        }" stroke-width="16" stroke-dasharray="${draw.toFixed(2)} ${(
+          CIRC - draw
+        ).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}"></circle>`;
+        offset += len;
+        return el;
+      })
+      .join("");
+
+    return `<p class="section-label">This round's status</p>
+    <div class="donut-card">
+      <svg class="donut" viewBox="0 0 120 120" width="120" height="120" role="img"
+           aria-label="Round ${round}: ${slices
+      .map((x) => `${x.label} ${x.n}`)
+      .join(", ")}">
+        <circle cx="60" cy="60" r="${R}" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="16"></circle>
+        <g transform="rotate(-90 60 60)">${arcs}</g>
+      </svg>
+      <ul class="donut-legend">
+        ${slices
+          .map(
+            (x) => `<li class="donut-legend-row">
+              <span class="donut-swatch" style="background:${x.color}"></span>
+              <span class="donut-legend-label">${x.label}</span>
+              <span class="donut-legend-n">${x.n}</span>
+            </li>`
+          )
+          .join("")}
+      </ul>
+    </div>`;
+  }
+
+  function renderInsightsView(members) {
+    const contributions = state.contributions;
+    const collected = C.totalCollected(contributions);
+    const roundsDone = C.completedRoundsCount(contributions, state.payouts);
+    const overdue = C.totalOverdueCount(contributions, state.cycles, state.members);
+    const pending = C.pendingCount(contributions);
+
+    const tile = (value, label, tone) =>
+      `<div class="stat-tile"><div class="stat-value ${
+        tone || ""
+      }">${value}</div><div class="stat-label">${label}</div></div>`;
+
+    let html = `<div class="view-head">
+      <h2 class="view-title">Insights</h2>
+      <p class="view-sub">How the fund is tracking, from confirmed payments only</p>
+    </div>`;
+    // On-time rate, with the change since the previous round. A trend needs two
+    // rounds with dated payments in them; before that it just states the rate.
+    const curRound = C.currentRound(state.payouts, contributions);
+    const thisRound = C.onTimeRateForRound(contributions, state.cycles, curRound);
+    const prevRound =
+      curRound > 1 ? C.onTimeRateForRound(contributions, state.cycles, curRound - 1) : null;
+    const overallOnTime = (() => {
+      let on = 0;
+      let n = 0;
+      for (const m of members) {
+        const st = C.onTimeStats(contributions, state.cycles, m.id);
+        on += st.onTime;
+        n += st.counted;
+      }
+      return n ? (on / n) * 100 : null;
+    })();
+    let trendHtml = "";
+    if (thisRound.rate !== null && prevRound && prevRound.rate !== null) {
+      const delta = Math.round(thisRound.rate - prevRound.rate);
+      trendHtml =
+        delta === 0
+          ? `level with Round ${curRound - 1}`
+          : `${delta > 0 ? "↑" : "↓"} ${Math.abs(delta)}pts vs Round ${curRound - 1}`;
+    }
+
+    // Name who is behind rather than only counting: "1 · Dan · Round 2".
+    const missed = C.missedContributions(contributions, state.cycles, members);
+    const overdueNames = [];
+    for (const x of missed) {
+      const st = C.statusOf(contributions, x.memberId, x.cycleNumber);
+      if (!C.isOwed(st)) continue;
+      const m = members.find((mm) => mm.id === x.memberId);
+      if (m && overdueNames.indexOf(m.name) === -1) overdueNames.push(m.name);
+    }
+    const overdueSub = overdueNames.length
+      ? overdueNames.slice(0, 2).join(", ") +
+        (overdueNames.length > 2 ? ` +${overdueNames.length - 2}` : "")
+      : "nobody behind";
+
+    // FOUR tiles, as the design draws them. A fifth ("awaiting review") made
+    // the grid odd, leaving a visible hole in the last row that read as a
+    // layout fault — and pending money belongs beside the collected figure
+    // anyway, since it is the part of it not yet counted.
+    html += `<div class="stat-grid">
+      ${tile(
+        C.peso(collected),
+        `collected of ${C.peso(C.TARGET_AMOUNT)}${
+          pending ? ` · ${pending} awaiting review` : ""
+        }`
+      )}
+      ${tile(
+        `${roundsDone} / ${C.TOTAL_ROUNDS}`,
+        allDoneLabel(contributions, state.payouts, curRound)
+      )}
+      ${tile(
+        overallOnTime === null ? "—" : `${Math.round(overallOnTime)}%`,
+        overallOnTime === null ? "no dated payments yet" : "paid on time" + (trendHtml ? " · " + trendHtml : ""),
+        // Deliberately unthemed: "79% on time" is information, not a fault,
+        // and colouring it red implied a threshold the app never states.
+        ""
+      )}
+      ${tile(String(overdue), overdueSub, overdue ? "danger" : "success")}
+    </div>`;
+
+    html += renderRoundStatusDonut(members, curRound);
+
+    // Per-round bar chart. Inline markup sized by percentage — the same
+    // approach the battery hero already uses, so no charting library.
+    html += `<p class="section-label">Collected per round</p>
+    <div class="round-bars">`;
+    for (let r = 1; r <= C.TOTAL_ROUNDS; r++) {
+      const amt = C.roundCollected(contributions, r);
+      const pctOfGoal = Math.min(100, (amt / C.GOAL_PER_ROUND) * 100);
+      const recipient = members.find((m) => m.member_order === r);
+      const full = amt >= C.GOAL_PER_ROUND;
+      html += `<div class="round-bar-row">
+        <div class="round-bar-label">R${r}<span class="round-bar-name">${
+        recipient ? escapeHtml(recipient.name) : "—"
+      }</span></div>
+        <div class="round-bar-track" role="img" aria-label="Round ${r}: ${C.peso(
+        amt
+      )} of ${C.peso(C.GOAL_PER_ROUND)} collected">
+          <div class="round-bar-fill ${
+            full ? "full" : ""
+          }" style="width:${pctOfGoal}%"></div>
+        </div>
+        <div class="round-bar-amt">${C.peso(amt)}</div>
+      </div>`;
+    }
+    html += `</div>`;
+
+    // On-time leaderboard. Members with nothing countable yet sort last and
+    // say so, rather than being shown as 0%.
+    const ranked = members
+      .map((m) => ({ m, s: C.onTimeStats(contributions, state.cycles, m.id) }))
+      .sort((a, b) => {
+        if (a.s.rate === null && b.s.rate === null) return 0;
+        if (a.s.rate === null) return 1;
+        if (b.s.rate === null) return -1;
+        return b.s.rate - a.s.rate;
+      });
+
+    html += `<p class="section-label">Paid on time</p><div class="leaderboard">`;
+    ranked.forEach(({ m, s }) => {
+      const pct = s.rate === null ? null : Math.round(s.rate);
+      html += `<div class="leader-row">
+        <div class="leader-name">${escapeHtml(m.name)}</div>
+        <div class="leader-track"><div class="leader-fill" style="width:${
+          pct === null ? 0 : pct
+        }%"></div></div>
+        <div class="leader-val">${
+          pct === null
+            ? '<span class="leader-nodata">no data yet</span>'
+            : `${pct}% <span class="leader-sub">${s.onTime}/${s.counted}</span>`
+        }</div>
+      </div>`;
+    });
+    html += `</div>
+    <p class="insights-note">On-time counts confirmed payments that carry a payment date, compared against each cycle's due date.</p>`;
+
+    return html;
+  }
+  /** One nav, two shells.
+   *
+   * The chrome is still a single element that CSS lays out as a bottom bar or
+   * a left sidebar — but the two shells no longer carry the same items, so the
+   * item list is chosen here rather than hidden with CSS. Rendering only what
+   * a shell actually shows keeps the hidden half out of the accessibility tree
+   * and out of the tab order.
+   *
+   * The sidebar's extra furniture — brand, mode card, profile row — has no
+   * equivalent on mobile, where the header already carries all three.
+   */
+  function renderTabBar(active, wide, myMember) {
+    const items = navItems(wide ? NAV_DESKTOP : NAV_MOBILE);
+    const btn = (t) => `
+        <button type="button" class="tab-item ${
+          t.id === active ? "active" : ""
+        }" aria-current="${t.id === active ? "page" : "false"}" onclick="PowerFund.setView('${
+      t.id
+    }')">
+          <span class="tab-icon">${icon(t.icon, 20)}</span>
+          <span class="tab-label">${escapeHtml(t.label)}</span>
+        </button>`;
+
+    if (!wide) {
+      return `<nav class="tab-bar" aria-label="Main">${items.map(btn).join("")}</nav>`;
+    }
+
+    // Mode card: states which side of the gate you are on, and is the way
+    // through it. Locked, it is the sidebar's "Unlock treasurer mode" entry.
+    const mode = `
+      <button type="button" class="nav-mode ${
+        unlocked ? "on" : ""
+      }" onclick="PowerFund.toggleUnlock()">
+        <span class="nav-mode-label">${icon(unlocked ? "unlocked" : "lock", 14)}<span>${
+      unlocked ? "Treasurer mode" : "Member mode"
+    }</span></span>
+        <span class="nav-mode-state">${
+          unlocked ? "Active" : "Unlock treasurer mode →"
+        }</span>
+      </button>`;
+
+    // Menu lives here on desktop, as the profile row rather than a sixth nav
+    // item — it is settings, not a destination alongside the fund's screens.
+    const profile = `
+      <button type="button" class="tab-item nav-profile ${
+        active === "menu" ? "active" : ""
+      }" aria-current="${
+      active === "menu" ? "page" : "false"
+    }" onclick="PowerFund.setView('menu')">
+        <span class="nav-profile-avatar">${
+          myMember ? escapeHtml(myMember.name.trim().charAt(0).toUpperCase()) : icon("menu", 16)
+        }</span>
+        <span class="tab-label">Menu &amp; settings</span>
+      </button>`;
+
+    return `<nav class="tab-bar" aria-label="Main">
+      <div class="tab-brand">
+        <span class="tab-brand-mark">⚡</span>
+        <span class="tab-brand-name">${escapeHtml(fundName())}</span>
+      </div>
+      ${items.map(btn).join("")}
+      <div class="nav-spacer"></div>
+      ${mode}
+      ${profile}
+    </nav>`;
+  }
+  /** Infers a coarse category from an activity-log message so the log can be
+   * filtered without a dedicated DB column — every logActivity() call site
+   * produces one of a small, stable set of message shapes. */
+  function activityCategory(message) {
+    if (/^Payout (released|release undone)/i.test(message)) return "payout";
+    if (
+      /marked .* as sent|recorded .*'s cycle .* as paid|reverted .*'s cycle .* to unpaid|confirmed .*'s .*cycle|rejected .*'s .*cycle/i.test(
+        message
+      )
+    )
+      return "payment";
+    return "admin"; // reset, PIN, round start, name edits, payout order swap, QR update, restore
+  }
   function expandAttentionQueue() {
-    attentionQueueExpanded = true;
+    // A toggle, not a one-way door. This only ever set true, and the control
+    // that called it rendered only while collapsed — so once opened, the queue
+    // held the fold for the rest of the session with no way back.
+    attentionQueueExpanded = !attentionQueueExpanded;
     render();
   }
   function toggleOverdueList() {
@@ -1402,13 +4160,53 @@
     if (!unlocked) return;
     qrModalOpen = true;
     qrUploadMsg = null;
+    // The account the QR belongs to (migration 006). These columns existed
+    // from that migration but nothing ever wrote them, so a member scanning
+    // the QR had no name or number to check it against — the verification
+    // the design added them for.
+    const st = state.settings || {};
+    qrAccountFields = {
+      qr_bank: st.qr_bank || "",
+      qr_account_name: st.qr_account_name || "",
+      qr_account_number: st.qr_account_number || "",
+    };
     clearQrSelection();
     render();
+  }
+
+  function setQrAccountField(field, value) {
+    if (!qrAccountFields) return;
+    qrAccountFields[field] = value;
+  }
+
+  async function saveQrAccount() {
+    if (busy || !qrAccountFields) return;
+    busy = true;
+    render();
+    try {
+      await window.DB.saveQrAccount({
+        qr_bank: qrAccountFields.qr_bank.trim() || null,
+        qr_account_name: qrAccountFields.qr_account_name.trim() || null,
+        qr_account_number: qrAccountFields.qr_account_number.trim() || null,
+      });
+      await logActivity("Treasurer updated the payment account details", {
+        type: "admin",
+      });
+      await reload();
+      showSuccess("Account details saved — members will see them beside the QR.");
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      busy = false;
+      render();
+    }
   }
   function closeQrModal() {
     qrModalOpen = false;
     qrUploadMsg = null;
+    qrAccountFields = null;
     clearQrSelection();
+    clearSubmitState();
     render();
   }
   function cancelQrSelection() {
@@ -1435,22 +4233,110 @@
     render();
   }
 
-  async function confirmQrUpload() {
-    if (!unlocked || !qrNewFile || busy) return;
+  // ===================================================================
+  // Member payout details (treasurer only)
+  //
+  // Treasurer-managed rather than member-managed: this app has no per-member
+  // auth, so "members edit their own" would in practice mean anyone can edit
+  // anyone's — and a swapped QR redirects a ₱30,000 payout. Gating it behind
+  // the same treasurer PIN as every other money action is the honest limit of
+  // what this app can enforce. Every change is logged so a swap is visible.
+  // ===================================================================
+  function openPayoutQrModal(memberId) {
+    if (!unlocked) return;
+    const m = state.members.find((x) => x.id === memberId);
+    if (!m) return;
+    payoutQrMemberId = memberId;
+    payoutQrFields = {
+      bank: m.payout_bank || "",
+      accountName: m.payout_account_name || "",
+      accountNumber: m.payout_account_number || "",
+    };
+    clearPayoutQrSelection();
+    render();
+  }
+  function closePayoutQrModal() {
+    payoutQrMemberId = null;
+    payoutQrFields = null;
+    clearPayoutQrSelection();
+    render();
+  }
+  function clearPayoutQrSelection() {
+    if (payoutQrPreview) URL.revokeObjectURL(payoutQrPreview);
+    payoutQrFile = null;
+    payoutQrPreview = null;
+  }
+  function setPayoutQrField(field, value) {
+    if (!payoutQrFields) return;
+    payoutQrFields[field] = value;
+    // No re-render: the inputs already hold what was typed, and re-rendering
+    // mid-keystroke would move the caret.
+  }
+  function onPayoutQrFileSelected(input) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    if (!QR_ALLOWED_TYPES.includes((file.type || "").toLowerCase())) {
+      return showError("Please select a valid image file (JPG, PNG or WEBP).");
+    }
+    if (file.size === 0) {
+      return showError("That file is empty — please choose another image.");
+    }
+    if (file.size > QR_MAX_BYTES) {
+      return showError("The QR image must be smaller than 5 MB.");
+    }
+    clearPayoutQrSelection();
+    payoutQrFile = file;
+    payoutQrPreview = URL.createObjectURL(file);
+    render();
+  }
+  async function savePayoutDetails() {
+    if (!unlocked || !payoutQrMemberId || busy) return;
+    const memberId = payoutQrMemberId;
+    const m = state.members.find((x) => x.id === memberId);
     busy = true;
     render();
     try {
-      await window.DB.uploadPaymentQr(qrNewFile, "treasurer");
-      await logActivity("Treasurer updated the payment QR code");
-      clearQrSelection();
-      qrUploadMsg = "Payment QR code updated successfully.";
+      const fields = {
+        payout_bank: payoutQrFields.bank.trim() || null,
+        payout_account_name: payoutQrFields.accountName.trim() || null,
+        payout_account_number: payoutQrFields.accountNumber.trim() || null,
+      };
+      // Upload first, save second: a failed upload must never blank the QR
+      // that is already on file.
+      if (payoutQrFile) {
+        fields.payout_qr_url = await window.DB.uploadMemberPayoutQr(payoutQrFile, memberId);
+      }
+      await window.DB.saveMemberPayoutDetails(memberId, fields);
+      await logActivity(
+        `Treasurer updated ${m ? m.name : "a member"}'s payout details${
+          payoutQrFile ? " and QR code" : ""
+        }`,
+        { type: "admin", memberId: memberId }
+      );
+      closePayoutQrModal();
       await reload();
+      showSuccess(`Payout details saved for ${m ? m.name : "the member"}.`);
     } catch (e) {
       showError(e.message);
     } finally {
       busy = false;
       render();
     }
+  }
+
+  async function confirmQrUpload() {
+    if (!unlocked || !qrNewFile || busy) return;
+    // Same submit pattern as the contribute sheet: progress and any failure
+    // report in place, with the chosen file still attached for a retry.
+    const ok = await runSubmit("Uploading QR code", async () => {
+      await window.DB.uploadPaymentQr(qrNewFile, "treasurer");
+      await logActivity("Treasurer updated the payment QR code", { type: "admin" });
+    });
+    if (!ok) return;
+    clearQrSelection();
+    qrUploadMsg = "Payment QR code updated successfully.";
+    await reload();
+    render();
   }
 
   // ===================================================================
@@ -1504,17 +4390,29 @@
     const due = C.dueDateOf(state.cycles, curCycle);
     const now = new Date();
 
+    // Five buckets, not three. "Not yet paid" lumped together three different
+    // situations — a rejected claim the member has to resend, a genuinely late
+    // payment, and someone whose cycle simply isn't due yet — and the group
+    // chat read all three as the same nudge.
     const paid = [];
     const pending = [];
-    const unpaid = [];
+    const rejected = [];
+    const overdue = [];
+    const notDue = [];
     members.forEach((m) => {
       const s = C.statusOf(state.contributions, m.id, curCycle);
-      if (s === 2) paid.push(m.name);
-      else if (s === 1) pending.push(m.name);
-      else unpaid.push(m.name);
+      if (s === 2) return paid.push(m.name);
+      if (s === 1) return pending.push(m.name);
+      if (s === 3) return rejected.push(m.name);
+      // Overdue is a fact about the member, not about today's date: they may
+      // be current on this cycle's clock and still owe an earlier one.
+      if (C.memberOverdueCount(state.contributions, state.cycles, m.id) > 0) {
+        return overdue.push(m.name);
+      }
+      notDue.push(m.name);
     });
 
-    let text = `⚡ Power Fund Update — ${C.formatDate(now)}\n`;
+    let text = `⚡ ${fundName()} Update — ${C.formatDate(now)}\n`;
     if (round) {
       const label = status === "payout_pending" ? " (🟡 payout pending)" : "";
       text += `Round ${round} of ${C.TOTAL_ROUNDS} — ${
@@ -1529,11 +4427,10 @@
     if (due && status === "collecting") text += `Cycle due: ${C.formatDate(due)}\n`;
     text += `\n`;
     if (paid.length) text += `✅ Paid: ${paid.join(", ")}\n`;
-    if (pending.length) text += `⏳ Pending review: ${pending.join(", ")}\n`;
-    if (unpaid.length) {
-      const late = due && (C.isSameDay(due, now) || due < now);
-      text += `${late ? "⚠️" : "⏰"} Not yet paid: ${unpaid.join(", ")}\n`;
-    }
+    if (pending.length) text += `🟣 Pending review: ${pending.join(", ")}\n`;
+    if (rejected.length) text += `❌ Needs resending: ${rejected.join(", ")}\n`;
+    if (overdue.length) text += `🔴 Overdue: ${overdue.join(", ")}\n`;
+    if (notDue.length) text += `⏰ Not yet due: ${notDue.join(", ")}\n`;
     text += `\nThis round: ${C.peso(roundCollected)} / ${C.peso(C.GOAL_PER_ROUND)}`;
     return text;
   }
@@ -1550,6 +4447,38 @@
     copyFeedback = null;
     render();
   }
+  /**
+   * A message the treasurer can paste into the group chat asking the recipient
+   * for their payout details. Same clipboard pattern as Share fund status,
+   * including its fallback: some browsers refuse writeText without a gesture
+   * they recognise, so the text is put on screen to copy by hand instead.
+   */
+  function copyPayoutReminder(round) {
+    const m = (state.members || []).find((x) => x.member_order === round);
+    const name = m ? m.name : "you";
+    const text =
+      `Hi ${name}! Round ${round} of the fund is ready to pay out ` +
+      `${C.peso(C.GOAL_PER_ROUND)} to you. Could you send your GCash/bank QR ` +
+      `(or account name + number) so I can transfer it? Thanks!`;
+    const done = () => {
+      copyFeedback = "Copied!";
+      render();
+      window.setTimeout(() => {
+        if (copyFeedback === "Copied!") {
+          copyFeedback = null;
+          render();
+        }
+      }, 2000);
+    };
+    try {
+      navigator.clipboard.writeText(text).then(done).catch(() => {
+        showWarning("Couldn't copy automatically. Message to send: " + text);
+      });
+    } catch (e) {
+      showWarning("Couldn't copy automatically. Message to send: " + text);
+    }
+  }
+
   function copyShareText() {
     const text = generateStatusText();
     const ta = document.getElementById("shareTextArea");
@@ -1582,12 +4511,18 @@
       payoutModalRound ||
       shareModalOpen ||
       editNamesModalOpen ||
+      memberAccountsModalOpen ||
+      transferRoleModalOpen ||
+      reorderModalOpen ||
+      restoreState != null ||
       lightboxSrc ||
       startRoundConfirming ||
       qrModalOpen ||
       confirmDialog ||
       contributePicker != null ||
-      whoAmIPickerOpen
+      whoAmIPickerOpen ||
+      profileModalOpen ||
+      photoSheetOpen
     );
   }
 
@@ -1595,6 +4530,9 @@
   function closeTopModal() {
     if (lightboxSrc) return closeLightbox();
     if (confirmDialog) return closeConfirm();
+    // Change Photo opens over Edit Profile, so it is the one on top.
+    if (photoSheetOpen) return closePhotoSheet();
+    if (profileModalOpen) return closeProfileModal();
     if (contributePicker != null) return closeContributePicker();
     if (whoAmIPickerOpen) return closeWhoAmIPicker();
     if (modalTarget) return closeModal();
@@ -1602,7 +4540,11 @@
     if (pinModalMode) return closePinModal();
     if (payoutModalRound) return closePayoutModal();
     if (qrModalOpen) return closeQrModal();
+    if (restoreState && restoreState.phase !== "working") return closeRestoreState();
+    if (reorderModalOpen) return closeReorderModal();
     if (editNamesModalOpen) return closeEditNamesModal();
+    if (memberAccountsModalOpen) return closeMemberAccountsModal();
+    if (transferRoleModalOpen) return closeTransferRole();
     if (shareModalOpen) return closeShareModal();
     if (startRoundConfirming) return cancelStartRound();
   }
@@ -1629,17 +4571,261 @@
     }
   }
 
+  /**
+   * Render, with a floor under it.
+   *
+   * renderView() builds the whole page into a string and assigns it in one go
+   * at the very end, so anything that throws part-way leaves the PREVIOUS DOM
+   * on screen — still carrying live onclick handlers that call render() and
+   * throw again. The result is a frozen UI: a dialog that ignores both its
+   * confirm and its cancel button, with nothing in the interface to say why.
+   *
+   * Catching here turns that silent freeze into something a person can act on
+   * and report, and keeps a way out of whatever state broke.
+   */
   function render() {
     const app = document.getElementById("app");
     if (!app) return;
+    // Set here rather than inside renderView: the gate returns early from
+    // renderView, so anything after that early return never runs on the one
+    // screen this class exists for. The gate has no sidebar and no tab bar,
+    // so the desktop shell's sidebar gutter (body padding-left) has to go or
+    // the card sits off-centre.
+    document.body.classList.toggle("auth-gate", isAuthScreenUp());
+    try {
+      renderView(app);
+    } catch (e) {
+      console.error("Render failed:", e);
+      app.innerHTML =
+        `<div class="wrap"><div class="loading">` +
+        `<p><b>Something went wrong drawing this screen.</b></p>` +
+        `<p class="view-placeholder-note">The app stopped before it could finish. ` +
+        `Reloading usually clears it — your data is safe, nothing was saved from this screen.</p>` +
+        `<p class="view-placeholder-note"><code>${escapeHtml(
+          (e && e.message) || String(e)
+        )}</code></p>` +
+        `<button class="reset-btn" style="margin-top:16px" onclick="location.reload()">Reload</button>` +
+        `</div></div>`;
+    }
+  }
+
+  /** The boot failure screen, drawn to the design's NoConnection artboard.
+   *  The headline only claims "No connection" when the failure really looks
+   *  like one — a dead network, or a fetch that never reached Supabase. Any
+   *  other boot failure (a missing table, a bad key) keeps its own message,
+   *  because telling someone to check their wifi would send them the wrong way. */
+  function bootErrorHtml(msg) {
+    const text = String(msg || "");
+    const offline =
+      typeof navigator !== "undefined" && navigator.onLine === false;
+    const looksNetwork =
+      offline || /network|fetch|connection|offline|timeout|unreachable/i.test(text);
+    const title = looksNetwork ? "No connection" : "Couldn't load your fund";
+    // The network case gets the design's own wording and nothing else: the
+    // app's internal message for a dead connection says the same thing, and
+    // printing both read as two separate faults. A non-network failure keeps
+    // its real message, which is the only clue to what actually went wrong.
+    const body = looksNetwork
+      ? "We couldn't load your fund data. Check your internet connection and try again."
+      : text;
+    return `<div class="boot-error">
+      <div class="boot-error-card">
+        <div class="boot-error-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1 9l2 2c4.9-4.9 12.1-4.9 17 0l2-2C15.9 2.9 8.1 2.9 1 9Z" opacity="0.4"/>
+            <path d="M5 13l2 2c2.8-2.8 7.2-2.8 10 0l2-2c-4-4-10-4-14 0Z" opacity="0.4"/>
+            <path d="M9 17l2 2c1-1 3-1 4 0"/>
+            <line x1="3" y1="3" x2="21" y2="21"/>
+          </svg>
+        </div>
+        <h1 class="boot-error-title">${escapeHtml(title)}</h1>
+        <p class="boot-error-sub">${escapeHtml(body)}</p>
+        <button type="button" class="boot-error-cta" onclick="PowerFund.retry()">Try again</button>
+      </div>
+    </div>`;
+  }
+
+  /** Count-up on a figure that changed, as the design's Main artboard does for
+   *  the fund balance. render() reassigns innerHTML every pass, so without the
+   *  key/last-value bookkeeping below the number would re-animate on every
+   *  unrelated re-render — a tap on a filter chip would replay the balance. */
+  const countedValues = Object.create(null);
+  function runCountUps() {
+    const reduce =
+      window.matchMedia &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    document.querySelectorAll(".count-up").forEach((el) => {
+      const key = el.getAttribute("data-count-key") || "";
+      const target = Number(el.getAttribute("data-count"));
+      if (!isFinite(target)) return;
+      const from = countedValues[key];
+      countedValues[key] = target;
+      // Nothing moved, or motion is unwelcome: the rendered figure is already
+      // the right one, so leave it alone.
+      if (reduce || from === target) return;
+      const start = from == null ? 0 : from;
+      const t0 = performance.now();
+      const dur = 900;
+      const tick = (t) => {
+        // The node is replaced on every render; stop the moment ours is gone,
+        // or a stale frame would overwrite a newer figure.
+        if (!el.isConnected) return;
+        const p = Math.min(1, (t - t0) / dur);
+        const eased = 1 - Math.pow(1 - p, 3);
+        el.textContent = C.peso(Math.round(start + (target - start) * eased));
+        if (p < 1) requestAnimationFrame(tick);
+        else el.textContent = C.peso(target);
+      };
+      requestAnimationFrame(tick);
+    });
+  }
+
+  /** The sign-in screen.
+   *
+   *  NO APPROVED MOCKUP EXISTS for this screen — the design predates member
+   *  accounts and says so (canvas.json, forgot-pin-notes). Rather than invent
+   *  a new visual language it borrows OnboardingWelcome.dc.html's shape: the
+   *  glow, the round emblem, a Space Grotesk headline over the fund name in
+   *  accent caps, and the gold gradient CTA the rest of the app already uses.
+   *  Recorded as an implementation gap for UI/UX QA to review as NEW design,
+   *  not as a port of something signed off. */
+  /** The sign-in screen. Drawn as the whole app in two situations:
+   *   - AUTH_MODE "required": the gate. There is no way past it.
+   *   - AUTH_MODE "optional": the FIRST-RUN PROMPT (see promptSignIn()). The
+   *     same screen, plus a "Not now" that steps around it — because in
+   *     optional mode the app genuinely works without an account, and a
+   *     hard-looking gate in front of a soft rule would be a lie. */
+  function signInHtml() {
+    const name = (window.APP_CONFIG || {}).SUBTITLE || "";
+    const skippable = !authRequired();
+    return `<div class="signin">
+      <div class="signin-glow" aria-hidden="true"></div>
+      <div class="signin-card">
+        <div class="signin-emblem" aria-hidden="true">${icon("lock", 38)}</div>
+        <h1 class="signin-title">Sign in to Power Fund</h1>
+        ${name ? `<p class="signin-fund">${escapeHtml(name)}</p>` : ""}
+        <p class="signin-sub">${
+          skippable
+            ? `Sign in so this app knows who you are — your name, your photo and
+               your own payments. Use the Google account the treasurer has on
+               file for you.`
+            : `This fund tracks real money, so it now asks who you
+          are. Use the Google account the treasurer has on file for you.`
+        }</p>
+        <button type="button" class="signin-btn" onclick="PowerFund.signIn()" ${
+          signingIn ? "disabled" : ""
+        }>
+          ${signingIn ? "Opening Google…" : "Continue with Google"}
+        </button>
+        <p class="signin-note">You'll be taken to Google and brought straight
+          back. Power Fund never sees your password.</p>
+        ${
+          skippable
+            ? `<button type="button" class="signin-btn signin-btn-quiet"
+                 onclick="PowerFund.skipSignInPrompt()">Not now</button>
+               <p class="signin-note">You can sign in later from
+                 <b>Menu → Account</b>.</p>`
+            : ""
+        }
+      </div>
+    </div>`;
+  }
+
+  /** Signed in, but this account cannot act as anyone on the roster.
+   *
+   *  Shown only when auth is REQUIRED. In "optional" mode an unrecognised
+   *  account is no worse off than not signing in at all, so it gets a warning
+   *  and keeps the app — blocking there would punish the person testing it.
+   *
+   *  Every branch offers a way out. A dead-end you cannot leave is how someone
+   *  ends up reinstalling the app to escape a screen. */
+  function accountProblemHtml() {
+    const email = (session && session.user && session.user.email) || "";
+    const COPY = {
+      unknown: {
+        title: "You're not on this fund's roster",
+        body: `You're signed in as ${email}, but nobody on this fund carries that
+               address. Ask the treasurer to add it, or sign in with the account
+               they have on file for you.`,
+      },
+      taken: {
+        title: "That member is already claimed",
+        body: `The member with the address ${email} is already linked to a
+               different account. If that wasn't you, ask the treasurer to
+               unlink it before you try again.`,
+      },
+      "no-email": {
+        title: "This fund isn't ready for sign-ins yet",
+        body: `No member on this fund has an email address recorded, so there is
+               nothing to match ${email} against. The treasurer needs to add the
+               addresses first.`,
+      },
+    };
+    const c = COPY[accountState] || COPY.unknown;
+    return `<div class="signin">
+      <div class="signin-glow" aria-hidden="true"></div>
+      <div class="signin-card">
+        <div class="signin-emblem signin-emblem-warn" aria-hidden="true">${icon("alert", 34)}</div>
+        <h1 class="signin-title">${escapeHtml(c.title)}</h1>
+        <p class="signin-sub">${escapeHtml(c.body.replace(/\s+/g, " ").trim())}</p>
+        <button type="button" class="signin-btn signin-btn-quiet" onclick="PowerFund.signOut()" ${
+          busy ? "disabled" : ""
+        }>${busy ? "Signing out…" : "Sign out"}</button>
+      </div>
+    </div>`;
+  }
+
+  function renderView(app) {
+    // The auth gate. Placed before the !state check because when auth is
+    // required there is deliberately no data load until there is a session —
+    // so "no state" is the normal, expected condition here, not a failure.
+    if (authRequired() && !session) {
+      app.innerHTML = authReady
+        ? signInHtml()
+        : `<div class="loading"><div class="loading-spinner" aria-hidden="true"></div><p>Checking your sign-in…</p></div>`;
+      return;
+    }
 
     if (!state) {
       app.innerHTML = appError
-        ? `<div class="loading">
-             <div class="save-error-banner">⚠️ ${escapeHtml(appError)}</div>
-             <button class="reset-btn" style="margin-top:16px" onclick="PowerFund.retry()">Try again</button>
-           </div>`
+        ? bootErrorHtml(appError)
         : `<div class="loading"><div class="loading-spinner" aria-hidden="true"></div><p>Loading fund data…</p></div>`;
+      return;
+    }
+
+    // Signed in as somebody this fund does not recognise. Required-auth only —
+    // see accountProblemHtml.
+    if (
+      authRequired() &&
+      session &&
+      (accountState === "unknown" ||
+        accountState === "taken" ||
+        accountState === "no-email")
+    ) {
+      app.innerHTML = accountProblemHtml();
+      return;
+    }
+
+    // OPTIONAL MODE, FIRST RUN ON THIS DEVICE: front the app with sign-in.
+    //
+    // After !state, on purpose: a member whose fund failed to load should see
+    // the connection error, not a sign-in screen that cannot work. And BEFORE
+    // onboarding, also on purpose — signing in first means the claim has
+    // happened by the time the tour renders, so onboarding correctly drops its
+    // who-am-I step for a member whose identity now comes from the database.
+    if (promptSignIn()) {
+      app.innerHTML = signInHtml();
+      return;
+    }
+
+    // First run. After the data load, because the picker needs the roster and
+    // the round strip shows real state; after the account checks, because
+    // someone who cannot use the app at all should be told so rather than
+    // walked through a tour and dead-ended at the end of it; and before the
+    // shell, because this replaces the whole screen rather than living in a
+    // tab.
+    if (onboardingStep != null) {
+      app.innerHTML = onboardingHtml();
       return;
     }
 
@@ -1690,16 +4876,24 @@
         ).length
       : members.length;
 
-    // ---- "My status" — personalized status for this device's remembered
-    // member (if any). Display only: derived entirely from data already
-    // computed above, never gates any action. ---------------------------
-    const myMember = myMemberId ? members.find((m) => m.id === myMemberId) : null;
+    // ---- "My status" — who this viewer is.
+    //
+    // Once accounts are on, the linked member IS the identity: it comes from
+    // the database, not from a per-device preference, and it cannot be
+    // switched. localStorage's pf_my_member_id stays the answer only while
+    // AUTH_MODE is "off" or nobody is linked, so a fund that has not switched
+    // accounts on behaves exactly as before. ---------------------------
+    const identityId = accountMemberId || myMemberId;
+    const myMember = identityId ? members.find((m) => m.id === identityId) : null;
     let myStatus = null;
     if (myMember) {
       if (allDone) {
         myStatus = {
           kind: "done",
-          label: `🎉 All ${C.TOTAL_ROUNDS} rounds complete — thanks, ${escapeHtml(
+          word: "Fund complete",
+          detail: `All ${C.TOTAL_ROUNDS} rounds collected and paid out — thanks!`,
+          mark: "party",
+          label: `All ${C.TOTAL_ROUNDS} rounds complete — thanks, ${escapeHtml(
             myMember.name
           )}!`,
           actionCycle: null,
@@ -1710,17 +4904,27 @@
         // that only happens once every member has paid every cycle in it.
         myStatus = {
           kind: "paid",
-          label: `🟢 You're paid up — Round ${curRound} is fully funded`,
+          word: "Paid up",
+          detail: `Round ${curRound} is fully funded — nothing to send`,
+          mark: "check",
+          label: `You're paid up — Round ${curRound} is fully funded`,
           actionCycle: null,
         };
       } else {
         const myOverdue = C.memberOverdueCount(state.contributions, state.cycles, myMember.id);
         const myCycleStatus = C.statusOf(state.contributions, myMember.id, payCycle);
-        const canAct = myCycleStatus === C.STATUS_UNPAID;
+        // Rejected still owes the cycle, so it is actionable exactly like
+        // unpaid — C.isOwed is the single place that rule lives.
+        const canAct = C.isOwed(myCycleStatus);
         if (myOverdue > 0) {
           myStatus = {
             kind: "overdue",
-            label: `🔴 Payment overdue — ${myOverdue} cycle${
+            word: "Overdue",
+            detail: `${myOverdue} cycle${
+              myOverdue === 1 ? "" : "s"
+            } unpaid past the due date`,
+            mark: "alert",
+            label: `Payment overdue — ${myOverdue} cycle${
               myOverdue === 1 ? "" : "s"
             } unpaid past due`,
             actionCycle: canAct ? payCycle : null,
@@ -1728,17 +4932,86 @@
         } else if (myCycleStatus === C.STATUS_PENDING) {
           myStatus = {
             kind: "pending",
-            label: "🟣 Submitted — awaiting treasurer verification",
+            word: "Submitted",
+            detail: "Awaiting treasurer verification",
+            mark: "clock",
+            label: "Submitted — awaiting treasurer verification",
             actionCycle: null,
           };
         } else if (myCycleStatus === C.STATUS_PAID) {
-          myStatus = { kind: "paid", label: "🟢 You're paid up", actionCycle: null };
-        } else {
           myStatus = {
-            kind: "due",
-            label: `🟡 Payment due${payCycleDue ? " " + C.formatDate(payCycleDue) : ""}`,
-            actionCycle: payCycle,
+            kind: "paid",
+            word: "Paid",
+            detail: `This cycle is confirmed${
+              payCycleDue ? " — " + C.formatDate(payCycleDue) : ""
+            }`,
+            mark: "check",
+            label: "You're paid up",
+            actionCycle: null,
           };
+        } else if (myCycleStatus === C.STATUS_REJECTED) {
+          // The card used to read "Payment due" here, so the one state that
+          // needs explaining looked identical to a cycle nobody had touched.
+          // The rejected card above carries the reason and the action; this
+          // just has to agree with it.
+          myStatus = {
+            kind: "rejected",
+            word: "Not accepted",
+            detail: "Please send this payment again",
+            mark: "alert",
+            label: "Payment not accepted — please send it again",
+            actionCycle: null,
+          };
+        } else {
+          // "Payment due" only inside a 7-day window before the due date.
+          // The cycle the fund is collecting can be months out — the card was
+          // announcing "Payment due Dec 15, 2026" in September and offering to
+          // take the money, which reads as an outstanding bill rather than a
+          // future one. Outside that window nothing is owed, so say so.
+          //
+          // This changes only what the card SAYS and whether it offers the
+          // shortcut. It moves no due date and blocks no payment: the cycle,
+          // its due date and paying ahead all work exactly as before, from the
+          // Rounds grid or the floating CTA.
+          const DUE_SOON_DAYS = 7;
+          const msPerDay = 24 * 60 * 60 * 1000;
+          const daysToDue = payCycleDue
+            ? Math.ceil((C.startOfDay(payCycleDue) - C.startOfDay(new Date())) / msPerDay)
+            : 0;
+          const dueSoon = !payCycleDue || daysToDue <= DUE_SOON_DAYS;
+          myStatus = dueSoon
+            ? {
+                kind: "due",
+                word: "Payment due",
+                detail: payCycleDue
+                  ? `Due ${C.formatDate(payCycleDue)}${
+                      daysToDue <= 0
+                        ? " — today"
+                        : daysToDue === 1
+                        ? " — tomorrow"
+                        : ` — in ${daysToDue} days`
+                    }`
+                  : "Due now",
+                mark: "bell",
+                label: `Payment due${payCycleDue ? " " + C.formatDate(payCycleDue) : ""}`,
+                actionCycle: payCycle,
+              }
+            : {
+                kind: "paid",
+                word: "All caught up",
+                detail: `Next payment ${C.formatDate(payCycleDue)}`,
+                mark: "check",
+                label: `You're all caught up — next payment ${C.formatDate(
+                  payCycleDue
+                )}`,
+                // The shortcut stays. Nothing is DUE yet, but paying ahead is a
+                // real thing members do — the app supports up to three cycles
+                // in one transfer — so the card says "caught up" and still
+                // offers the way to pay. Withholding it would mean the card
+                // that mentions the next payment is the one screen you cannot
+                // make it from.
+                actionCycle: payCycle,
+              };
         }
       }
     }
@@ -1748,665 +5021,202 @@
       hasAutoOpened = true;
     }
 
+    // The dot is decorative; the pill always spells the state out too.
+    const pill = (cls, label) =>
+      `<span class="round-state ${cls}"><span class="round-dot"></span>${label}</span>`;
     const ROUND_PILL = {
-      not_started: '<span class="round-state not-started">⚪ Not started</span>',
-      collecting: '<span class="round-state collecting">🟢 Collecting</span>',
-      payout_pending: '<span class="round-state pending">🟡 Payout Pending</span>',
-      completed: '<span class="round-state completed">✅ Completed</span>',
+      not_started: pill("not-started", "Not started"),
+      collecting: pill("collecting", "Collecting"),
+      payout_pending: pill("pending", "Payout Pending"),
+      completed: pill("completed", "Completed"),
+    };
+    // Just the word, for Home's single "Round 2 of 5 · Collecting" pill, which
+    // builds its own chip rather than nesting one.
+    const ROUND_PILL_WORD = {
+      not_started: "Not started",
+      collecting: "Collecting",
+      payout_pending: "Payout pending",
+      completed: "Completed",
     };
 
     let html = "";
 
+    // The app header and the banners below it render on every tab: both
+    // reflect app-wide state (treasurer mode, action feedback), not the state
+    // of whichever view happens to be open.
     html += `<div class="header">
       <div class="header-titles">
-        <p class="title">⚡ Power Fund</p>
-        <p class="subtitle">${escapeHtml(
-          (window.APP_CONFIG && window.APP_CONFIG.SUBTITLE) ||
-            `${members.length}-member sinking fund · ${C.peso(
+        <p class="title" title="${escapeHtml(fundName())}">⚡ ${escapeHtml(
+      fundName()
+    )}</p>
+        ${(function () {
+          const sub = (function () {
+            const fundName = (state.settings && state.settings.fund_name) || "";
+            const configured = (window.APP_CONFIG && window.APP_CONFIG.SUBTITLE) || "";
+            // Before fund_name existed the group's name lived in the config
+            // subtitle, so once it is set in the database the two can hold the
+            // same string and the header prints it twice. Fall through to the
+            // structural summary in that case.
+            const duplicate =
+              fundName &&
+              configured.trim().toLowerCase() === fundName.trim().toLowerCase();
+            if (configured && !duplicate) return configured;
+            return `${members.length}-member sinking fund · ${C.peso(
               C.CONTRIBUTION_AMOUNT
-            )} on the 15th & end of every month`
-        )}</p>
+            )} on the 15th & end of every month`;
+          })();
+          // Two subtitles, not one hidden. The long form describes the fund's
+          // schedule and only fits on desktop; the short form is what the
+          // design actually shows at 390px ("Group of 5 · Paluwagan"). Hiding
+          // it outright lost the schedule from every phone, and a `title`
+          // tooltip on a display:none element is unreachable — and never fires
+          // on touch anyway.
+          const short = `Group of ${members.length} · Paluwagan`;
+          return `<p class="subtitle subtitle-long">${escapeHtml(sub)}</p>
+        <p class="subtitle subtitle-short">${escapeHtml(short)}</p>`;
+        })()}
       </div>
-      <button class="unlock-btn ${unlocked ? "unlocked" : ""}" onclick="PowerFund.toggleUnlock()">
-        ${unlocked ? "🔓 Treasurer mode on" : "🔒 Unlock treasurer mode"}
-      </button>
+      ${
+        canUnlockTreasurer()
+          ? `<button class="unlock-btn ${unlocked ? "unlocked" : ""}"
+               onclick="PowerFund.toggleUnlock()" aria-label="${
+                 unlocked
+                   ? "Treasurer mode is on — tap to lock"
+                   : "Unlock treasurer mode"
+               }">
+              ${icon(unlocked ? "unlocked" : "lock", 13)}<span>${
+                unlocked ? "Treasurer" : "Unlock"
+              }</span>
+            </button>`
+          : ""
+      }
     </div>`;
 
-    // ---- My status: personalized, only shown once a member has set "who
-    // am I on this device" — never forced, never gates anything. ----------
-    html += (function () {
-      if (myMember && myStatus) {
-        return `<div class="my-status-card my-status-${myStatus.kind}">
-          <div class="my-status-row">
-            <span class="my-status-text"><b>${escapeHtml(
-              myMember.name
-            )}</b> — ${myStatus.label}</span>
-            <button type="button" class="my-status-change" onclick="PowerFund.openWhoAmIPicker()">Not you?</button>
-          </div>
-          ${
-            myStatus.actionCycle
-              ? `<button type="button" class="my-status-cta" onclick="PowerFund.openContributeModal('${inlineArg(
-                  myMember.id
-                )}', ${myStatus.actionCycle})">＋ Record my payment — ${C.peso(
-                  C.CONTRIBUTION_AMOUNT
-                )}</button>`
-              : ""
-          }
-        </div>`;
-      }
-      return `<button type="button" class="my-status-setup" onclick="PowerFund.openWhoAmIPicker()">👋 Which member are you? Tap to see your personal status.</button>`;
-    })();
-
-    // The old standalone due-countdown banner was removed — the same date is
-    // always visible a little further down, either on the My-status card
-    // (once a member is identified) or on the round card's own
-    // "<date> · N/5 paid this cycle" line and the matching accordion row.
-
-    if (appError) {
-      html += `<div class="save-error-banner">⚠️ ${escapeHtml(appError)}</div>`;
+    // Optional mode with an account this fund does not recognise. Not a wall
+    // (see accountProblemHtml) but it must not be silent either, or someone
+    // signs in, sees no change, and assumes it worked.
+    if (
+      authEnabled() &&
+      !authRequired() &&
+      session &&
+      (accountState === "unknown" || accountState === "taken" || accountState === "no-email")
+    ) {
+      html += `<div class="save-warning-banner" role="status" aria-live="polite">${icon(
+        "alert",
+        15
+      )}<span>${
+        accountState === "taken"
+          ? "You're signed in, but that member is already linked to another account."
+          : accountState === "no-email"
+          ? "You're signed in, but this fund has no member email addresses recorded yet."
+          : "You're signed in, but that address isn't on this fund's roster yet."
+      } Your personal status still comes from the member you picked on this device.</span></div>`;
     }
     if (appWarning) {
-      html += `<div class="save-warning-banner">⚠️ ${escapeHtml(
+      html += `<div class="save-warning-banner" role="status" aria-live="polite">${icon(
+        "alert",
+        15
+      )}<span>${escapeHtml(
         appWarning
-      )} <button type="button" class="warn-dismiss" onclick="PowerFund.dismissWarning()" aria-label="Dismiss">✕</button></div>`;
-    }
-    if (appSuccess) {
-      html += `<div class="save-success-banner" role="status">${escapeHtml(
-        appSuccess
-      )} <button type="button" class="warn-dismiss" onclick="PowerFund.dismissSuccess()" aria-label="Dismiss">✕</button></div>`;
+      )}</span> <button type="button" class="warn-dismiss" onclick="PowerFund.dismissWarning()" aria-label="Dismiss">✕</button></div>`;
     }
 
-    // ---- Overall fund balance (whole fund, confirmed money only) ------
-    // Built here but appended AFTER the treasurer's "Needs your attention"
-    // panel below, so a treasurer sees what needs action before a passive
-    // stat — see fundTotalHtml usage after that panel.
-    const fundTotalHtml = (function () {
-      const collected = C.totalCollected(state.contributions);
-      const remaining = C.remainingAmount(state.contributions);
-      const overallPct = Math.round(C.progressPercentOverall(state.contributions));
-      const pendingPesos = C.pendingTotal(state.contributions);
-      return `<div class="fund-total">
-        <p class="fund-total-label">Fund balance</p>
-        <div class="fund-total-amount">${C.peso(collected)} <span>/ ${C.peso(
-        C.TARGET_AMOUNT
-      )}</span></div>
-        <div class="fund-total-bar"><div class="fund-total-fill" style="width:${Math.min(
-          100,
-          Math.max(0, overallPct)
-        )}%"></div></div>
-        <div class="fund-total-meta">${
-          C.allRoundsComplete(state.contributions, rounds)
-            ? "Fund complete ✅"
-            : `${overallPct}% collected · <b>${C.peso(remaining)}</b> to go`
-        }${
-        pendingPesos > 0
-          ? ` <span class="fund-total-pending">+ ${C.peso(
-              pendingPesos
-            )} awaiting review</span>`
-          : ""
-      }</div>
-      </div>`;
-    })();
+    // ---- Tab views ----
+    // Content is moving out of the old single-page Home view one piece at a
+    // time; tabs whose content hasn't moved across yet show a placeholder.
+    // ---- Tab views ----
+    // Each view is a pure function of the render-time snapshot below: it gets
+    // ctx, returns a string, and touches nothing else. Adding a view means
+    // adding a file in js/views/ and a line here.
+    const ctx = {
+      // data computed once above, shared by whichever view is open
+      members, rounds, curCycle, allDone, curRound, curStatus, curCollected,
+      heroRecipient, pct, prevPendingRounds, canStartNext, pendingCount,
+      overdueCount, remainingToGo, payCycle, payCycleDue, cyclePaidCount,
+      myMember, myStatus, ROUND_PILL, ROUND_PILL_WORD,
+      // UI state, snapshotted so a view can't mutate it mid-render
+      state, unlocked, busy, openRound, myMemberId, attentionQueueExpanded,
+      overdueListOpen, startRoundConfirming, isWide, selectedMemberId,
+      undoPaidTarget, markPaidTarget,
+      hasMasterPin: hasMasterPin(),
+      // Accounts (migration 008). The mode drives whether Menu shows an
+      // Account group at all; the email is what "Signed in as ..." prints.
+      authMode: AUTH_MODE,
+      sessionEmail: (session && session.user && session.user.email) || null,
+      // When a login owns a member row, that row IS the identity: it comes
+      // from the database and cannot be switched, so every "Change" / "Not
+      // you?" control has to go. Leaving them would offer a choice the app
+      // then ignores.
+      identityLocked: accountState === "linked",
+      // Counts for the admin's "Member sign-in" row, so the menu can say how
+      // far the rollout has got without opening the panel.
+      signInStatus: signInReadiness(),
+      // The ADMIN gate — a login that owns a row carrying is_treasurer. Not
+      // `unlocked`: that is the shared PIN, which every member has.
+      isAdmin: isTreasurerAccount(),
+      payoutQrMemberId,
+      // Helpers the views render with.
+      //
+      // A view file is a separate script with no access to this closure, so
+      // anything it calls has to arrive here. Miss one and the view throws a
+      // ReferenceError the moment that branch is reached — which can be long
+      // after the feature ships, if the branch is treasurer-only or needs data
+      // the fixtures don't have. tests/views.test.js guards against that.
+      escapeHtml, inlineArg, icon, memberAvatar, memberStanding, batteryCell,
+      getPayout, payoutRecipientName, payoutDateText, sparkline,
+      formatDateTime, overdueRows, activityTimeLabel, C,
+    };
 
-    // ---- Treasurer action center: "Needs your attention" --------------
-    // Only actionable items. Hidden entirely when there is nothing to do.
-    if (unlocked && !allDone) {
-      const batches = C.pendingBatches(state.contributions);
-      const releaseRounds = [];
-      for (let r = 1; r <= C.TOTAL_ROUNDS; r++) {
-        if (C.roundStatus(state.contributions, rounds, r) === "payout_pending") {
-          releaseRounds.push(r);
-        }
-      }
-      const nextRound = curRound + 1;
-
-      if (batches.length || releaseRounds.length || canStartNext || overdueCount) {
-        html += `<div class="attention-panel">
-          <p class="attention-title">⚠ Needs your attention</p>`;
-
-        // 1) pending review queue
-        if (batches.length) {
-          const shown = attentionQueueExpanded ? batches : batches.slice(0, 6);
-          html += `<div class="attention-group">
-            <p class="attention-group-label">🔔 ${
-              batches.length === 1
-                ? "1 payment"
-                : batches.length + " payments"
-            } waiting for your review</p>
-            <div class="queue-list">
-              ${shown
-                .map((b) => {
-                  const m = state.members.find((x) => x.id === b.memberId);
-                  const name = m ? m.name : "—";
-                  const multi = b.cycles.length > 1;
-                  const firstDue = C.dueDateOf(state.cycles, b.cycles[0]);
-                  const lastDue = C.dueDateOf(
-                    state.cycles,
-                    b.cycles[b.cycles.length - 1]
-                  );
-                  const range = multi
-                    ? `${firstDue ? C.formatDate(firstDue) : "Cycle " + b.cycles[0]} – ${
-                        lastDue
-                          ? C.formatDate(lastDue)
-                          : "Cycle " + b.cycles[b.cycles.length - 1]
-                      }`
-                    : `${firstDue ? C.formatDate(firstDue) : "Cycle " + b.cycles[0]}`;
-                  return `<div class="queue-card">
-                    <div class="queue-card-info">
-                      <div class="queue-card-l1"><b>${escapeHtml(name)}</b> · ${escapeHtml(
-                    range
-                  )}${
-                    multi
-                      ? ` <span class="queue-badge">${b.cycles.length} cycles</span>`
-                      : ""
-                  }</div>
-                      <div class="queue-card-l2">${C.peso(b.amount)} · submitted ${
-                    b.submittedAt ? formatDateTime(b.submittedAt) : "—"
-                  }</div>
-                    </div>
-                    <div class="queue-card-actions">
-                      ${
-                        b.proofUrl
-                          ? `<button type="button" class="queue-thumb" onclick="PowerFund.openLightbox('${inlineArg(
-                              b.proofUrl
-                            )}')" aria-label="View ${escapeHtml(
-                              name
-                            )}'s payment screenshot larger"><img src="${escapeHtml(
-                              b.proofUrl
-                            )}" alt="Payment screenshot"></button>`
-                          : `<span class="queue-thumb queue-thumb-empty">no&nbsp;proof</span>`
-                      }
-                      <button type="button" class="queue-btn queue-btn-review" onclick="PowerFund.openReviewModal('${inlineArg(
-                        b.memberId
-                      )}', ${b.cycles[0]})">Review</button>
-                      <button type="button" class="queue-btn queue-btn-confirm" onclick="PowerFund.confirmBatch('${inlineArg(
-                        b.memberId
-                      )}', ${b.cycles[0]})" ${busy ? "disabled" : ""}>${
-                    multi ? `Confirm ${b.cycles.length}` : "Confirm"
-                  }</button>
-                    </div>
-                  </div>`;
-                })
-                .join("")}
-            </div>
-            ${
-              batches.length > shown.length
-                ? `<button type="button" class="attention-more" onclick="PowerFund.expandAttentionQueue()">Show ${
-                    batches.length - shown.length
-                  } more</button>`
-                : ""
-            }
-          </div>`;
-        }
-
-        // 2) payout(s) ready to release
-        releaseRounds.forEach((r) => {
-          const recip = members.find((m) => m.member_order === r);
-          html += `<div class="attention-group">
-            <p class="attention-group-label">🟡 Round ${r}${
-            recip ? " — " + escapeHtml(recip.name) : ""
-          } is funded — release the ${C.peso(C.GOAL_PER_ROUND)} payout</p>
-            <button class="contribute-btn payout-btn" onclick="PowerFund.openPayoutModal(${r})">Mark payout released</button>
-          </div>`;
-        });
-
-        // 3) start the next round
-        if (canStartNext) {
-          html += `<div class="attention-group">
-            ${
-              startRoundConfirming
-                ? `<p class="attention-group-label">Start Round ${nextRound}? Round ${curRound}'s payout stays pending until you release it.</p>
-                   <div class="start-round-confirm-btns">
-                     <button class="modal-btn-secondary" onclick="PowerFund.cancelStartRound()">Cancel</button>
-                     <button class="modal-btn-primary" onclick="PowerFund.confirmStartRound()" ${
-                       busy ? "disabled" : ""
-                     }>Start Round ${nextRound}</button>
-                   </div>`
-                : `<p class="attention-group-label">▶ Round ${nextRound} is ready to start</p>
-                   <button class="contribute-btn" onclick="PowerFund.askStartNextRound()">Start Round ${nextRound}</button>`
-            }
-          </div>`;
-        }
-
-        // 4) overdue contributions (nudge — not a treasurer action per se)
-        if (overdueCount) {
-          const rows = overdueListOpen ? overdueRows() : null;
-          html += `<div class="attention-group">
-            <p class="attention-group-label">⏰ ${overdueCount} contribution${
-            overdueCount === 1 ? "" : "s"
-          } overdue</p>
-            <button type="button" class="attention-more" onclick="PowerFund.toggleOverdueList()">${
-              overdueListOpen ? "Hide" : "Show"
-            } overdue</button>
-            ${
-              rows
-                ? `<div class="overdue-list">${rows
-                    .map(
-                      (o) =>
-                        `<div class="overdue-row"><span>${escapeHtml(
-                          o.name
-                        )}</span><span>${
-                          o.due ? C.formatDate(o.due) : "Cycle " + o.cycle
-                        }</span></div>`
-                    )
-                    .join("")}</div>`
-                : ""
-            }
-          </div>`;
-        }
-
-        html += `</div>`;
-      }
+    const view = window.PFViews && window.PFViews[currentView];
+    let viewHtml;
+    if (currentView === "activity") {
+      viewHtml = renderActivityView();
+    } else if (currentView === "insights") {
+      viewHtml = renderInsightsView(members);
+    } else if (view) {
+      viewHtml = view(ctx);
+    } else {
+      viewHtml = renderPlaceholderView(currentView);
     }
+    // The wrapper is what lets a view lay itself out differently on a wide
+    // screen without its own render path — the desktop rules key off it.
+    html += `<div class="view view-${currentView}">${viewHtml}</div>`;
 
-    // Fund balance renders here — after "Needs your attention" for a
-    // treasurer, and simply here (there's nothing before it) for a member.
-    html += fundTotalHtml;
+    html += renderTabBar(currentView, isWide, myMember);
 
-    // ---- Current round hero: round → money → to-go → who paid → CTA ----
-    html += `<div class="battery-hero">
-      <div class="hero-round-line">
-        ${
-          allDone
-            ? `<span class="hero-round-num">✅ All ${C.TOTAL_ROUNDS} Rounds Completed</span>`
-            : `<span class="hero-round-num">Round ${curRound} of ${C.TOTAL_ROUNDS}${
-                heroRecipient ? ` — ${escapeHtml(heroRecipient.name)}` : ""
-              }</span> ${ROUND_PILL[curStatus]}`
-        }
-      </div>
-      <div class="battery-amount">${
-        allDone
-          ? `${C.peso(C.TARGET_AMOUNT)} <span>/ ${C.peso(C.TARGET_AMOUNT)}</span>`
-          : `${C.peso(curCollected)} <span>/ ${C.peso(C.GOAL_PER_ROUND)}</span>`
-      }</div>
-      <div class="battery-shell" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(
-        pct
-      )}" aria-label="Round ${
-      allDone ? C.TOTAL_ROUNDS : curRound
-    } funding progress"><div class="battery-fill" style="width:${pct}%"></div></div>
-      <div class="hero-progress-meta">${
-        allDone
-          ? "Fund fully funded"
-          : `<b>${C.peso(remainingToGo)}</b> to go · ${Math.round(pct)}%`
-      }</div>
-      ${
-        pendingCount || overdueCount
-          ? `<div class="cycle-note">${
-              pendingCount
-                ? `<b style="color:var(--accent)">${pendingCount} pending treasurer review</b>`
-                : ""
-            }${pendingCount && overdueCount ? " · " : ""}${
-              overdueCount
-                ? `<b style="color:#E15353">${overdueCount} overdue</b>`
-                : ""
-            }</div>`
-          : ""
-      }
-      ${
-        payCycle
-          ? `<div class="cycle-status">
-               <div class="cycle-status-head">${
-                 payCycleDue ? C.formatDate(payCycleDue) : `Cycle ${payCycle}`
-               } · <b>${cyclePaidCount} / ${members.length} paid</b> this cycle</div>
-               <div class="cycle-status-chips">
-                 ${members
-                   .map((m) => {
-                     const s = C.statusOf(state.contributions, m.id, payCycle);
-                     const cls = s === 2 ? "paid" : s === 1 ? "pending" : "unpaid";
-                     // No icon for "not paid yet" — a plain unpaid chip on a
-                     // freshly-opened cycle isn't an error, so it shouldn't
-                     // read like one (matches the Rounds & cycles grid below,
-                     // which also shows no icon for a not-yet-due unpaid cycle).
-                     const mark = s === 2 ? "✓" : s === 1 ? "…" : "";
-                     const word =
-                       s === 2
-                         ? "paid"
-                         : s === 1
-                         ? "sent, awaiting review"
-                         : "not paid";
-                     // Same rule as the Rounds & cycles grid: treasurer can act
-                     // on any chip, members only on their own unpaid one.
-                     const clickable = unlocked || s === 0;
-                     const action = !clickable
-                       ? ""
-                       : unlocked
-                       ? s === 1
-                         ? " — tap to review"
-                         : s === 2
-                         ? " — tap to mark unpaid"
-                         : " — tap to record as paid"
-                       : " — tap to record your payment";
-                     const treasurerTap = unlocked && s !== 0;
-                     return `<button type="button" class="mini-chip ${cls} ${
-                       treasurerTap ? "treasurer-tap" : ""
-                     }" ${
-                       clickable ? "" : "disabled"
-                     } onclick="PowerFund.cellClicked('${m.id}', ${payCycle})" aria-label="${escapeHtml(
-                       m.name
-                     )}: ${word}${action}">${mark ? mark + " " : ""}${escapeHtml(m.name)}</button>`;
-                   })
-                   .join("")}
-               </div>
-             </div>`
-          : ""
-      }
-      ${
-        // Skip this generic "pick your name" CTA when the My-status card
-        // above already offers the exact same action for the exact same
-        // cycle (one tap, no picker) — showing both is two buttons that do
-        // the same thing. Still shown when unlocked (treasurer needs the
-        // picker to act on ANY member) or when this device isn't tied to a
-        // member yet, so a shared device can still be used by anyone.
-        payCycle &&
-        (unlocked || cyclePaidCount < members.length) &&
-        !(!unlocked && myMember && myStatus && myStatus.actionCycle)
-          ? `<button type="button" class="hero-cta" onclick="PowerFund.openContributePicker(${payCycle})">${
-              unlocked ? "＋ Record / review a payment" : "＋ Record a contribution"
-            }</button>`
-          : ""
-      }
-      <button class="share-btn" onclick="PowerFund.openShareModal()">📋 Copy status update</button>
-    </div>`;
-
-    // Previous round(s) whose payout hasn't been released — shown AFTER the
-    // current round and styled as history, so last round's ₱30,000 is never
-    // mistaken for the active round's progress. The release action lives in the
-    // treasurer "Needs your attention" panel above; this card is informational.
-    prevPendingRounds.forEach((r) => {
-      const collected = C.roundCollected(state.contributions, r);
-      const recip = members.find((m) => m.member_order === r);
-      html += `<div class="prev-round">
-        <div class="prev-round-label">Previous round</div>
-        <div class="prev-round-title">Round ${r}${
-        recip ? ` — ${escapeHtml(recip.name)}` : ""
-      } ${ROUND_PILL[C.roundStatus(state.contributions, rounds, r)]}</div>
-        <div class="prev-round-meta">${C.peso(collected)} / ${C.peso(
-        C.GOAL_PER_ROUND
-      )} · historical, not part of Round ${curRound}</div>
-      </div>`;
-    });
-
-    // member cards
-    html += `<p class="section-label">Members</p><div class="member-grid">`;
-    // Cycles due so far (date-based) — the denominator for each member's
-    // "caught up" ratio. Cycles not yet due aren't counted against anyone.
-    const cyclesDueSoFar = C.completedCyclesCount(state.cycles);
-    members.forEach((m) => {
-      const total = C.totalPerMember(state.contributions, m.id);
-      const payoutCycle = m.member_order * C.CYCLES_PER_ROUND;
-      const payoutDue = C.dueDateOf(state.cycles, payoutCycle);
-      const mOverdue = C.memberOverdueCount(state.contributions, state.cycles, m.id);
-      const paidOut = getPayout(m.member_order).released;
-      let mPaidSoFar = 0;
-      for (let c = 1; c <= cyclesDueSoFar; c++) {
-        if (C.statusOf(state.contributions, m.id, c) === C.STATUS_PAID) mPaidSoFar++;
-      }
-      html += `<div class="member-card ${paidOut ? "paid-out" : ""}">
-        <div class="member-order-row">
-          <span class="member-order-num">#${m.member_order} in order</span>
-          ${
-            unlocked
-              ? `<div class="reorder-arrows">
-                   <button onclick="PowerFund.moveMember('${m.id}', -1)" ${
-                  m.member_order === 1 ? "disabled" : ""
-                }>↑</button>
-                   <button onclick="PowerFund.moveMember('${m.id}', 1)" ${
-                  m.member_order === members.length ? "disabled" : ""
-                }>↓</button>
-                 </div>`
-              : ""
-          }
-        </div>
-        <p class="member-name">${escapeHtml(m.name)}</p>
-        <div class="member-contrib-label">Contributed</div>
-        <div class="member-contrib">${C.peso(total)}</div>
-        ${
-          cyclesDueSoFar > 0
-            ? `<div class="member-ratio ${
-                mPaidSoFar < cyclesDueSoFar ? "behind" : ""
-              }">${mPaidSoFar}/${cyclesDueSoFar} cycles paid</div>`
+    // Toasts, in one stack. The design bottom-anchors them above the tab bar on
+    // the phone and to the bottom-right corner on desktop, and puts failures in
+    // the same stack as confirmations — so when both are live they sit one
+    // above the other instead of one hiding the other.
+    if (appError || appSuccess) {
+      // The stack is pinned to the bottom, so it has to clear the floating
+      // action button rather than sit on top of it.
+      const cta = viewHtml.indexOf("floating-cta") !== -1 ? " above-cta" : "";
+      html += `<div class="toast-stack${cta}">`;
+      if (appError) {
+        // role="alert" so a screen reader announces a failed write on
+        // insertion. Without it a save that failed while the user was further
+        // down the page was completely silent, and they would reasonably
+        // assume the money went through. A failure never auto-dismisses.
+        html += `<div class="save-error-banner" role="alert" id="appErrorBanner">${icon(
+          "alert",
+          15
+        )}<span>${escapeHtml(appError)}</span>${
+          appErrorRetry
+            ? ` <button type="button" class="banner-retry" onclick="PowerFund.retryLastAction()">Retry</button>`
             : ""
-        }
-        <div class="member-payout-date">Payout target: ${
-          payoutDue ? C.formatDate(payoutDue) : "—"
-        }${paidOut ? ' <span class="payout-done-tag">✅ done</span>' : ""}</div>
-        ${mOverdue ? `<div class="overdue-badge">⚠ ${mOverdue} overdue</div>` : ""}
-      </div>`;
-    });
-    html += `</div>`;
-
-    // rounds & cycles
-    html += `<p class="section-label">Rounds &amp; cycles</p>`;
-    for (let r = 1; r <= C.TOTAL_ROUNDS; r++) {
-      const recipient = members.find((m) => m.member_order === r);
-      const { startCycle, endCycle } = C.roundCycleRange(r);
-      const roundCollected = C.roundCollected(state.contributions, r);
-      const roundPending = C.roundPending(state.contributions, r);
-      const isOpen = openRound === r;
-      const payout = getPayout(r);
-      const fullyFunded = roundCollected >= C.GOAL_PER_ROUND;
-      const rStatus = C.roundStatus(state.contributions, rounds, r); // not_started|collecting|payout_pending|completed
-      const endDue = C.dueDateOf(state.cycles, endCycle);
-
-      html += `<div class="round">
-        <div class="round-header" role="button" tabindex="0" aria-expanded="${
-          isOpen ? "true" : "false"
-        }" onclick="PowerFund.toggleRound(${r})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();PowerFund.toggleRound(${r})}">
-          <div class="round-title"><span class="round-chevron ${
-            isOpen ? "open" : ""
-          }">▸</span> Round ${r} — ${recipient ? escapeHtml(recipient.name) : "—"} ${
-        ROUND_PILL[rStatus]
-      }${r === curRound && !allDone ? ' <span class="round-active-tag">active</span>' : ""}</div>
-          <div class="round-status">${C.peso(roundCollected)} / ${C.peso(C.GOAL_PER_ROUND)}${
-        fullyFunded ? "" : ` · ${Math.round(C.progressPercentRound(state.contributions, r))}%`
-      }${roundPending ? ` · ${roundPending} pending` : ""}${
-        endDue ? ` · ${C.formatDate(endDue)}` : ""
-      }</div>
-        </div>
-        <div class="round-body ${isOpen ? "open" : ""}">
-          <div class="cycle-list">
-            ${(function () {
-              let rowsHtml = "";
-              for (let c = startCycle; c <= endCycle; c++) {
-                const due = C.dueDateOf(state.cycles, c);
-                const isCurrent = c === curCycle;
-                const rowTag = isCurrent
-                  ? due && C.isSameDay(due, new Date())
-                    ? "today"
-                    : "next due"
-                  : null;
-                const chips = members
-                  .map((m) => {
-                    const status = C.statusOf(state.contributions, m.id, c);
-                    const overdue = C.isOverdue(
-                      state.contributions,
-                      state.cycles,
-                      m.id,
-                      c
-                    );
-                    const cls =
-                      status === 2
-                        ? "paid"
-                        : status === 1
-                        ? "pending"
-                        : overdue
-                        ? "overdue"
-                        : "";
-                    const icon =
-                      status === 2 ? "✓" : status === 1 ? "…" : overdue ? "!" : "";
-                    const clickable = unlocked || status === 0;
-                    const tip =
-                      status === 1
-                        ? "Pending treasurer review"
-                        : status === 2
-                        ? "Confirmed paid"
-                        : overdue
-                        ? "Overdue — tap to contribute"
-                        : "Tap to contribute";
-                    // Treasurer mode makes every chip clickable, including
-                    // paid/pending ones that would otherwise look like plain
-                    // status badges — a dashed border marks those as also
-                    // being buttons (tap to revert / review), not just info.
-                    const treasurerTap = unlocked && status !== 0;
-                    return `<span class="member-chip ${cls} ${
-                      clickable ? "editable" : ""
-                    } ${
-                      treasurerTap ? "treasurer-tap" : ""
-                    }" onclick="PowerFund.cellClicked('${m.id}', ${c})" title="${escapeHtml(
-                      m.name
-                    )}: ${tip}">${escapeHtml(m.name)}${icon ? ` ${icon}` : ""}</span>`;
-                  })
-                  .join("");
-                rowsHtml += `<div class="cycle-row ${isCurrent ? "current-row" : ""}">
-                  <div class="cycle-date">${due ? C.formatDate(due) : `Cycle ${c}`}${
-                  rowTag ? ` <span class="today-tag">${rowTag}</span>` : ""
-                }</div>
-                  <div class="cycle-chips">${chips}</div>
-                </div>`;
-              }
-              return rowsHtml;
-            })()}
-          </div>
-          ${
-            payout.released
-              ? `<div class="payout-status-box">
-                   <div>✅ Payout released to <b>${escapeHtml(
-                     payoutRecipientName(payout)
-                   )}</b>${
-                  payout.amount != null ? `, ${C.peso(payout.amount)}` : ""
-                }${
-                  payout.released_on
-                    ? ` on ${payoutDateText(payout.released_on)}`
-                    : ""
-                }${payout.note ? ` — ${escapeHtml(payout.note)}` : ""}${
-                  payout.receipt_url
-                    ? ` · <button type="button" class="ph-receipt" onclick="PowerFund.openLightbox('${inlineArg(
-                        payout.receipt_url
-                      )}')">🧾 receipt</button>`
-                    : ""
-                }</div>
-                   ${
-                     unlocked
-                       ? `<button class="reset-btn" onclick="PowerFund.unmarkPayoutReleased(${r})">Undo</button>`
-                       : ""
-                   }
-                 </div>`
-              : fullyFunded
-              ? // No "Mark payout released" button here even when unlocked —
-                // every payout-pending round is already listed with that
-                // exact button in the "Needs your attention" panel above,
-                // which is visible on every render (not just while this
-                // round's accordion happens to be expanded). Two buttons
-                // for the same action on the same page is just noise.
-                `<div class="payout-status-box pending-box"><div>🟡 Payout Pending — ${C.peso(
-                  C.GOAL_PER_ROUND
-                )} reached</div></div>`
-              : ""
-          }
-        </div>
-      </div>`;
-    }
-
-    // ---- Payout history: released payouts, recipient/amount as recorded ----
-    (function () {
-      const released = (state.payouts || [])
-        .filter((p) => p.released)
-        .sort((a, b) => a.round_number - b.round_number);
-      if (!released.length) return;
-      html += `<p class="section-label">Payout history</p><div class="payout-history">`;
-      released.forEach((p) => {
-        const amt =
-          p.amount != null ? C.peso(p.amount) : C.peso(C.GOAL_PER_ROUND);
-        html += `<div class="payout-history-row">
-          <div class="ph-main"><b>Round ${p.round_number}</b> — ${escapeHtml(
-          payoutRecipientName(p)
-        )} · ${amt}</div>
-          <div class="ph-meta">${
-            p.released_on ? payoutDateText(p.released_on) : "date not recorded"
-          }${p.note ? ` · ${escapeHtml(p.note)}` : ""}</div>
-          ${
-            p.receipt_url
-              ? `<button type="button" class="ph-receipt" onclick="PowerFund.openLightbox('${inlineArg(
-                  p.receipt_url
-                )}')">🧾 View receipt</button>`
-              : ""
-          }
+        }<button type="button" class="warn-dismiss" onclick="PowerFund.dismissError()" aria-label="Dismiss">✕</button></div>`;
+      }
+      if (appSuccess) {
+        // Announced politely rather than assertively — it confirms something
+        // the user just did, it doesn't interrupt them.
+        html += `<div class="toast" role="status" aria-live="polite">
+          <span class="toast-icon">${icon("check", 15)}</span>
+          <span class="toast-text">${escapeHtml(appSuccess)}</span>
+          <button type="button" class="toast-x" onclick="PowerFund.dismissSuccess()" aria-label="Dismiss">✕</button>
         </div>`;
-      });
+      }
       html += `</div>`;
-    })();
-
-    // activity log
-    html += (function () {
-      const log = state.activityLog || [];
-      return `<div class="round activity-section">
-        <div class="round-header" role="button" tabindex="0" aria-expanded="${
-          activityLogOpen ? "true" : "false"
-        }" onclick="PowerFund.toggleActivityLog()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();PowerFund.toggleActivityLog()}">
-          <div class="round-title"><span class="round-chevron ${
-            activityLogOpen ? "open" : ""
-          }">▸</span> Activity log</div>
-          <div class="round-status">${log.length} ${
-        log.length === 1 ? "entry" : "entries"
-      }</div>
-        </div>
-        <div class="round-body ${activityLogOpen ? "open" : ""}">
-          ${
-            log.length === 0
-              ? '<p class="activity-empty">No activity yet — actions will show up here as your group uses the tracker.</p>'
-              : `<div class="activity-list">${log
-                  .map(
-                    (e) => `
-                <div class="activity-item">
-                  <span class="activity-time">${escapeHtml(
-                    activityTimeLabel(e.created_at)
-                  )}</span>
-                  <span class="activity-text">${escapeHtml(e.message)}</span>
-                </div>`
-                  )
-                  .join("")}</div>
-                ${
-                  log.length >= activityLogLimit
-                    ? `<button type="button" class="attention-more activity-more" onclick="PowerFund.loadMoreActivity()">Show older entries</button>`
-                    : ""
-                }`
-          }
-        </div>
-      </div>`;
-    })();
-
-    html += `<div class="footer-note">
-      <b>How this works</b>
-      <ul class="how-it-works-list">
-        <li><b>The fund:</b> ${members.length} members × ${C.peso(
-      C.CONTRIBUTION_AMOUNT
-    )} on the 15th &amp; end of every month → ${C.peso(
-      C.GOAL_PER_ROUND
-    )} payout per round, ${C.TOTAL_ROUNDS} rounds in total (${C.peso(
-      C.TARGET_AMOUNT
-    )} overall). Pay via the QR shown in "Record a contribution" — every payment needs a screenshot as proof</li>
-        <li><b>Members:</b> tap <b>＋ Record a contribution</b> → scan the QR → attach your payment screenshot (required) → <b>I've sent this</b></li>
-        <li><b>Treasurer:</b> reviews the screenshot, then <b>Confirm</b> or <b>Reject</b>. Paying several cycles in one transfer is reviewed together</li>
-        <li><b>Cycle status:</b> ✓ paid · … waiting for treasurer review · ✕ not paid (overdue is still fine to pay late)</li>
-        <li><b>Round status:</b> each round targets ${C.peso(
-          C.GOAL_PER_ROUND
-        )} — 🟢 Collecting → 🟡 Payout Pending → ✅ Completed. "Mark payout released" and "Start next round" are separate steps, so a previous round can stay Payout Pending while a new one collects</li>
-      </ul>
-    </div>`;
-
-    if (unlocked) {
-      html += `<div class="reset-row">
-        <button class="reset-btn" onclick="PowerFund.openQrModal()">Payment QR</button>
-        <button class="reset-btn" onclick="PowerFund.openEditNamesModal()">Edit names</button>
-        <button class="reset-btn" onclick="PowerFund.exportCsv()">Export CSV</button>
-        <button class="reset-btn" onclick="PowerFund.downloadBackup()">Download backup</button>
-        <button class="reset-btn" onclick="PowerFund.pickRestoreFile()">Restore backup</button>
-        <button class="reset-btn" onclick="PowerFund.openChangePin()">Change PIN</button>
-      </div>
-      <div class="danger-zone">
-        <span class="danger-zone-label">⚠ Danger zone</span>
-        <button class="reset-btn danger" onclick="PowerFund.resetData()">Reset all data</button>
-      </div>`;
     }
 
     // ---- Modals ----
@@ -2425,79 +5235,171 @@
       );
       const total = C.CONTRIBUTION_AMOUNT * modalCount;
       const qrUrl = qrImageUrl();
-      html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeModal()">
-        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
-          <h3 id="dlg-title">Contribute — ${member ? escapeHtml(member.name) : ""}</h3>
-          <p class="modal-sub">${
-            modalCount === 1
-              ? `Cycle due ${due ? C.formatDate(due) : "—"}`
-              : `Cycles ${due ? C.formatDate(due) : "—"} – ${
-                  lastDue ? C.formatDate(lastDue) : "—"
-                }`
-          }</p>
-          <p class="qr-scan-label">Scan to Pay</p>
+      // Laid out as the mockup draws it: title + due/round line with a close
+      // affordance, the QR matted on white with its own actions, then one
+      // panel holding AMOUNT and the pay-ahead stepper, then the proof row as
+      // a file chip rather than a bare upload box.
+      const advanceLast = C.dueDateOf(
+        state.cycles,
+        modalTarget.cycleNumber + modalCount - 1
+      );
+      const cycleRound = C.roundOfCycle(modalTarget.cycleNumber);
+      html += `<div class="modal-overlay sheet" onclick="if(event.target===this) PowerFund.closeModal()">
+        <div class="modal sheet-pay" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <div class="sheet-head">
+            <div class="sheet-head-titles">
+              <h3 id="dlg-title">Pay Cycle ${modalTarget.cycleNumber}</h3>
+              <p class="modal-sub">${
+                due ? `Due ${C.formatDate(due)} · ` : ""
+              }Round ${cycleRound}${
+        member ? ` · ${escapeHtml(member.name)}` : ""
+      }</p>
+            </div>
+            <button type="button" class="sheet-x" onclick="PowerFund.closeModal()" aria-label="Close">${icon(
+              "close",
+              14
+            )}</button>
+          </div>
+
           ${
             qrUrl
-              ? `<button type="button" class="qr-box-btn" onclick="PowerFund.openLightbox('${inlineArg(
-                  qrUrl
-                )}')" aria-label="Payment QR code — activate to enlarge">
-                   <span class="qr-box">
+              ? `<div class="qr-card">
+                   <button type="button" class="qr-card-img" onclick="PowerFund.openLightbox('${inlineArg(
+                     qrUrl
+                   )}')" aria-label="Payment QR code — activate to enlarge">
                      <img src="${escapeHtml(
                        qrUrl
                      )}" alt="Payment QR code" onerror="this.onerror=null;this.src='${inlineArg(
                   FALLBACK_QR_URL
                 )}'">
-                   </span>
-                 </button>
-                 <p class="qr-hint">🔍 Tap the QR to enlarge</p>`
+                     <span class="qr-card-expand">${icon("expand", 13)}</span>
+                   </button>
+                   <p class="qr-card-title">${
+                     // The mockup says "Scan with GCash", but the QR on file
+                     // may be Maya, InstaPay, a bank — naming the wrong wallet
+                     // over someone's real QR is worse than not naming one.
+                     // Reads app_settings.qr_bank (migration 006) when the
+                     // treasurer has set it.
+                     state.settings && state.settings.qr_bank
+                       ? `Scan with ${escapeHtml(state.settings.qr_bank)}`
+                       : "Scan to pay"
+                   }</p>
+                   ${(function () {
+                     // The account behind the QR. Without it a member is
+                     // scanning an opaque image and trusting it — the design
+                     // added these fields precisely so the name can be checked
+                     // before money leaves the wallet.
+                     const st = state.settings || {};
+                     const line = [st.qr_bank, st.qr_account_number]
+                       .filter(Boolean)
+                       .join(" · ");
+                     if (!line && !st.qr_account_name) return "";
+                     return `<p class="qr-card-acct">${
+                       st.qr_account_name
+                         ? `<b>${escapeHtml(st.qr_account_name)}</b>`
+                         : ""
+                     }${line ? `<span>${escapeHtml(line)}</span>` : ""}</p>`;
+                   })()}
+                   <p class="qr-card-hint">Tap to enlarge</p>
+                   <a href="${escapeHtml(
+                     qrUrl
+                   )}" download="powerfund-qr" class="qr-card-save">${icon(
+                  "download",
+                  13
+                )}<span>Save QR code</span></a>
+                 </div>`
               : `<div class="qr-box">QR code goes here — the treasurer needs to add the InstaPay/GCash QR image</div>`
           }
-          ${
-            qrUrl
-              ? `<a href="${escapeHtml(
-                  qrUrl
-                )}" download="powerfund-qr" class="download-qr-btn">⬇ Download QR to upload in your app</a>`
-              : ""
-          }
-          <div class="modal-amount">${C.peso(total)}</div>
-          ${
-            maxCount > 1
-              ? `<div class="advance-row">
-                   <span class="advance-label">Paying in advance?</span>
-                   <div class="stepper">
-                     <button onclick="PowerFund.adjustModalCount(-1)" ${
-                       modalCount <= 1 ? "disabled" : ""
-                     }>−</button>
-                     <span class="stepper-count">${modalCount} cycle${
-                  modalCount > 1 ? "s" : ""
-                }</span>
-                     <button onclick="PowerFund.adjustModalCount(1)" ${
-                       modalCount >= maxCount ? "disabled" : ""
-                     }>+</button>
-                   </div>
-                 </div>`
-              : ""
-          }
-          <label class="proof-upload">
+
+          <div class="pay-panel">
+            <div class="pay-row">
+              <span class="pay-row-label">Amount</span>
+              <span class="pay-row-amount">${C.peso(total)}</span>
+            </div>
             ${
-              modalProofPreview
-                ? `<img src="${modalProofPreview}" class="proof-preview" alt="Payment screenshot">`
-                : `<span class="proof-upload-label">📎 Attach proof of payment (required)</span>`
+              maxCount > 1
+                ? `<div class="pay-row pay-row-split">
+                     <span class="pay-row-main">
+                       <span class="pay-row-title">Pay ahead</span>
+                       <span class="pay-row-note">${
+                         modalCount === 1
+                           ? `Cycle ${modalTarget.cycleNumber}${
+                               due ? ` · ${C.formatDate(due)}` : ""
+                             }`
+                           : `Cycles ${modalTarget.cycleNumber}–${
+                               modalTarget.cycleNumber + modalCount - 1
+                             }${
+                               due && advanceLast
+                                 ? ` · ${C.formatDate(due)} & ${C.formatDate(advanceLast)}`
+                                 : ""
+                             }`
+                       }</span>
+                     </span>
+                     <span class="stepper">
+                       <button type="button" onclick="PowerFund.adjustModalCount(-1)" ${
+                         modalCount <= 1 ? "disabled" : ""
+                       } aria-label="One fewer cycle">−</button>
+                       <span class="stepper-count" aria-live="polite">${modalCount}</span>
+                       <button type="button" onclick="PowerFund.adjustModalCount(1)" ${
+                         modalCount >= maxCount ? "disabled" : ""
+                       } aria-label="One more cycle">+</button>
+                     </span>
+                   </div>`
+                : ""
             }
-            <input type="file" accept="image/*" onchange="PowerFund.onProofSelected(this)" hidden>
-          </label>
+          </div>
+
+          <p class="sheet-section-label">Proof of payment ${
+            modalProofPreview ? "" : `<span class="field-required">required</span>`
+          }</p>
           ${
             modalProofPreview
-              ? `<button type="button" class="zoom-link" onclick="PowerFund.openLightbox('${inlineArg(
-                  modalProofPreview
-                )}')">🔍 View proof larger</button>`
-              : `<p class="proof-required-hint">Proof of payment is required to submit.</p>`
+              ? `<div class="file-chip">
+                   <button type="button" class="file-chip-thumb" onclick="PowerFund.openLightbox('${inlineArg(
+                     modalProofPreview
+                   )}')" aria-label="View the attached screenshot larger">
+                     <img src="${modalProofPreview}" alt="Attached payment screenshot">
+                     <span class="file-chip-badge">${icon("check", 10)}</span>
+                   </button>
+                   <span class="file-chip-body">
+                     <span class="file-chip-name">${escapeHtml(
+                       (modalProofFile && modalProofFile.name) || "screenshot"
+                     )}</span>
+                     <span class="file-chip-meta">${
+                       modalProofFile
+                         ? `${(modalProofFile.size / (1024 * 1024)).toFixed(1)} MB · attached`
+                         : "attached"
+                     }</span>
+                   </span>
+                   <label class="file-chip-change">Change
+                     <input type="file" accept="image/*" onchange="PowerFund.onProofSelected(this)" hidden>
+                   </label>
+                   <label class="file-chip-change">Camera
+                     <input type="file" accept="image/*" capture="environment" onchange="PowerFund.onProofSelected(this)" hidden>
+                   </label>
+                 </div>`
+              : `<label class="proof-upload">
+                   <span class="proof-upload-label">${icon(
+                     "upload",
+                     14
+                   )}<span>Attach your payment screenshot</span></span>
+                   <input type="file" accept="image/*" onchange="PowerFund.onProofSelected(this)" hidden>
+                 </label>
+                 <label class="proof-upload proof-upload-camera">
+                   <span class="proof-upload-label">${icon(
+                     "qr",
+                     14
+                   )}<span>Take a photo instead</span></span>
+                   <input type="file" accept="image/*" capture="environment" onchange="PowerFund.onProofSelected(this)" hidden>
+                 </label>
+                 <p class="proof-required-hint">The treasurer checks this before confirming, so it has to show the amount and the date.</p>`
           }
+          ${submitStateHtml()}
           <div class="modal-actions">
             <button class="modal-btn-primary" onclick="PowerFund.markPending()" ${
               busy || !modalProofPreview ? "disabled" : ""
-            }>${busy ? "Saving…" : "I've sent this"}</button>
-            <button class="modal-btn-secondary" onclick="PowerFund.closeModal()">Cancel</button>
+            }>${busy ? "Saving…" : `I've sent this · ${C.peso(total)}`}</button>
+            <button class="modal-btn-quiet" onclick="PowerFund.closeModal()">Cancel</button>
           </div>
         </div>
       </div>`;
@@ -2511,31 +5413,59 @@
       const total = C.CONTRIBUTION_AMOUNT * rc.length;
       const proof = C.proofOf(state.contributions, reviewTarget.memberId, rc[0]);
       const multi = rc.length > 1;
-      html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeReviewModal()">
-        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
-          <h3 id="dlg-title">Review payment — ${member ? escapeHtml(member.name) : ""}</h3>
-          <p class="modal-sub">${
-            multi
-              ? `Cycles ${firstDue ? C.formatDate(firstDue) : "—"} – ${
-                  lastDue ? C.formatDate(lastDue) : "—"
-                }`
-              : `Cycle due ${firstDue ? C.formatDate(firstDue) : "—"}`
-          } · <b>${C.peso(total)}</b>${
-        multi ? ` · ${rc.length} payments in one transfer` : ""
-      }</p>
+      html += `<div class="modal-overlay sheet" onclick="if(event.target===this) PowerFund.closeReviewModal()">
+        <div class="modal sheet-pay" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <div class="sheet-head">
+            <div class="sheet-head-titles">
+              <h3 id="dlg-title">Review Payment</h3>
+            </div>
+            <button type="button" class="sheet-x" onclick="PowerFund.closeReviewModal()" aria-label="Close">${icon(
+              "close",
+              14
+            )}</button>
+          </div>
+
+          <!-- Claimant, what for, and how much — one row, as the mockup has it. -->
+          <div class="claim-row">
+            ${memberAvatar(
+            member ? member.name : "?",
+            "pending",
+            40,
+            member && member.avatar_url
+          )}
+            <span class="claim-body">
+              <span class="claim-name">${member ? escapeHtml(member.name) : "—"}</span>
+              <span class="claim-meta">${
+                multi
+                  ? `Cycles ${rc[0]}–${rc[rc.length - 1]}`
+                  : `Cycle ${rc[0]}`
+              }${firstDue ? ` · Due ${C.formatDate(firstDue)}` : ""}${
+        reviewTarget.submittedAt
+          ? ` · submitted ${activityClockLabel(reviewTarget.submittedAt)}`
+          : ""
+      }</span>
+            </span>
+            <span class="claim-amount">${C.peso(total)}</span>
+          </div>
+
+          <p class="sheet-section-label">Proof of payment</p>
           ${
             proof
-              ? `<button type="button" class="qr-box-btn" onclick="PowerFund.openLightbox('${inlineArg(
+              ? `<button type="button" class="proof-card" onclick="PowerFund.openLightbox('${inlineArg(
                   proof
                 )}')" aria-label="Submitted payment screenshot — activate to enlarge">
-                   <span class="qr-box"><img src="${escapeHtml(
+                   <img src="${escapeHtml(
                      proof
-                   )}" alt="Submitted payment screenshot"></span>
+                   )}" alt="Submitted payment screenshot">
+                   <span class="proof-card-expand">${icon("expand", 13)}</span>
                  </button>
-                 <p class="qr-hint">🔍 Tap the screenshot to enlarge</p>`
-              : `<div class="qr-box">No screenshot attached — member confirmed by text only</div>`
+                 <p class="proof-card-hint">Tap the screenshot to enlarge</p>`
+              : `<div class="proof-card proof-card-empty">${icon(
+                  "alert",
+                  16
+                )}<span>No screenshot attached — there is nothing here to check against.</span></div>`
           }
-          <div class="modal-meta">Check the screenshot matches <b>${C.peso(
+          <div class="modal-meta">Check it matches <b>${C.peso(
             total
           )}</b> sent to the right account before confirming${
         multi ? ` — this approves all ${rc.length} cycles at once` : ""
@@ -2545,22 +5475,39 @@
               rejectConfirming
                 ? `<p class="reject-confirm-text">Reject this claim? ${
                     multi ? `All ${rc.length} cycles go` : "It goes"
-                  } back to unpaid. The screenshot is kept in the archive.</p>
+                  } back to unpaid and ${multi ? "stay" : "stays"} due. ${
+                    memberName(reviewTarget.memberId)
+                  } sees your reason and can send a new screenshot.</p>
+                   <label class="reject-note-label" for="reject-note">Why wasn't it accepted? <span class="field-required">required</span></label>
+                   <textarea id="reject-note" class="reject-note-input" rows="2" required
+                     aria-describedby="reject-note-help"
+                     placeholder="e.g. The screenshot doesn't show the amount or the date clearly."
+                     oninput="PowerFund.setRejectNote(this.value)">${escapeHtml(
+                       rejectNoteValue
+                     )}</textarea>
+                   <p id="reject-note-help" class="reject-note-help">A rejection with no reason leaves the member no way to fix it — this is the only thing they are told.</p>
+                   ${
+                     rejectError
+                       ? `<p class="pin-error" role="alert">${escapeHtml(rejectError)}</p>`
+                       : ""
+                   }
                    <button class="modal-btn-primary confirm-yes" onclick="PowerFund.doRejectReview()" ${
-                     busy ? "disabled" : ""
+                     busy || !rejectNoteValue.trim() ? "disabled" : ""
                    }>Yes, reject</button>
                    <button class="modal-btn-secondary" onclick="PowerFund.cancelRejectConfirm()">Never mind</button>`
-                : `<button class="modal-btn-primary" onclick="PowerFund.confirmReview()" ${
+                : // The mockup: a green Confirm carrying a tick, then "Reject
+                  // claim" as a red outline. Close lives in the header × now,
+                  // so a third stacked button is no longer needed.
+                  `<button class="modal-btn-primary modal-btn-confirm" onclick="PowerFund.confirmReview()" ${
                     busy ? "disabled" : ""
                   }>${
                     busy
                       ? "Working…"
-                      : multi
-                      ? `Confirm all ${rc.length} as paid`
-                      : "Confirm as paid"
+                      : `${icon("check", 15)}<span>${
+                          multi ? `Confirm all ${rc.length} as paid` : "Confirm Payment"
+                        }</span>`
                   }</button>
-                   <button class="modal-btn-secondary reject" onclick="PowerFund.rejectReview()">Reject</button>
-                   <button class="modal-btn-secondary" onclick="PowerFund.closeReviewModal()">Cancel</button>`
+                   <button class="modal-btn-secondary reject" onclick="PowerFund.rejectReview()">Reject claim</button>`
             }
           </div>
         </div>
@@ -2568,31 +5515,174 @@
     }
 
     if (pinModalMode) {
+      // A multi-step flow needs per-STEP wording, not one title for the whole
+      // thing — "Change treasurer PIN" over a keypad tells you nothing about
+      // which of the three PINs it currently wants.
+      const settingPin =
+        pinModalMode === "setup" ||
+        pinModalMode === "change" ||
+        pinModalMode === "master";
+      const isMasterFlow = pinModalMode === "master";
+      const stepTitles = {
+        current: "Enter your current PIN",
+        new: isMasterFlow
+          ? hasMasterPin()
+            ? "Choose a new master PIN"
+            : "Choose a master PIN"
+          : "Choose a new PIN",
+        confirm: isMasterFlow ? "Confirm the master PIN" : "Confirm the new PIN",
+        done: isMasterFlow ? "Master PIN saved" : "PIN changed",
+      };
+      const stepSubs = {
+        current: "Confirm it is you before the PIN is replaced.",
+        new: "At least 4 digits. You will type it again to confirm.",
+        confirm: "Type the same digits once more so a typo cannot lock you out.",
+        done: isMasterFlow
+          ? "Keep it somewhere safe and separate from the treasurer PIN."
+          : "Everyone unlocking treasurer mode uses this from now on.",
+      };
       const titles = {
-        setup: "Create a treasurer PIN",
+        setup: settingPin ? stepTitles[pinStep] : "Create a treasurer PIN",
         enter: "Enter treasurer PIN",
-        change: "Change treasurer PIN",
+        change: settingPin ? stepTitles[pinStep] : "Change treasurer PIN",
+        master: settingPin ? stepTitles[pinStep] : "Set a master PIN",
       };
       const subs = {
         setup:
           "This protects treasurer actions. Anyone with the PIN can edit — share it only with whoever holds that role.",
-        enter: "Enter the PIN to unlock treasurer actions.",
-        change: "Set a new PIN. This replaces the current one for everyone.",
+        enter:
+          state.pins && state.pins.hasMaster
+            ? "Enter the PIN to unlock treasurer actions. Forgotten it? The group's master PIN also works, then set a new one from Menu → Change PIN."
+            : "Enter the PIN to unlock treasurer actions. A forgotten PIN can't be recovered — ask whoever else in the group has it.",
+        change: settingPin
+          ? stepSubs[pinStep]
+          : "Set a new PIN. This replaces the current one for everyone.",
+        master: settingPin
+          ? pinStep === "new"
+            ? "The group's way back in if the treasurer PIN is forgotten. It also unlocks treasurer mode, so keep it safe and separate."
+            : stepSubs[pinStep]
+          : "Set a master PIN.",
       };
+      if (settingPin) titles.setup = stepTitles[pinStep];
+      // There is deliberately no PIN recovery: any reset that worked without
+      // the PIN would let whoever is holding the phone take treasurer control.
+      // That is a fine trade only if people are told BEFORE they forget, so
+      // the warning sits on the screens where a PIN is chosen.
+      const hasMaster = hasMasterPin();
+      const noRecovery =
+        pinModalMode === "enter" || isMasterFlow || pinStep !== "new"
+          ? ""
+          : `<p class="pin-warning">${icon("alert", 14)}<span>${
+              hasMaster
+                ? "If this PIN is forgotten, the group's master PIN is the only way back in — keep that one somewhere safe."
+                : "There is no way to recover a forgotten PIN. Write it down somewhere safe, and make sure a second person in the group knows it."
+            }</span></p>`;
+
+      // Dot-and-keypad entry, replacing a text field: it is faster one-handed,
+      // gives no keyboard autofill or autocorrect to fight, and matches how
+      // banking apps ask for a PIN. The hidden live region is what a screen
+      // reader announces, since the dots themselves carry no text.
+      //
+      // There is deliberately NO auto-submit on the 4th digit: PINs here may be
+      // longer than four (setup only enforces a minimum), and submitting early
+      // would make a longer PIN impossible to type — a wrong attempt clears the
+      // field. The confirm button costs one tap and always works.
+      const dots = Array.from(
+        { length: Math.max(4, pinInputValue.length) },
+        (_, i) =>
+          `<span class="pin-dot ${i < pinInputValue.length ? "filled" : ""}"></span>`
+      ).join("");
+      const keypad =
+        `<div class="pin-dots${pinShake ? " shake" : ""}" role="img" aria-label="${pinInputValue.length} digit${
+          pinInputValue.length === 1 ? "" : "s"
+        } entered">${dots}</div>` +
+        `<div class="pin-keypad">` +
+        [1, 2, 3, 4, 5, 6, 7, 8, 9].
+          map(
+            (n) =>
+              `<button type="button" class="pin-key" onclick="PowerFund.pinKey('${n}')">${n}</button>`
+          )
+          .join("") +
+        `<button type="button" class="pin-key pin-key-util" onclick="PowerFund.pinKey('clear')" aria-label="Clear">C</button>` +
+        `<button type="button" class="pin-key" onclick="PowerFund.pinKey('0')">0</button>` +
+        `<button type="button" class="pin-key pin-key-util" onclick="PowerFund.pinKey('back')" aria-label="Delete last digit">⌫</button>` +
+        `</div>`;
+      // Which steps this flow has, so the progress bar counts only real ones:
+      // setting a first PIN has no current-PIN step to prove.
+      const flowSteps =
+        pinModalMode === "change" && hasTreasurerPin()
+          ? ["current", "new", "confirm"]
+          : ["new", "confirm"];
+      const stepIndex = flowSteps.indexOf(pinStep);
+      const progress =
+        settingPin && pinStep !== "done"
+          ? `<div class="pin-steps" role="img" aria-label="Step ${
+              stepIndex + 1
+            } of ${flowSteps.length}">${flowSteps
+              .map(
+                (st, i) =>
+                  `<span class="pin-step ${
+                    i < stepIndex ? "done" : i === stepIndex ? "now" : ""
+                  }"></span>`
+              )
+              .join("")}</div>`
+          : "";
+
+      // A fund that never sets a master PIN has no way back in if the
+      // treasurer PIN is forgotten — the exact lockout the master PIN exists
+      // to close. The only moment we know a treasurer is present, unlocked and
+      // thinking about PINs is right after they set one, so offer it here.
+      // Offered, not forced: it is skippable, and Menu → Security still has it.
+      const offerMaster =
+        pinStep === "done" && pinModalMode === "setup" && !hasMasterPin();
+      const doneCard =
+        pinStep === "done" && settingPin
+          ? `<div class="pin-done">
+               <span class="pin-done-icon">${icon("check", 20)}</span>
+               <p class="pin-done-text">${escapeHtml(stepSubs.done)}</p>
+             </div>${
+               offerMaster
+                 ? `<p class="pin-master-offer">${icon(
+                     "alert",
+                     14
+                   )}<span>No master PIN is set, so a forgotten treasurer PIN would lock the group out. Setting one now is the way back in.</span></p>`
+                 : ""
+             }`
+          : "";
+
       html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closePinModal()">
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
           <h3 id="dlg-title">${titles[pinModalMode]}</h3>
           <p class="modal-sub">${subs[pinModalMode]}</p>
-          <input type="password" inputmode="numeric" autocomplete="off" class="pin-input" placeholder="PIN" value="${escapeHtml(
-            pinInputValue
-          )}"
-                 oninput="PowerFund.setPinInput(this.value)" onkeydown="if(event.key==='Enter') PowerFund.submitPin()">
-          ${pinError ? `<p class="pin-error">${escapeHtml(pinError)}</p>` : ""}
+          ${progress}
+          ${pinStep === "done" && settingPin ? doneCard : keypad}
+          ${pinError ? `<p class="pin-error" role="alert">${escapeHtml(pinError)}</p>` : ""}
+          ${noRecovery}
           <div class="modal-actions">
-            <button class="modal-btn-primary" onclick="PowerFund.submitPin()">${
-              pinModalMode === "enter" ? "Unlock" : "Save PIN"
-            }</button>
-            <button class="modal-btn-secondary" onclick="PowerFund.closePinModal()">Cancel</button>
+            ${
+              offerMaster
+                ? `<button class="modal-btn-primary" onclick="PowerFund.openMasterPin()">Set a master PIN</button>
+                   <button class="modal-btn-secondary" onclick="PowerFund.closePinModal()">Not now</button>`
+                : ""
+            }
+            ${offerMaster ? "" : `<button class="modal-btn-primary" onclick="PowerFund.submitPin()">${
+              pinModalMode === "enter"
+                ? "Unlock"
+                : pinStep === "current"
+                ? "Continue"
+                : pinStep === "new"
+                ? "Next"
+                : pinStep === "confirm"
+                ? isMasterFlow
+                  ? "Save master PIN"
+                  : "Save PIN"
+                : "Done"
+            }</button>`}
+            ${
+              pinStep === "done" && settingPin
+                ? ""
+                : `<button class="modal-btn-secondary" onclick="PowerFund.closePinModal()">Cancel</button>`
+            }
           </div>
         </div>
       </div>`;
@@ -2600,46 +5690,187 @@
 
     if (payoutModalRound) {
       const recipient = members.find((m) => m.member_order === payoutModalRound);
-      html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closePayoutModal()">
-        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
-          <h3 id="dlg-title">Mark payout released</h3>
-          <p class="modal-sub">Round ${payoutModalRound} — ${
-        recipient ? escapeHtml(recipient.name) : "—"
-      } · recorded now so it stays correct if the order changes later</p>
+      // What the button will actually record: the typed amount when it parses,
+      // the round goal otherwise — the same fallback markPayoutReleased() uses.
+      const releaseAmount = C.GOAL_PER_ROUND;
+      html += `<div class="modal-overlay sheet" onclick="if(event.target===this) PowerFund.closePayoutModal()">
+        <div class="modal sheet-pay" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <div class="sheet-head">
+            <div class="sheet-head-titles">
+              <h3 id="dlg-title">Release Payout</h3>
+              <p class="modal-sub">Round ${payoutModalRound}</p>
+            </div>
+            <button type="button" class="sheet-x" onclick="PowerFund.closePayoutModal()" aria-label="Close">${icon(
+              "close",
+              14
+            )}</button>
+          </div>
 
-          <label class="payout-field-label" for="payout-amount">Amount paid out</label>
-          <input id="payout-amount" class="pin-input payout-amount-input" type="text"
-                 inputmode="decimal" value="${escapeHtml(payoutAmountValue)}"
-                 oninput="PowerFund.setPayoutAmount(this.value)"
-                 placeholder="${C.GOAL_PER_ROUND}">
-          <p class="payout-field-hint">Defaults to ${C.peso(
+          <!-- Why this is releasable, stated before anything is asked for. -->
+          <div class="ready-banner">
+            <span class="ready-banner-icon">${icon("check", 14)}</span>
+            <span>Round ${payoutModalRound} reached its ${C.peso(
+        C.GOAL_PER_ROUND
+      )} goal — ready to release</span>
+          </div>
+
+          ${
+            recipient
+              ? `<p class="sheet-section-label">Recipient</p>
+                 <div class="recipient-card">
+                   ${memberAvatar(recipient.name, "paid-out", 40, recipient.avatar_url)}
+                   <span class="recipient-body">
+                     <span class="recipient-name">${escapeHtml(recipient.name)}</span>
+                     <span class="recipient-meta">Payout order #${
+                       recipient.member_order
+                     } · recorded now, so it stays correct if the order changes later</span>
+                   </span>
+                 </div>`
+              : ""
+          }
+
+          ${
+            recipient
+              ? (function () {
+                  const hasAny =
+                    recipient.payout_qr_url ||
+                    recipient.payout_bank ||
+                    recipient.payout_account_name ||
+                    recipient.payout_account_number;
+                  // The point of showing this here is verification: check the
+                  // account name against the person before sending, since a QR
+                  // image on its own is opaque.
+                  if (!hasAny) {
+                    return `<div class="payout-dest-warn">${icon(
+                      "alert",
+                      15
+                    )}<span>No payout details on file for ${escapeHtml(
+                      recipient.name
+                    )}. Releasing still works — arrange payment another way, or ask them for a QR.</span>
+                    <button type="button" class="copy-reminder-btn" onclick="PowerFund.copyPayoutReminder(${payoutModalRound})">${icon(
+                      "sheet",
+                      13
+                    )}<span>${
+                      copyFeedback ? escapeHtml(copyFeedback) : "Copy reminder message"
+                    }</span></button></div>`;
+                  }
+                  // The mockup's "Send payment to" card: the QR matted on
+                  // white beside the account it belongs to, so the treasurer
+                  // can check the name against the person before sending —
+                  // a QR image on its own is opaque.
+                  const acct = [
+                    recipient.payout_bank,
+                    recipient.payout_account_number,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ");
+                  return `<p class="sheet-section-label">Send payment to</p>
+                  <div class="send-to-card">
+                    ${
+                      recipient.payout_qr_url
+                        ? `<button type="button" class="send-to-qr" onclick="PowerFund.openLightbox('${inlineArg(
+                            recipient.payout_qr_url
+                          )}')" aria-label="Payout QR for ${escapeHtml(
+                            recipient.name
+                          )} — activate to enlarge"><img src="${escapeHtml(
+                            recipient.payout_qr_url
+                          )}" alt=""></button>`
+                        : ""
+                    }
+                    <div class="send-to-lines">
+                      <div class="send-to-title">${escapeHtml(
+                        recipient.name
+                      )}'s payout QR</div>
+                      ${
+                        acct
+                          ? `<div class="send-to-acct">${escapeHtml(acct)}</div>`
+                          : ""
+                      }
+                      ${
+                        recipient.payout_account_name
+                          ? `<div class="send-to-acct">${escapeHtml(
+                              recipient.payout_account_name
+                            )}</div>`
+                          : ""
+                      }
+                      ${
+                        recipient.payout_qr_url
+                          ? `<div class="send-to-zoom">Tap to enlarge</div>`
+                          : ""
+                      }
+                    </div>
+                  </div>
+                  <p class="sheet-note">Scan this to send ${escapeHtml(
+                    recipient.name
+                  )}'s payout, then attach a receipt below as proof it was sent.</p>`;
+                })()
+              : ""
+          }
+
+          <p class="sheet-section-label">Amount</p>
+          <div class="payout-amount-fixed">
+            <span class="payout-amount-value">${C.peso(C.GOAL_PER_ROUND)}</span>
+            <span class="payout-amount-tag">${icon("lock", 12)}<span>Fixed</span></span>
+          </div>
+          <p class="payout-field-hint">Every round pays out exactly ${C.peso(
             C.GOAL_PER_ROUND
-          )} (the round target). This is a record only — it never changes funding.</p>
+          )} — ${C.CYCLES_PER_ROUND} cycles × ${
+        members.length
+      } members × ${C.peso(C.CONTRIBUTION_AMOUNT)} — so this is not editable.</p>
 
-          <label class="payout-field-label" for="payout-note">Note (optional)</label>
+          <label class="sheet-section-label" for="payout-note">Note (optional)</label>
           <textarea id="payout-note" class="payout-note-input" placeholder="What did they buy? (e.g. BLUETTI AC70P, ₱32,000)"
                     oninput="PowerFund.setPayoutNote(this.value)">${escapeHtml(
                       payoutNoteValue
                     )}</textarea>
 
-          <label class="proof-upload">
+          <label class="sheet-section-label">Receipt photo <span class="field-required">required</span></label>
+          <label class="proof-upload ${payoutReceiptPreview ? "" : "needed"}">
             ${
               payoutReceiptPreview
                 ? `<img src="${payoutReceiptPreview}" class="proof-preview" alt="Receipt preview">`
-                : `<span class="proof-upload-label">🧾 Attach a receipt (optional)</span>`
+                : `<span class="proof-upload-label">${icon(
+                    "sheet",
+                    14
+                  )}<span>Attach a receipt photo</span></span>`
             }
             <input type="file" accept="image/*" onchange="PowerFund.onPayoutReceiptSelected(this)" hidden>
           </label>
+          <label class="proof-upload proof-upload-camera">
+            <span class="proof-upload-label">${icon(
+              "qr",
+              14
+            )}<span>Take a photo of the receipt</span></span>
+            <input type="file" accept="image/*" capture="environment" onchange="PowerFund.onPayoutReceiptSelected(this)" hidden>
+          </label>
+          <p class="payout-field-hint">${
+            payoutReceiptPreview
+              ? "Kept on this round's record as proof the payout was sent."
+              : "A screenshot of the transfer. This is the only evidence the payout was actually sent, so it is required before releasing."
+          }</p>
           ${
             payoutReceiptPreview
               ? `<button type="button" class="zoom-link" onclick="PowerFund.removePayoutReceipt()">Remove receipt</button>`
               : ""
           }
 
+          ${submitStateHtml()}
+          ${
+            // Only after an upload has actually failed. Never a first-choice
+            // path — the receipt requirement stands until storage refuses.
+            receiptUploadFailed
+              ? `<div class="release-noreceipt">
+                   <p class="release-noreceipt-text">If the money really was sent and the photo still won't upload, you can record the payout without it. The round's record will say the receipt is missing, and so will the activity log.</p>
+                   <button type="button" class="modal-btn-secondary reject" onclick="PowerFund.releaseWithoutReceipt()" ${
+                     busy ? "disabled" : ""
+                   }>Record ${C.peso(releaseAmount)} without the receipt</button>
+                 </div>`
+              : ""
+          }
           <div class="modal-actions">
             <button class="modal-btn-primary" onclick="PowerFund.markPayoutReleased()" ${
-              busy ? "disabled" : ""
-            }>${busy ? "Working…" : "Confirm released"}</button>
+              busy || !payoutReceiptFile ? "disabled" : ""
+            }>${busy ? "Working…" : "Release " + C.peso(releaseAmount)}</button>
             <button class="modal-btn-secondary" onclick="PowerFund.closePayoutModal()">Cancel</button>
           </div>
         </div>
@@ -2663,6 +5894,217 @@
       </div>`;
     }
 
+    if (restoreState) {
+      // One shell for all three states, as the design asks — the treasurer
+      // stays in the same place from picking a file to knowing it worked.
+      const body =
+        restoreState.phase === "working"
+          ? `<div class="submit-state working" role="status" aria-live="polite">
+               <span class="submit-spinner" aria-hidden="true"></span>
+               <span>Restoring your data…</span>
+             </div>
+             <p class="modal-sub">Replacing contributions and payout status. This only takes a moment.</p>`
+          : restoreState.phase === "done"
+          ? `<div class="restore-done">${icon("check", 18)}<span>Restore complete</span></div>
+             <p class="modal-sub">Your data now matches the backup${
+               restoreState.exportedAt
+                 ? ` exported ${escapeHtml(formatDateTime(restoreState.exportedAt))}`
+                 : ""
+             }.</p>
+             <ul class="restore-summary">
+               <li><b>${restoreState.n}</b> contribution${
+              restoreState.n === 1 ? "" : "s"
+            } restored</li>
+               <li><b>${restoreState.released}</b> released payout${
+              restoreState.released === 1 ? "" : "s"
+            }</li>
+             </ul>`
+          : `<div class="restore-invalid">${icon("alert", 18)}<span>This isn't a Power Fund backup</span></div>
+             <p class="modal-sub"><b>${escapeHtml(
+               restoreState.fileName
+             )}</b> couldn't be used. ${escapeHtml(restoreState.reason)}</p>
+             <p class="restore-hint">${icon(
+               "download",
+               13
+             )}<span>Look for a file named like <code>power-fund-backup-YYYY-MM-DD.json</code>, exported from Menu → Backup data.</span></p>
+             <p class="restore-untouched">Nothing was changed — your current data is untouched.</p>`;
+
+      const actions =
+        restoreState.phase === "working"
+          ? ""
+          : restoreState.phase === "done"
+          ? `<button class="modal-btn-primary" onclick="PowerFund.closeRestoreState()">Done</button>`
+          : `<button class="modal-btn-primary" onclick="PowerFund.chooseAnotherBackup()">Choose another file</button>
+             <button class="modal-btn-secondary" onclick="PowerFund.closeRestoreState()">Cancel</button>`;
+
+      html += `<div class="modal-overlay" onclick="${
+        restoreState.phase === "working"
+          ? ""
+          : "if(event.target===this) PowerFund.closeRestoreState()"
+      }">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <h3 id="dlg-title">Restore from backup</h3>
+          ${body}
+          ${actions ? `<div class="modal-actions">${actions}</div>` : ""}
+        </div>
+      </div>`;
+    }
+
+    if (reorderModalOpen) {
+      // Up/down arrows rather than drag: the design keeps the app's existing
+      // interaction because drag "is easy to fumble one-handed". There is no
+      // save step — each tap swaps a pair and writes immediately, which is what
+      // moveMember() already did from the roster.
+      html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeReorderModal()">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <h3 id="dlg-title">Reorder payout order</h3>
+          <p class="modal-sub">Round N always pays whoever is in position N. Changes apply immediately — there is no separate save.</p>
+          <div class="reorder-list">
+            ${members
+              .map(
+                (m) => `<div class="reorder-row">
+                  <span class="reorder-pos">${m.member_order}</span>
+                  <span class="reorder-name">${escapeHtml(m.name)}</span>
+                  <span class="reorder-btns">
+                    <button type="button" onclick="PowerFund.moveMember('${inlineArg(
+                      m.id
+                    )}', -1)" ${
+                  m.member_order === 1 || busy ? "disabled" : ""
+                } aria-label="Move ${escapeHtml(m.name)} up">↑</button>
+                    <button type="button" onclick="PowerFund.moveMember('${inlineArg(
+                      m.id
+                    )}', 1)" ${
+                  m.member_order === members.length || busy ? "disabled" : ""
+                } aria-label="Move ${escapeHtml(m.name)} down">↓</button>
+                  </span>
+                </div>`
+              )
+              .join("")}
+          </div>
+          <p class="reorder-note">${icon(
+            "alert",
+            13
+          )}<span>Rounds already paid out keep their recipient — reordering only affects rounds that haven't started.</span></p>
+          <div class="modal-actions">
+            <button class="modal-btn-secondary" onclick="PowerFund.closeReorderModal()">Done</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
+    // ---- Edit Profile (EditProfile.dc.html) -----------------------------
+    // A bottom sheet: grabber, title with a round close chip, the avatar with
+    // a camera badge, then Display name over its hint, Save, Cancel.
+    if (profileModalOpen) {
+      const me = editableMember();
+      if (me) {
+        const shown = photoPreview || me.avatar_url || null;
+        const standing = memberStanding(
+          me.id,
+          C.completedCyclesCount(state.cycles),
+          getPayout(me.member_order).released
+        );
+        const problem = profileNameProblem();
+        html += `<div class="modal-overlay sheet" onclick="if(event.target===this) PowerFund.closeProfileModal()">
+          <div class="modal sheet-pay sheet-profile" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+            <div class="sheet-head">
+              <h3 id="dlg-title">Edit Profile</h3>
+              <button type="button" class="sheet-x" onclick="PowerFund.closeProfileModal()" aria-label="Close">${icon(
+                "close",
+                13
+              )}</button>
+            </div>
+            <div class="profile-avatar-wrap">
+              <button type="button" class="profile-avatar-btn" onclick="PowerFund.openPhotoSheet()" aria-label="Change photo">
+                ${memberAvatar(me.name, standing, 76, shown)}
+                <span class="profile-avatar-badge" aria-hidden="true">${icon("camera", 13)}</span>
+              </button>
+            </div>
+            ${
+              photoBlob
+                ? `<p class="profile-photo-pending">${icon(
+                    "check",
+                    13
+                  )}<span>New photo ready — it saves with your changes.</span></p>`
+                : ""
+            }
+            <label class="field-label" for="profile-name">Display name</label>
+            <input id="profile-name" class="text-input profile-name-input" type="text"
+                   value="${escapeHtml(profileNameValue)}" placeholder="Your name"
+                   oninput="PowerFund.setProfileName(this.value)">
+            <p class="profile-name-hint${problem ? " is-error" : ""}" id="profileNameHint">${escapeHtml(
+          problem || "Visible to the rest of the group. Must be unique."
+        )}</p>
+            ${
+              profileError
+                ? `<p class="pin-error" role="alert">${escapeHtml(profileError)}</p>`
+                : ""
+            }
+            <div class="modal-actions">
+              <button class="modal-btn-primary" id="profileSave" onclick="PowerFund.saveProfile()" ${
+                busy || problem ? "disabled" : ""
+              }>${busy ? "Saving…" : "Save Changes"}</button>
+              <button class="modal-btn-secondary" onclick="PowerFund.closeProfileModal()">Cancel</button>
+            </div>
+          </div>
+        </div>`;
+      }
+    }
+
+    // ---- Change Photo (ProfilePhotoSheet.dc.html) -----------------------
+    // Take Photo / Choose from Library as one grouped card, then a separately
+    // styled red Remove Photo so it is never mistaken for an upload option.
+    if (photoSheetOpen) {
+      const me = editableMember();
+      if (me) {
+        const shown = photoPreview || me.avatar_url || null;
+        const standing = memberStanding(
+          me.id,
+          C.completedCyclesCount(state.cycles),
+          getPayout(me.member_order).released
+        );
+        html += `<div class="modal-overlay sheet" onclick="if(event.target===this) PowerFund.closePhotoSheet()">
+          <div class="modal sheet-pay sheet-photo" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+            <div class="photo-head">
+              <span class="profile-avatar-static">
+                ${memberAvatar(me.name, standing, 72, shown)}
+                <span class="profile-avatar-badge" aria-hidden="true">${icon("camera", 12)}</span>
+              </span>
+              <h3 id="dlg-title">Change Photo</h3>
+              <p class="photo-sub">Visible to the rest of the group</p>
+            </div>
+            <div class="photo-options">
+              <label class="photo-row">
+                <span class="photo-row-icon accent">${icon("camera", 17)}</span>
+                <span class="photo-row-label">Take Photo</span>
+                <input type="file" accept="image/*" capture="user" onchange="PowerFund.onAvatarSelected(this)" hidden>
+              </label>
+              <label class="photo-row">
+                <span class="photo-row-icon teal">${icon("photos", 17)}</span>
+                <span class="photo-row-label">Choose from Library</span>
+                <input type="file" accept="image/*" onchange="PowerFund.onAvatarSelected(this)" hidden>
+              </label>
+            </div>
+            ${
+              // Offered only when there is something to remove — a stored photo
+              // or an unsaved crop. Otherwise it is a button that does nothing.
+              me.avatar_url || photoBlob
+                ? `<button type="button" class="photo-row photo-row-danger" onclick="PowerFund.removeAvatar()" ${
+                    busy ? "disabled" : ""
+                  }>
+                     <span class="photo-row-icon danger">${icon("trash", 17)}</span>
+                     <span class="photo-row-label">${
+                       me.avatar_url ? "Remove Photo" : "Discard this photo"
+                     }</span>
+                   </button>`
+                : ""
+            }
+            <button type="button" class="photo-cancel" onclick="PowerFund.closePhotoSheet()">Cancel</button>
+          </div>
+        </div>`;
+      }
+    }
+
     if (editNamesModalOpen) {
       const ordered = sortedMembers();
       html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeEditNamesModal()">
@@ -2672,19 +6114,171 @@
           ${ordered
             .map(
               (m) => `
-            <input type="text" class="pin-input name-input" value="${escapeHtml(
-              editNamesValues[m.id] || ""
-            )}"
+            <input type="text" class="pin-input name-input" data-member="${escapeHtml(
+              m.id
+            )}" value="${escapeHtml(editNamesValues[m.id] || "")}"
                    oninput="PowerFund.setEditName('${m.id}', this.value)" placeholder="Name">
           `
             )
             .join("")}
-          ${editNamesError ? `<p class="pin-error">${escapeHtml(editNamesError)}</p>` : ""}
+          <p class="pin-error" id="editNamesError" role="alert"${
+            editNamesError ? "" : " hidden"
+          }>${escapeHtml(editNamesError || "")}</p>
           <div class="modal-actions">
-            <button class="modal-btn-primary" onclick="PowerFund.saveEditNames()" ${
-              busy ? "disabled" : ""
+            <button class="modal-btn-primary" id="editNamesSave" onclick="PowerFund.saveEditNames()" ${
+              busy || editNamesProblem() ? "disabled" : ""
             }>Save names</button>
             <button class="modal-btn-secondary" onclick="PowerFund.closeEditNamesModal()">Cancel</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
+    // ADMIN: the addresses a Google login is matched against, and who has
+    // actually signed in. Gated on isTreasurerAccount(), NOT on `unlocked` —
+    // the treasurer PIN is shared with all five members, so gating this on the
+    // PIN would let any of them put their own address on somebody else's row.
+    // Checked here as well as in the menu row: the open* handlers are exported
+    // on PowerFund, so anyone can reach them from a console and the render
+    // must never take the caller's word for it.
+    if (memberAccountsModalOpen && isTreasurerAccount()) {
+      const ordered = sortedMembers();
+      const r = signInReadiness();
+      const rows = ordered
+        .map((m) => {
+          const linked = !!m.auth_user_id;
+          const hasEmail = !!String(m.email || "").trim();
+          const pill = linked
+            ? `<span class="acct-pill ok">${icon("check", 12)} Signed in</span>`
+            : hasEmail
+            ? `<span class="acct-pill wait">Hasn't signed in yet</span>`
+            : `<span class="acct-pill none">No address yet</span>`;
+          return `<div class="acct-row">
+            <div class="acct-row-head">
+              ${memberAvatar(m.name, "idle", 30, m.avatar_url)}
+              <div class="acct-row-who">
+                <span class="acct-row-name">${escapeHtml(m.name)}${
+            m.is_treasurer ? ` <span class="acct-tag">Treasurer</span>` : ""
+          }</span>
+                ${pill}
+              </div>
+              ${
+                linked
+                  ? `<button type="button" class="acct-unlink" onclick="PowerFund.unlinkMember('${String(
+                      m.id
+                    ).replace(/'/g, "\\'")}')" ${busy ? "disabled" : ""}>Unlink</button>`
+                  : ""
+              }
+            </div>
+            <input type="email" class="pin-input email-input" inputmode="email"
+                   autocomplete="off" autocapitalize="none" spellcheck="false"
+                   data-member="${escapeHtml(m.id)}"
+                   value="${escapeHtml(memberEmailValues[m.id] || "")}"
+                   oninput="PowerFund.setMemberEmail('${String(m.id).replace(
+                     /'/g,
+                     "\\'"
+                   )}', this.value)"
+                   placeholder="name@gmail.com">
+          </div>`;
+        })
+        .join("");
+
+      // Says plainly where the group is, because the alternative is running
+      // 011_preflight.sql to find out. Deliberately not a promise that the
+      // lockdown will succeed — it names the same three conditions the
+      // migration checks, and the migration remains the authority.
+      const readyNote = r.ready
+        ? `<p class="acct-ready ok">${icon(
+            "check",
+            13
+          )} All ${r.total} members have an address and have signed in once, and a treasurer is flagged.</p>`
+        : `<p class="acct-ready">Addresses on file: <b>${r.withEmail}/${
+            r.total
+          }</b> · signed in at least once: <b>${r.linked}/${r.total}</b>${
+            r.treasurerFlagged ? "" : " · <b>no treasurer is flagged yet</b>"
+          }</p>`;
+
+      html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeMemberAccountsModal()">
+        <div class="modal member-accounts-modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <h3 id="dlg-title">Member sign-in</h3>
+          <p class="modal-sub">A member signs in with Google, and the address you
+            record here is what links their login to their row. Leave one blank
+            until you have it — that member simply can't sign in yet.</p>
+          ${rows}
+          ${readyNote}
+          <p class="pin-error" id="memberEmailsError" role="alert"${
+            memberAccountsError ? "" : " hidden"
+          }>${escapeHtml(memberAccountsError || "")}</p>
+          <div class="modal-actions">
+            <button class="modal-btn-primary" id="memberEmailsSave" onclick="PowerFund.saveMemberEmails()" ${
+              busy || memberEmailsProblem() ? "disabled" : ""
+            }>Save addresses</button>
+            <button class="modal-btn-secondary" onclick="PowerFund.closeMemberAccountsModal()">Cancel</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
+    // ADMIN: move `members.is_treasurer` — the flag Postgres actually checks.
+    if (transferRoleModalOpen && isTreasurerAccount()) {
+      const me = editableMember();
+      const cands = transferCandidates();
+      // A member who has never signed in cannot hold the role: pf_is_treasurer()
+      // matches on auth_user_id, so the flag on an unlinked row would produce a
+      // fund whose treasurer nobody can actually be. Say so rather than listing
+      // them and failing later.
+      const unlinked = sortedMembers().filter((m) => !m.auth_user_id && !m.is_treasurer);
+
+      html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeTransferRole()">
+        <div class="modal transfer-role-modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <h3 id="dlg-title">Transfer treasurer role</h3>
+          <p class="modal-sub">The treasurer is a permission in the database, not
+            the PIN. Move it here and the new treasurer can really confirm
+            payments and release payouts — telling someone the PIN does not do
+            that.</p>
+          ${
+            me
+              ? `<p class="transfer-current">${icon("unlocked", 13)} Currently
+                   <b>${escapeHtml(me.name)}</b> — you</p>`
+              : ""
+          }
+          ${
+            cands.length
+              ? cands
+                  .map(
+                    (m) => `<button type="button" class="transfer-row${
+                      String(transferRolePick) === String(m.id) ? " picked" : ""
+                    }" onclick="PowerFund.pickTransferRole('${String(m.id).replace(
+                      /'/g,
+                      "\\'"
+                    )}')">
+                      ${memberAvatar(m.name, "idle", 30, m.avatar_url)}
+                      <span class="transfer-row-name">${escapeHtml(m.name)}</span>
+                      <span class="transfer-row-mark">${
+                        String(transferRolePick) === String(m.id) ? icon("check", 14) : ""
+                      }</span>
+                    </button>`
+                  )
+                  .join("")
+              : `<p class="transfer-empty">Nobody else has signed in yet, so there
+                   is nobody who can take the role. The treasurer has to be a
+                   member with an account — the database matches the role to a
+                   login, not to a name.</p>`
+          }
+          ${
+            unlinked.length
+              ? `<p class="transfer-note">Not listed: ${escapeHtml(
+                  unlinked.map((m) => m.name).join(", ")
+                )} — ${
+                  unlinked.length === 1 ? "hasn't" : "haven't"
+                } signed in yet.</p>`
+              : ""
+          }
+          <div class="modal-actions">
+            <button class="modal-btn-primary" onclick="PowerFund.confirmTransferRole()" ${
+              busy || !transferRolePick ? "disabled" : ""
+            }>Continue</button>
+            <button class="modal-btn-secondary" onclick="PowerFund.closeTransferRole()">Cancel</button>
           </div>
         </div>
       </div>`;
@@ -2701,7 +6295,7 @@
           <p class="modal-sub">Members scan this to pay the treasurer. Replacing it updates every member's app.</p>
           ${
             qrUploadMsg
-              ? `<p class="copy-feedback">✅ ${escapeHtml(qrUploadMsg)}</p>`
+              ? `<p class="copy-feedback">${icon("check", 14)} ${escapeHtml(qrUploadMsg)}</p>`
               : ""
           }
           ${
@@ -2713,6 +6307,7 @@
                  <div class="modal-meta">${escapeHtml(
                    qrNewFile ? qrNewFile.name : ""
                  )}</div>
+                 ${submitStateHtml()}
                  <div class="modal-actions">
                    <button class="modal-btn-primary" onclick="PowerFund.confirmQrUpload()" ${
                      busy ? "disabled" : ""
@@ -2735,10 +6330,42 @@
                      : "Using the QR bundled with the app."
                  }</div>
                  <label class="proof-upload">
-                   <span class="proof-upload-label">📷 Choose new QR code (JPG, PNG or WEBP · max 5 MB)</span>
+                   <span class="proof-upload-label">${icon(
+                     "upload",
+                     14
+                   )}<span>Choose new QR code (JPG, PNG or WEBP · max 5 MB)</span></span>
                    <input type="file" accept="image/jpeg,image/png,image/webp" onchange="PowerFund.onQrFileSelected(this)" hidden>
                  </label>
+                 <label class="proof-upload">
+                   <span class="proof-upload-label">${icon(
+                     "qr",
+                     14
+                   )}<span>Take a photo of the QR</span></span>
+                   <input type="file" accept="image/*" capture="environment" onchange="PowerFund.onQrFileSelected(this)" hidden>
+                 </label>
+
+                 <p class="sheet-section-label">Account details</p>
+                 <p class="qr-account-note">Shown to members beside the QR, so they can check they are paying the right account before sending.</p>
+
+                 <label class="field-label" for="qr-bank">Bank or e-wallet</label>
+                 <input id="qr-bank" class="text-input" type="text" placeholder="GCash, Maya, BPI…" value="${escapeHtml(
+                   (qrAccountFields && qrAccountFields.qr_bank) || ""
+                 )}" oninput="PowerFund.setQrAccountField('qr_bank', this.value)">
+
+                 <label class="field-label" for="qr-acct-name">Account name</label>
+                 <input id="qr-acct-name" class="text-input" type="text" placeholder="Name on the account" value="${escapeHtml(
+                   (qrAccountFields && qrAccountFields.qr_account_name) || ""
+                 )}" oninput="PowerFund.setQrAccountField('qr_account_name', this.value)">
+
+                 <label class="field-label" for="qr-acct-num">Account or mobile number</label>
+                 <input id="qr-acct-num" class="text-input" type="text" inputmode="numeric" placeholder="09XX XXX XXXX" value="${escapeHtml(
+                   (qrAccountFields && qrAccountFields.qr_account_number) || ""
+                 )}" oninput="PowerFund.setQrAccountField('qr_account_number', this.value)">
+
                  <div class="modal-actions">
+                   <button class="modal-btn-primary" onclick="PowerFund.saveQrAccount()" ${
+                     busy ? "disabled" : ""
+                   }>${busy ? "Saving…" : "Save account details"}</button>
                    <button class="modal-btn-secondary" onclick="PowerFund.closeQrModal()">Close</button>
                  </div>`
           }
@@ -2747,6 +6374,61 @@
     }
 
     // "Record a contribution" — pick which member you are
+    if (payoutQrMemberId) {
+      const pm = state.members.find((x) => x.id === payoutQrMemberId);
+      const f = payoutQrFields || { bank: "", accountName: "", accountNumber: "" };
+      const currentQr = pm && pm.payout_qr_url;
+      html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closePayoutQrModal()">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pq-title" tabindex="-1">
+          <h3 id="pq-title">Payout details${pm ? " — " + escapeHtml(pm.name) : ""}</h3>
+          <p class="modal-sub">Where this member's ₱${C.GOAL_PER_ROUND.toLocaleString(
+            "en-PH"
+          )} payout gets sent. The account name is what lets you check you're paying the right person.</p>
+
+          <label class="field-label" for="pq-bank">Bank or e-wallet</label>
+          <input id="pq-bank" class="text-input" type="text" placeholder="GCash, Maya, BPI…" value="${escapeHtml(
+            f.bank
+          )}" oninput="PowerFund.setPayoutQrField('bank', this.value)">
+
+          <label class="field-label" for="pq-name">Account name</label>
+          <input id="pq-name" class="text-input" type="text" placeholder="Name on the account" value="${escapeHtml(
+            f.accountName
+          )}" oninput="PowerFund.setPayoutQrField('accountName', this.value)">
+
+          <label class="field-label" for="pq-num">Account or mobile number</label>
+          <input id="pq-num" class="text-input" type="text" inputmode="numeric" placeholder="09XX XXX XXXX" value="${escapeHtml(
+            f.accountNumber
+          )}" oninput="PowerFund.setPayoutQrField('accountNumber', this.value)">
+
+          <label class="field-label">Receiving QR code</label>
+          ${
+            payoutQrPreview
+              ? `<img class="qr-preview" src="${payoutQrPreview}" alt="New payout QR preview">`
+              : currentQr
+              ? `<img class="qr-preview" src="${escapeHtml(
+                  currentQr
+                )}" alt="Current payout QR">`
+              : `<p class="qr-empty">No QR on file yet.</p>`
+          }
+          <input type="file" accept="image/*" class="file-input" onchange="PowerFund.onPayoutQrFileSelected(this)">
+          <label class="proof-upload proof-upload-camera">
+            <span class="proof-upload-label">${icon(
+              "qr",
+              14
+            )}<span>Take a photo of the QR</span></span>
+            <input type="file" accept="image/*" capture="environment" onchange="PowerFund.onPayoutQrFileSelected(this)" hidden>
+          </label>
+
+          <div class="modal-actions">
+            <button class="modal-btn-primary" onclick="PowerFund.savePayoutDetails()" ${
+              busy ? "disabled" : ""
+            }>${busy ? "Saving…" : "Save"}</button>
+            <button class="modal-btn-secondary" onclick="PowerFund.closePayoutQrModal()">Cancel</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
     if (contributePicker != null) {
       const cyc = contributePicker;
       const due = C.dueDateOf(state.cycles, cyc);
@@ -2762,16 +6444,29 @@
             ${members
               .map((m) => {
                 const s = C.statusOf(state.contributions, m.id, cyc);
-                const cls = s === 2 ? "paid" : s === 1 ? "pending" : "unpaid";
+                const cls =
+                  s === 2 ? "paid" : s === 1 ? "pending" : s === 3 ? "rejected" : "unpaid";
                 let status =
                   s === 2
                     ? "✓ Paid"
                     : s === 1
                     ? "… Sent — awaiting review"
+                    : s === 3
+                    ? "✕ Rejected — send it again"
                     : "Not paid yet";
-                const clickable = unlocked || s === 0;
+                // A rejected cycle is still owed, so a member has to be able to
+                // pick it and resubmit — isOwed() keeps that in step with the
+                // cycle grid, which routes both states to the same handler.
+                const clickable = unlocked || C.isOwed(s);
+                // Say where each tap goes. The unpaid and rejected rows lead
+                // to the cash record, whose confirmation is an inline panel in
+                // the Rounds grid — so this row is also a jump to that screen,
+                // and saying "record as paid" makes that predictable rather
+                // than a surprise change of view.
                 if (unlocked && s === 1) status += " · tap to review";
                 else if (unlocked && s === 2) status += " · tap to undo";
+                else if (unlocked && s === 3) status = "✕ Rejected · tap to record as paid";
+                else if (unlocked) status += " · tap to record as paid";
                 return `<button type="button" class="picker-row ${cls}" ${
                   clickable ? "" : "disabled"
                 } onclick="PowerFund.pickContributor('${m.id}')">
@@ -2853,18 +6548,55 @@
 
     // Zoom lightbox — sits above every modal
     if (lightboxSrc) {
+      // The mockup: the image sits in a white rounded card, centred, with a
+      // pill-shaped "✕ Close" BELOW it. The button used to sit above, which
+      // put the control between the header and the thing you opened to look
+      // at.
       html += `<div class="lightbox-overlay" role="dialog" aria-modal="true" aria-label="Enlarged image" tabindex="-1" onclick="PowerFund.closeLightbox()">
-        <button class="lightbox-close" onclick="PowerFund.closeLightbox()">✕ Close</button>
-        <img src="${escapeHtml(
-          lightboxSrc
-        )}" alt="Enlarged image" class="lightbox-img" onclick="event.stopPropagation()">
+        <div class="lightbox-frame" onclick="event.stopPropagation()">
+          <img src="${escapeHtml(
+            lightboxSrc
+          )}" alt="Enlarged image" class="lightbox-img">
+        </div>
+        <button class="lightbox-close" onclick="PowerFund.closeLightbox()">${icon(
+          "close",
+          13
+        )}<span>Close</span></button>
       </div>`;
     }
 
     app.innerHTML = html;
+    runCountUps();
+
+    // A confirmation the viewer was sent to but cannot see is the same as no
+    // confirmation at all. render() assigns innerHTML on the line above, so
+    // the panel exists only from here on.
+    if (scrollPanelIntoView) {
+      scrollPanelIntoView = false;
+      requestAnimationFrame(() => {
+        const panel = document.querySelector(".undo-paid-panel");
+        if (!panel) return;
+        const reduce =
+          window.matchMedia &&
+          window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        try {
+          panel.scrollIntoView({
+            behavior: reduce ? "auto" : "smooth",
+            block: "center",
+          });
+        } catch (e) {
+          panel.scrollIntoView();
+        }
+      });
+    }
 
     // Move focus into a dialog the first render it appears (a11y).
     const modalNow = isAnyModalOpen();
+    // Lock the page behind an open sheet/dialog. overscroll-behavior stops
+    // scroll CHAINING, but a touch that begins on the overlay itself still
+    // scrolled the app underneath — the sheet appeared to stick while the
+    // page moved. Class-based so the CSS keeps the rule.
+    document.body.classList.toggle("modal-open", modalNow);
     if (modalNow && !modalWasOpen) {
       requestAnimationFrame(() => {
         const root =
@@ -2891,12 +6623,74 @@
   // Init + keeping devices in sync
   // ===================================================================
   async function init() {
-    try {
-      await loadAll();
-      render();
-    } catch (e) {
-      showError(e.message);
-      return;
+    // Re-render when the layout breakpoint flips, so a view that renders
+    // differently wide (rounds) switches shape on resize or rotation.
+    const onWideChange = (e) => {
+      if (e.matches === isWide) return;
+      isWide = e.matches;
+      if (state) render();
+    };
+    if (wideQuery.addEventListener) wideQuery.addEventListener("change", onWideChange);
+    else if (wideQuery.addListener) wideQuery.addListener(onWideChange); // older Safari
+
+    // ---- Auth first (migration 008) ------------------------------------
+    // The session has to settle before the first load, or a required-auth
+    // boot fires a data request it has no business making and flashes the
+    // sign-in screen at someone who is already signed in.
+    if (authEnabled()) {
+      session = await window.DB.getSession();
+      authReady = true;
+      render(); // paint the gate or the spinner immediately
+
+      // Sign-in completes by NAVIGATING BACK to this page, so the session
+      // arrives through this listener rather than a return value. It also
+      // fires on token refresh and on sign-out in another tab.
+      window.DB.onAuthChange((event, next) => {
+        const was = session && session.user && session.user.id;
+        const now = next && next.user && next.user.id;
+        session = next;
+        if (was === now) return; // a silent token refresh: nothing to redraw
+        signingIn = false;
+        if (!now) {
+          // Signed out. Treasurer mode must not survive it.
+          unlocked = false;
+          unlockedViaMaster = false;
+          accountState = null;
+          accountMemberId = null;
+          if (authRequired()) state = null;
+          render();
+          return;
+        }
+        // Signed in: load the fund if the gate had held it back, and show the
+        // intro if this device has not seen it.
+        if (!onboardingSeen() && onboardingStep == null) onboardingStep = 0;
+        if (!state) reload();
+        else render();
+      });
+
+    } else {
+      authReady = true;
+    }
+
+    // Gated: there is nothing to load until someone signs in, and the
+    // onAuthChange listener above does the load when they do. The listeners
+    // below are still registered — returning early here would leave a
+    // signed-in app with no realtime, no polling and no Esc key.
+    const gated = authRequired() && !session;
+    if (!gated) {
+      try {
+        await loadAll();
+        await resolveAccount();
+        applyAdminAutoUnlock();
+        // First run on this device. Started here rather than in render() so a
+        // later reload never re-opens it mid-session.
+        if (!onboardingSeen()) onboardingStep = 0;
+        render();
+      } catch (e) {
+        showError(e.message);
+        // Keep going: the error screen offers a retry, and that retry needs
+        // the keydown and visibility listeners set up below to work.
+      }
     }
 
     // Realtime: refresh when another device changes something.
@@ -2930,6 +6724,25 @@
       }
       if (e.key === "Tab" && (lightboxSrc || isAnyModalOpen())) {
         trapFocus(e);
+        return;
+      }
+      // The PIN keypad has no text field, so a physical keyboard has to be
+      // wired up explicitly — otherwise the modal is mouse-only on desktop.
+      // Ignored while another control has focus so typing elsewhere (the
+      // confirm dialog's own PIN field) still behaves normally.
+      if (pinModalMode) {
+        const tag = (document.activeElement && document.activeElement.tagName) || "";
+        if (tag === "INPUT" || tag === "TEXTAREA") return;
+        if (/^[0-9]$/.test(e.key)) {
+          e.preventDefault();
+          pinKey(e.key);
+        } else if (e.key === "Backspace") {
+          e.preventDefault();
+          pinKey("back");
+        } else if (e.key === "Enter") {
+          e.preventDefault();
+          submitPin();
+        }
       }
     });
   }
@@ -2940,18 +6753,32 @@
   window.PowerFund = {
     retry: () => {
       appError = null;
+      appErrorRetry = null;
       render();
       init();
     },
+    dismissError,
     dismissWarning,
     dismissSuccess,
     toggleUnlock,
     toggleRound,
-    toggleActivityLog,
+    setActivityFilter,
+    setActivityMember,
+    setActivityRound,
     loadMoreActivity,
+    setView,
+    openMemberDetail,
+    openPayoutQrModal,
+    closePayoutQrModal,
+    setPayoutQrField,
+    onPayoutQrFileSelected,
+    savePayoutDetails,
+    closeMemberDetail,
     openLightbox,
     closeLightbox,
     openQrModal,
+    setQrAccountField,
+    saveQrAccount,
     closeQrModal,
     onQrFileSelected,
     confirmQrUpload,
@@ -2959,6 +6786,23 @@
     cellClicked,
     openContributeModal,
     closeModal,
+    signIn,
+    signOut,
+    onboardingNext,
+    onboardingSkip: finishOnboarding,
+    onboardingPick,
+    replayOnboarding,
+    openProfileModal,
+    closeProfileModal,
+    saveProfile,
+    setProfileName: (v) => {
+      profileNameValue = v;
+      refreshProfileValidity();
+    },
+    openPhotoSheet,
+    closePhotoSheet,
+    onAvatarSelected,
+    removeAvatar,
     openContributePicker,
     closeContributePicker,
     openWhoAmIPicker,
@@ -2972,30 +6816,44 @@
     openReviewModal,
     closeReviewModal,
     confirmReview,
-    confirmBatch,
     expandAttentionQueue,
     toggleOverdueList,
+    cancelUndoPaid,
+    confirmUndoPaid,
+    cancelMarkPaid,
+    confirmMarkPaid,
     rejectReview,
+    setRejectNote: (v) => {
+      rejectNoteValue = v;
+      rejectError = null;
+      // Toggle the button in place rather than calling render(): render()
+      // rebuilds innerHTML, which would destroy the textarea being typed into
+      // and drop focus after the first character.
+      const btn = document.querySelector(".modal-actions .confirm-yes");
+      if (btn) btn.disabled = busy || !v.trim();
+    },
     cancelRejectConfirm,
     doRejectReview,
     moveMember,
     resetData,
     exportCsv,
+    exportRoundCsv,
     downloadBackup,
     pickRestoreFile,
+    restoreBackup,
     closeConfirm,
     setConfirmType,
     setConfirmPin,
     submitConfirm,
     closePinModal,
     openChangePin,
+    openMasterPin,
     submitPin,
-    setPinInput: (v) => {
-      pinInputValue = v;
-    },
+    pinKey,
     openPayoutModal,
     closePayoutModal,
     markPayoutReleased,
+    releaseWithoutReceipt,
     unmarkPayoutReleased,
     onPayoutReceiptSelected,
     removePayoutReceipt,
@@ -3005,17 +6863,35 @@
     setPayoutNote: (v) => {
       payoutNoteValue = v;
     },
-    setPayoutAmount: (v) => {
-      payoutAmountValue = v;
-    },
     openShareModal,
     closeShareModal,
     copyShareText,
+    copyPayoutReminder,
+    retryLastAction,
+    retrySubmit: () => {
+      if (submitState && submitState.retry) submitState.retry();
+    },
+    closeRestoreState,
+    chooseAnotherBackup,
+    openReorderModal,
+    closeReorderModal,
+    skipSignInPrompt,
+    openTransferRole,
+    closeTransferRole,
+    pickTransferRole,
+    confirmTransferRole,
     openEditNamesModal,
+    openMemberAccountsModal,
+    closeMemberAccountsModal,
+    setMemberEmail,
+    saveMemberEmails,
+    memberEmailsProblem,
+    unlinkMember,
     closeEditNamesModal,
     saveEditNames,
     setEditName: (id, v) => {
       editNamesValues[id] = v;
+      refreshEditNamesValidity();
     },
   };
 

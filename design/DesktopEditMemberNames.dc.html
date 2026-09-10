@@ -1,0 +1,90 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .pf-modal { opacity: 0; animation: pfModalIn .32s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfModalIn { from { opacity: 0; transform: translate(-50%,-50%) translateY(10px) scale(0.98); } to { opacity: 1; transform: translate(-50%,-50%) translateY(0) scale(1); } }
+    .pf-x:hover { background: rgba(255,255,255,0.08) !important; }
+    input { font-family:'Inter',sans-serif; }
+  </style>
+</helmet>
+
+<div style="position:relative; width:1440px; height:900px; overflow:hidden; background:#0D1B2A; border-radius:16px; border:1px solid rgba(255,255,255,0.08); font-family:'Inter',sans-serif; color:#EDEFF2;">
+
+  <div style="opacity:0.35; filter:blur(1.5px); display:flex; height:100%;">
+    <div style="width:240px; height:100%; background:rgba(255,255,255,0.02); border-right:1px solid rgba(255,255,255,0.08);"></div>
+    <div style="flex:1; padding:32px 40px;"><div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:24px;">Menu</div></div>
+  </div>
+  <div style="position:absolute; inset:0; background:rgba(5,10,18,0.6);"></div>
+
+  <div class="pf-modal" style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:460px; background:linear-gradient(180deg, rgba(20,42,66,0.98), rgba(13,27,42,0.99)); border:1px solid rgba(255,255,255,0.12); border-radius:22px; box-shadow:0 30px 80px -20px rgba(0,0,0,0.7); padding:28px 30px;">
+
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:17px;">Edit member names</div>
+      <button class="pf-x" style="width:32px; height:32px; border-radius:9px; background:none; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:16px; height:16px; color:#93A2B8;"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:8px;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div style="width:30px; height:30px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:12px; box-shadow:0 0 0 2px #4CAF83; flex-shrink:0;">A</div>
+        <input class="pf-name-field" type="text" value="Ana" style="flex:1; height:44px; border-radius:11px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.14); color:#EDEFF2; font-size:13.5px; padding:0 12px;">
+      </div>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div style="width:30px; height:30px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:12px; box-shadow:0 0 0 2px #4CAF83; flex-shrink:0;">B</div>
+        <input class="pf-name-field" type="text" value="Ben" style="flex:1; height:44px; border-radius:11px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.14); color:#EDEFF2; font-size:13.5px; padding:0 12px;">
+      </div>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div style="width:30px; height:30px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:12px; box-shadow:0 0 0 2px #9B7FE0; flex-shrink:0;">C</div>
+        <input class="pf-name-field" type="text" value="Cathy" style="flex:1; height:44px; border-radius:11px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.14); color:#EDEFF2; font-size:13.5px; padding:0 12px;">
+      </div>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div style="width:30px; height:30px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:12px; box-shadow:0 0 0 2px #E15353; flex-shrink:0;">D</div>
+        <input class="pf-name-field" type="text" value="Dan" style="flex:1; height:44px; border-radius:11px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.14); color:#EDEFF2; font-size:13.5px; padding:0 12px;">
+      </div>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <div style="width:30px; height:30px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:12px; box-shadow:0 0 0 2px rgba(255,255,255,0.18); flex-shrink:0;">E</div>
+        <input class="pf-name-field" type="text" value="Elena" style="flex:1; height:44px; border-radius:11px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.14); color:#EDEFF2; font-size:13.5px; padding:0 12px;">
+      </div>
+    </div>
+    <div id="pf-names-hint" style="font-size:11.5px; color:#93A2B8; margin:10px 0 18px;">Names must be unique and non-empty</div>
+
+    <button id="pf-names-save" style="width:100%; height:50px; border:none; border-radius:15px; background:linear-gradient(135deg,#F5A623,#e0951d); color:#14213D; font-family:'Inter',sans-serif; font-weight:700; font-size:14px; cursor:pointer;">Save names</button>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {
+  componentDidMount() {
+    var fields = Array.prototype.slice.call(document.querySelectorAll('.pf-name-field'));
+    var hint = document.getElementById('pf-names-hint');
+    var save = document.getElementById('pf-names-save');
+    function check() {
+      var values = fields.map(function (f) { return f.value.trim(); });
+      var allFilled = values.every(function (v) { return v.length > 0; });
+      var unique = new Set(values.map(function (v) { return v.toLowerCase(); })).size === values.length;
+      var ok = allFilled && unique;
+      if (!allFilled) { hint.textContent = 'All names must be filled in'; hint.style.color = '#E15353'; }
+      else if (!unique) { hint.textContent = 'Names must be unique'; hint.style.color = '#E15353'; }
+      else { hint.textContent = 'Names must be unique and non-empty'; hint.style.color = '#93A2B8'; }
+      save.disabled = !ok;
+      save.style.opacity = ok ? '1' : '0.5';
+    }
+    fields.forEach(function (f) { f.addEventListener('input', check); });
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,264 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    a { color: #F5A623; }
+    .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .pf-fade { opacity: 0; animation: pfFadeUp .5s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfFadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .pf-nav-item:hover { background: rgba(255,255,255,0.05) !important; }
+    .pf-filter.active { background: rgba(245,166,35,0.14) !important; border-color: rgba(245,166,35,0.4) !important; color: #F5A623 !important; }
+    .pf-tr:hover { background: rgba(255,255,255,0.03) !important; }
+    .pf-dd-btn.active { background: rgba(245,166,35,0.14) !important; border-color: rgba(245,166,35,0.4) !important; color: #F5A623 !important; }
+    .pf-dd-item:hover { background: rgba(255,255,255,0.06) !important; }
+    .pf-dd-item.selected { color: #F5A623 !important; }
+  </style>
+</helmet>
+
+<div style="position:relative; width:1440px; height:900px; overflow:hidden; background:#0D1B2A; border-radius:16px; border:1px solid rgba(255,255,255,0.08); font-family:'Inter',sans-serif; color:#EDEFF2; display:flex;">
+
+  <!-- SIDEBAR -->
+  <div style="width:240px; flex-shrink:0; height:100%; background:rgba(255,255,255,0.02); border-right:1px solid rgba(255,255,255,0.08); display:flex; flex-direction:column; padding:24px 16px;">
+    <div style="display:flex; align-items:center; gap:10px; padding:0 8px 28px;">
+      <div style="width:32px; height:32px; border-radius:9px; background:linear-gradient(135deg,#F5A623,#4CD9C0); display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:15px; color:#14213D;">P</div>
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:15px;">Power Fund</div>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:2px;">
+      <div class="pf-nav-item" style="display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:10px; cursor:pointer;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:18px; height:18px; color:#93A2B8;"><path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9a1 1 0 0 0 1 1h3v-6h4v6h3a1 1 0 0 0 1-1v-9"/></svg>
+        <span style="font-size:13.5px; font-weight:500; color:#93A2B8;">Home</span>
+      </div>
+      <div class="pf-nav-item" style="display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:10px; cursor:pointer;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:18px; height:18px; color:#93A2B8;"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg>
+        <span style="font-size:13.5px; font-weight:500; color:#93A2B8;">Rounds</span>
+      </div>
+      <div class="pf-nav-item" style="display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:10px; cursor:pointer;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:18px; height:18px; color:#93A2B8;"><circle cx="9" cy="8" r="3.2"/><path d="M2.8 20.2c.5-3.6 3-5.6 6.2-5.6s5.7 2 6.2 5.6"/><circle cx="17.3" cy="8.6" r="2.4"/><path d="M15.9 14.3c2.3.5 4 2.3 4.3 5.4"/></svg>
+        <span style="font-size:13.5px; font-weight:500; color:#93A2B8;">Members</span>
+      </div>
+      <div class="pf-nav-item" style="display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:10px; background:rgba(245,166,35,0.12); cursor:pointer;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:18px; height:18px; color:#F5A623;"><line x1="8" y1="7" x2="20" y2="7"/><line x1="8" y1="12" x2="20" y2="12"/><line x1="8" y1="17" x2="20" y2="17"/><circle cx="4" cy="7" r="1" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="4" cy="17" r="1" fill="currentColor" stroke="none"/></svg>
+        <span style="font-size:13.5px; font-weight:600; color:#F5A623;">Activity</span>
+      </div>
+      <div class="pf-nav-item" style="display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:10px; cursor:pointer;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:18px; height:18px; color:#93A2B8;"><polyline points="3 16 9 10 13 14 21 5"/><polyline points="15 5 21 5 21 11"/></svg>
+        <span style="font-size:13.5px; font-weight:500; color:#93A2B8;">Insights</span>
+      </div>
+    </div>
+    <div style="flex:1;"></div>
+    <div style="display:flex; align-items:center; gap:10px; padding:12px; border-radius:12px; background:rgba(76,175,131,0.1); border:1px solid rgba(76,175,131,0.3); margin-bottom:8px;">
+      <div style="width:34px; height:34px; border-radius:10px; background:rgba(76,175,131,0.16); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:16px; height:16px; color:#4CAF83;"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.4-2"/></svg>
+      </div>
+      <div style="min-width:0;">
+        <div style="font-size:12.5px; font-weight:600;">Treasurer mode</div>
+        <div style="font-size:11px; color:#4CAF83;">Active</div>
+      </div>
+    </div>
+    <div class="pf-nav-item" style="display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:10px; cursor:pointer;">
+      <div style="width:28px; height:28px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:11px;">C</div>
+      <span style="font-size:13px; font-weight:500; color:#EDEFF2;">Menu &amp; settings</span>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div style="flex:1; height:100%; overflow:hidden; padding:32px 40px; display:flex; flex-direction:column;">
+    <div class="pf-fade" style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
+      <div>
+        <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:24px;">Activity</div>
+        <div style="font-size:13px; color:#93A2B8; margin-top:2px;">Full transaction history across all rounds</div>
+      </div>
+      <button style="height:38px; padding:0 18px; border-radius:11px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.14); color:#EDEFF2; font-family:'Inter',sans-serif; font-weight:600; font-size:13px; cursor:pointer;">Export CSV</button>
+    </div>
+
+    <!-- filter bar -->
+    <div class="pf-fade" style="animation-delay:.04s; display:flex; align-items:center; gap:10px; margin-bottom:18px;">
+      <button class="pf-filter active" data-type="all" style="height:34px; padding:0 16px; border-radius:9px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1); color:#93A2B8; font-family:'Inter',sans-serif; font-weight:600; font-size:12.5px; cursor:pointer;">All</button>
+      <button class="pf-filter" data-type="Contribution" style="height:34px; padding:0 16px; border-radius:9px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1); color:#93A2B8; font-family:'Inter',sans-serif; font-weight:600; font-size:12.5px; cursor:pointer;">Contributions</button>
+      <button class="pf-filter" data-type="Payout" style="height:34px; padding:0 16px; border-radius:9px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1); color:#93A2B8; font-family:'Inter',sans-serif; font-weight:600; font-size:12.5px; cursor:pointer;">Payouts</button>
+      <div style="width:1px; height:20px; background:rgba(255,255,255,0.12); margin:0 4px;"></div>
+
+      <!-- member dropdown -->
+      <div style="position:relative;">
+        <button id="pf-member-dd-btn" class="pf-dd-btn" style="height:34px; padding:0 16px; border-radius:9px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1); color:#93A2B8; font-family:'Inter',sans-serif; font-weight:500; font-size:12.5px; cursor:pointer; display:flex; align-items:center; gap:6px;">
+          <span id="pf-member-dd-label">All members</span> <svg class="icon" viewBox="0 0 24 24" style="width:12px; height:12px;"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div id="pf-member-dd-menu" style="display:none; position:absolute; top:calc(100% + 6px); left:0; z-index:20; min-width:170px; background:#142A42; border:1px solid rgba(255,255,255,0.14); border-radius:12px; padding:6px; box-shadow:0 16px 36px -14px rgba(0,0,0,0.7);">
+          <div class="pf-dd-item selected" data-value="all" style="padding:9px 10px; border-radius:8px; font-size:12.5px; font-weight:600; color:#F5A623; cursor:pointer;">All members</div>
+          <div class="pf-dd-item" data-value="Ana" style="padding:9px 10px; border-radius:8px; font-size:12.5px; font-weight:500; color:#EDEFF2; cursor:pointer;">Ana</div>
+          <div class="pf-dd-item" data-value="Ben" style="padding:9px 10px; border-radius:8px; font-size:12.5px; font-weight:500; color:#EDEFF2; cursor:pointer;">Ben</div>
+          <div class="pf-dd-item" data-value="Cathy" style="padding:9px 10px; border-radius:8px; font-size:12.5px; font-weight:500; color:#EDEFF2; cursor:pointer;">Cathy</div>
+          <div class="pf-dd-item" data-value="Dan" style="padding:9px 10px; border-radius:8px; font-size:12.5px; font-weight:500; color:#EDEFF2; cursor:pointer;">Dan</div>
+          <div class="pf-dd-item" data-value="Elena" style="padding:9px 10px; border-radius:8px; font-size:12.5px; font-weight:500; color:#EDEFF2; cursor:pointer;">Elena</div>
+        </div>
+      </div>
+
+      <!-- round dropdown -->
+      <div style="position:relative;">
+        <button id="pf-round-dd-btn" class="pf-dd-btn active" style="height:34px; padding:0 16px; border-radius:9px; background:rgba(245,166,35,0.14); border:1px solid rgba(245,166,35,0.4); color:#F5A623; font-family:'Inter',sans-serif; font-weight:500; font-size:12.5px; cursor:pointer; display:flex; align-items:center; gap:6px;">
+          <span id="pf-round-dd-label">Round 2</span> <svg class="icon" viewBox="0 0 24 24" style="width:12px; height:12px;"><polyline points="6 9 12 15 18 9"/></svg>
+        </button>
+        <div id="pf-round-dd-menu" style="display:none; position:absolute; top:calc(100% + 6px); left:0; z-index:20; min-width:150px; background:#142A42; border:1px solid rgba(255,255,255,0.14); border-radius:12px; padding:6px; box-shadow:0 16px 36px -14px rgba(0,0,0,0.7);">
+          <div class="pf-dd-item" data-value="all" style="padding:9px 10px; border-radius:8px; font-size:12.5px; font-weight:500; color:#EDEFF2; cursor:pointer;">All rounds</div>
+          <div class="pf-dd-item" data-value="Round 1" style="padding:9px 10px; border-radius:8px; font-size:12.5px; font-weight:500; color:#EDEFF2; cursor:pointer;">Round 1</div>
+          <div class="pf-dd-item selected" data-value="Round 2" style="padding:9px 10px; border-radius:8px; font-size:12.5px; font-weight:600; color:#F5A623; cursor:pointer;">Round 2</div>
+          <div class="pf-dd-item" data-value="Round 3" style="padding:9px 10px; border-radius:8px; font-size:12.5px; font-weight:500; color:#EDEFF2; cursor:pointer;">Round 3</div>
+          <div class="pf-dd-item" data-value="Round 4" style="padding:9px 10px; border-radius:8px; font-size:12.5px; font-weight:500; color:#EDEFF2; cursor:pointer;">Round 4</div>
+          <div class="pf-dd-item" data-value="Round 5" style="padding:9px 10px; border-radius:8px; font-size:12.5px; font-weight:500; color:#EDEFF2; cursor:pointer;">Round 5</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- table -->
+    <div class="pf-fade" style="animation-delay:.08s; flex:1; min-height:0; border-radius:18px; background:rgba(20,42,66,0.4); border:1px solid rgba(255,255,255,0.1); overflow:hidden; display:flex; flex-direction:column;">
+      <div style="display:grid; grid-template-columns:110px 1fr 140px 120px 130px 100px; padding:13px 20px; font-size:11px; color:#93A2B8; text-transform:uppercase; letter-spacing:.04em; border-bottom:1px solid rgba(255,255,255,0.08); flex-shrink:0;">
+        <div>Date</div><div>Member</div><div>Type</div><div>Round</div><div>Amount</div><div>Status</div>
+      </div>
+      <div style="overflow-y:auto; flex:1;">
+        <div class="pf-tr" data-type="Contribution" data-member="Cathy" data-round="Round 2" style="display:grid; grid-template-columns:110px 1fr 140px 120px 130px 100px; padding:14px 20px; align-items:center; border-bottom:1px solid rgba(255,255,255,0.05);">
+          <div style="font-size:13px;">Sep 8</div>
+          <div style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600;"><div style="width:22px; height:22px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-size:10px; font-family:'Space Grotesk',sans-serif;">C</div>Cathy</div>
+          <div style="font-size:12.5px; color:#93A2B8;">Contribution</div>
+          <div style="font-size:12.5px; color:#93A2B8;">Round 2</div>
+          <div style="font-size:13px; font-weight:600;">&#8369;1,000</div>
+          <span style="font-size:10.5px; font-weight:700; color:#9B7FE0; background:rgba(155,127,224,0.16); padding:3px 9px; border-radius:20px; width:fit-content;">In review</span>
+        </div>
+        <div class="pf-tr" data-type="Contribution" data-member="Ben" data-round="Round 2" style="display:grid; grid-template-columns:110px 1fr 140px 120px 130px 100px; padding:14px 20px; align-items:center; border-bottom:1px solid rgba(255,255,255,0.05);">
+          <div style="font-size:13px; color:#93A2B8;">Sep 6</div>
+          <div style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600;"><div style="width:22px; height:22px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-size:10px; font-family:'Space Grotesk',sans-serif;">B</div>Ben</div>
+          <div style="font-size:12.5px; color:#93A2B8;">Contribution</div>
+          <div style="font-size:12.5px; color:#93A2B8;">Round 2</div>
+          <div style="font-size:13px; font-weight:600;">&#8369;1,000</div>
+          <span style="font-size:10.5px; font-weight:700; color:#4CAF83; background:rgba(76,175,131,0.16); padding:3px 9px; border-radius:20px; width:fit-content;">Confirmed</span>
+        </div>
+        <div class="pf-tr" data-type="Contribution" data-member="Ana" data-round="Round 2" style="display:grid; grid-template-columns:110px 1fr 140px 120px 130px 100px; padding:14px 20px; align-items:center; border-bottom:1px solid rgba(255,255,255,0.05);">
+          <div style="font-size:13px; color:#93A2B8;">Sep 6</div>
+          <div style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600;"><div style="width:22px; height:22px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-size:10px; font-family:'Space Grotesk',sans-serif;">A</div>Ana</div>
+          <div style="font-size:12.5px; color:#93A2B8;">Contribution</div>
+          <div style="font-size:12.5px; color:#93A2B8;">Round 2</div>
+          <div style="font-size:13px; font-weight:600;">&#8369;1,000</div>
+          <span style="font-size:10.5px; font-weight:700; color:#4CAF83; background:rgba(76,175,131,0.16); padding:3px 9px; border-radius:20px; width:fit-content;">Confirmed</span>
+        </div>
+        <div class="pf-tr" data-type="Contribution" data-member="Dan" data-round="Round 2" style="display:grid; grid-template-columns:110px 1fr 140px 120px 130px 100px; padding:14px 20px; align-items:center; border-bottom:1px solid rgba(255,255,255,0.05);">
+          <div style="font-size:13px; color:#93A2B8;">Aug 25</div>
+          <div style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600;"><div style="width:22px; height:22px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-size:10px; font-family:'Space Grotesk',sans-serif;">D</div>Dan</div>
+          <div style="font-size:12.5px; color:#93A2B8;">Contribution</div>
+          <div style="font-size:12.5px; color:#93A2B8;">Round 2</div>
+          <div style="font-size:13px; font-weight:600;">&#8369;1,000</div>
+          <span style="font-size:10.5px; font-weight:700; color:#4CAF83; background:rgba(76,175,131,0.16); padding:3px 9px; border-radius:20px; width:fit-content;">Confirmed</span>
+        </div>
+        <div class="pf-tr" data-type="Payout" data-member="Ana" data-round="Round 1" style="display:grid; grid-template-columns:110px 1fr 140px 120px 130px 100px; padding:14px 20px; align-items:center;">
+          <div style="font-size:13px; color:#93A2B8;">Aug 3</div>
+          <div style="display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600;"><div style="width:22px; height:22px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-size:10px; font-family:'Space Grotesk',sans-serif;">A</div>Ana</div>
+          <div style="font-size:12.5px; color:#93A2B8;">Payout</div>
+          <div style="font-size:12.5px; color:#93A2B8;">Round 1</div>
+          <div style="font-size:13px; font-weight:600;">&#8369;30,000</div>
+          <span style="font-size:10.5px; font-weight:700; color:#F5A623; background:rgba(245,166,35,0.16); padding:3px 9px; border-radius:20px; width:fit-content;">Released</span>
+        </div>
+        <div id="pf-empty-filter" style="display:none; flex-direction:column; align-items:center; text-align:center; padding:60px 10px;">
+          <div style="width:48px; height:48px; border-radius:50%; background:rgba(255,255,255,0.05); display:flex; align-items:center; justify-content:center; margin-bottom:14px;">
+            <svg class="icon" viewBox="0 0 24 24" style="width:22px; height:22px; color:#93A2B8;"><line x1="8" y1="7" x2="20" y2="7"/><line x1="8" y1="12" x2="20" y2="12"/><line x1="8" y1="17" x2="14" y2="17"/></svg>
+          </div>
+          <div style="font-size:13.5px; font-weight:600; margin-bottom:4px;">Nothing here yet</div>
+          <div style="font-size:12px; color:#93A2B8;">No activity matches this filter.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {
+  componentDidMount() {
+    var typeButtons = Array.prototype.slice.call(document.querySelectorAll('.pf-filter'));
+    var rows = Array.prototype.slice.call(document.querySelectorAll('.pf-tr'));
+    var emptyState = document.getElementById('pf-empty-filter');
+
+    var state = { type: 'all', member: 'all', round: 'Round 2' };
+
+    function applyFilters() {
+      var visibleCount = 0;
+      rows.forEach(function (row) {
+        var show = (state.type === 'all' || row.getAttribute('data-type') === state.type)
+          && (state.member === 'all' || row.getAttribute('data-member') === state.member)
+          && (state.round === 'all' || row.getAttribute('data-round') === state.round);
+        row.style.display = show ? 'grid' : 'none';
+        if (show) visibleCount++;
+      });
+      emptyState.style.display = visibleCount === 0 ? 'flex' : 'none';
+    }
+
+    typeButtons.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        typeButtons.forEach(function (b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        state.type = btn.getAttribute('data-type');
+        applyFilters();
+      });
+    });
+
+    function setupDropdown(btnId, menuId, labelId, allValue, allLabel, stateKey) {
+      var btn = document.getElementById(btnId);
+      var menu = document.getElementById(menuId);
+      var label = document.getElementById(labelId);
+      if (!btn || !menu) return;
+      var items = Array.prototype.slice.call(menu.querySelectorAll('.pf-dd-item'));
+
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var isOpen = menu.style.display === 'block';
+        document.querySelectorAll('[id$="-dd-menu"]').forEach(function (m) { m.style.display = 'none'; });
+        menu.style.display = isOpen ? 'none' : 'block';
+      });
+
+      items.forEach(function (item) {
+        item.addEventListener('click', function () {
+          var value = item.getAttribute('data-value');
+          state[stateKey] = value;
+          label.textContent = value === 'all' ? allLabel : value;
+          items.forEach(function (i) {
+            i.classList.remove('selected');
+            i.style.color = '#EDEFF2';
+            i.style.fontWeight = '500';
+          });
+          item.classList.add('selected');
+          item.style.color = '#F5A623';
+          item.style.fontWeight = '600';
+          btn.classList.toggle('active', value !== 'all');
+          if (value === 'all') {
+            btn.style.background = 'rgba(255,255,255,0.04)';
+            btn.style.borderColor = 'rgba(255,255,255,0.1)';
+            btn.style.color = '#93A2B8';
+          } else {
+            btn.style.background = 'rgba(245,166,35,0.14)';
+            btn.style.borderColor = 'rgba(245,166,35,0.4)';
+            btn.style.color = '#F5A623';
+          }
+          menu.style.display = 'none';
+          applyFilters();
+        });
+      });
+    }
+
+    setupDropdown('pf-member-dd-btn', 'pf-member-dd-menu', 'pf-member-dd-label', 'all', 'All members', 'member');
+    setupDropdown('pf-round-dd-btn', 'pf-round-dd-menu', 'pf-round-dd-label', 'all', 'All rounds', 'round');
+
+    document.addEventListener('click', function () {
+      document.querySelectorAll('[id$="-dd-menu"]').forEach(function (m) { m.style.display = 'none'; });
+    });
+
+    applyFilters();
+  }
+}
+</script>
+</body>
+</html>

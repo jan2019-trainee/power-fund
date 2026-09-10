@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .pf-modal { opacity: 0; animation: pfModalIn .32s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfModalIn { from { opacity: 0; transform: translate(-50%,-50%) translateY(10px) scale(0.98); } to { opacity: 1; transform: translate(-50%,-50%) translateY(0) scale(1); } }
+    .pf-x:hover { background: rgba(255,255,255,0.08) !important; }
+  </style>
+</helmet>
+
+<div style="position:relative; width:1440px; height:900px; overflow:hidden; background:#0D1B2A; border-radius:16px; border:1px solid rgba(255,255,255,0.08); font-family:'Inter',sans-serif; color:#EDEFF2;">
+
+  <div style="opacity:0.35; filter:blur(1.5px); display:flex; height:100%;">
+    <div style="width:240px; height:100%; background:rgba(255,255,255,0.02); border-right:1px solid rgba(255,255,255,0.08);"></div>
+    <div style="flex:1; padding:32px 40px;"><div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:24px;">Menu</div></div>
+  </div>
+  <div style="position:absolute; inset:0; background:rgba(5,10,18,0.6);"></div>
+
+  <!-- GAP: restoring a bad/corrupt file previously had no defined failure state — this is that state -->
+  <div class="pf-modal" style="position:absolute; top:50%; left:50%; width:460px; background:linear-gradient(180deg, rgba(20,42,66,0.98), rgba(13,27,42,0.99)); border:1px solid rgba(255,255,255,0.12); border-radius:22px; box-shadow:0 30px 80px -20px rgba(0,0,0,0.7); padding:30px 32px;">
+
+    <div style="display:flex; align-items:center; justify-content:flex-end; margin-bottom:4px;">
+      <button class="pf-x" style="width:32px; height:32px; border-radius:9px; background:none; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:16px; height:16px; color:#93A2B8;"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <div style="display:flex; flex-direction:column; align-items:center; text-align:center; padding:0 4px 6px;">
+      <div style="width:58px; height:58px; border-radius:50%; background:rgba(225,83,83,0.14); display:flex; align-items:center; justify-content:center; margin-bottom:16px;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:27px; height:27px; color:#E15353;"><circle cx="12" cy="12" r="9"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+      </div>
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:17.5px; margin-bottom:8px;">This isn't a Power Fund backup</div>
+      <div style="font-size:12.5px; color:#93A2B8; line-height:1.6; margin-bottom:6px;">"vacation-photos.json" doesn't match the backup format this app exports. Nothing was changed &mdash; your current data is untouched.</div>
+    </div>
+
+    <div style="display:flex; align-items:center; gap:10px; padding:12px 14px; border-radius:14px; background:rgba(225,83,83,0.06); border:1px solid rgba(225,83,83,0.25); margin:18px 0 22px;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:15px; height:15px; color:#E15353; flex-shrink:0;"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h3"/></svg>
+      <div style="font-size:11.5px; color:#93A2B8; line-height:1.5;">Look for a file named like <b style="color:#EDEFF2;">power-fund-backup-YYYY-MM-DD.json</b>, exported from Menu &rarr; Backup &amp; Restore on this or another member's device.</div>
+    </div>
+
+    <div style="display:flex; gap:10px;">
+      <button style="flex:1; height:48px; border-radius:14px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.14); color:#EDEFF2; font-family:'Inter',sans-serif; font-weight:600; font-size:13.5px; cursor:pointer;">Cancel</button>
+      <button style="flex:1; height:48px; border-radius:14px; background:linear-gradient(135deg,#F5A623,#e0951d); border:none; color:#14213D; font-family:'Inter',sans-serif; font-weight:700; font-size:13.5px; cursor:pointer;">Choose another file</button>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

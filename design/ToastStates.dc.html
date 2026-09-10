@@ -1,0 +1,64 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .pf-fade { opacity: 0; animation: pfFadeUp .4s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfFadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    .pf-toast { box-shadow: 0 12px 30px -8px rgba(0,0,0,0.5); }
+  </style>
+</helmet>
+
+<div style="position:relative; width:390px; height:640px; overflow:hidden; background:#0D1B2A; border-radius:38px; border:1px solid rgba(255,255,255,0.08); font-family:'Inter',sans-serif; color:#EDEFF2;">
+
+  <div style="padding:24px 20px 0;">
+    <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:18px; margin-bottom:4px;">Toast / confirmation states</div>
+    <div style="font-size:12px; color:#93A2B8; margin-bottom:24px;">Reference sheet — how the app confirms an action worked, or tells you it didn't. Appears bottom-anchored, above the tab bar, auto-dismisses after ~3s unless it has an action.</div>
+  </div>
+
+  <div style="padding:0 20px; display:flex; flex-direction:column; gap:14px;">
+
+    <div class="pf-fade pf-toast" style="animation-delay:0s; display:flex; align-items:center; gap:10px; padding:13px 16px; border-radius:14px; background:rgba(76,175,131,0.16); border:1px solid rgba(76,175,131,0.4);">
+      <svg class="icon" viewBox="0 0 24 24" style="width:16px; height:16px; color:#4CAF83; stroke-width:2.6; flex-shrink:0;"><polyline points="4 12 10 18 20 6"/></svg>
+      <span style="flex:1; font-size:13px; font-weight:600;">Backup exported</span>
+    </div>
+
+    <div class="pf-fade pf-toast" style="animation-delay:.05s; display:flex; align-items:center; gap:10px; padding:13px 16px; border-radius:14px; background:rgba(76,175,131,0.16); border:1px solid rgba(76,175,131,0.4);">
+      <svg class="icon" viewBox="0 0 24 24" style="width:16px; height:16px; color:#4CAF83; stroke-width:2.6; flex-shrink:0;"><polyline points="4 12 10 18 20 6"/></svg>
+      <span style="flex:1; font-size:13px; font-weight:600;">Payment confirmed</span>
+    </div>
+
+    <div class="pf-fade pf-toast" style="animation-delay:.1s; display:flex; align-items:center; gap:10px; padding:13px 16px; border-radius:14px; background:rgba(245,166,35,0.14); border:1px solid rgba(245,166,35,0.4);">
+      <svg class="icon" viewBox="0 0 24 24" style="width:16px; height:16px; color:#F5A623; stroke-width:2.6; flex-shrink:0;"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.4-2"/></svg>
+      <span style="flex:1; font-size:13px; font-weight:600;">Round 1 payout released to Ana</span>
+    </div>
+
+    <div class="pf-fade pf-toast" style="animation-delay:.15s; display:flex; align-items:center; gap:10px; padding:13px 16px; border-radius:14px; background:rgba(225,83,83,0.14); border:1px solid rgba(225,83,83,0.4);">
+      <svg class="icon" viewBox="0 0 24 24" style="width:16px; height:16px; color:#E15353; stroke-width:2.6; flex-shrink:0;"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <span style="flex:1; font-size:13px; font-weight:600;">Couldn't restore backup — invalid file</span>
+    </div>
+
+    <div class="pf-fade pf-toast" style="animation-delay:.2s; display:flex; align-items:center; gap:10px; padding:13px 16px; border-radius:14px; background:rgba(225,83,83,0.14); border:1px solid rgba(225,83,83,0.4);">
+      <svg class="icon" viewBox="0 0 24 24" style="width:16px; height:16px; color:#E15353; stroke-width:2.6; flex-shrink:0;"><circle cx="12" cy="12" r="9"/><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <span style="flex:1; font-size:13px; font-weight:600;">Something went wrong</span>
+      <button style="background:none; border:none; color:#E15353; font-family:'Inter',sans-serif; font-size:12.5px; font-weight:700; text-decoration:underline; cursor:pointer; flex-shrink:0;">Retry</button>
+    </div>
+
+    <div class="pf-fade pf-toast" style="animation-delay:.25s; display:flex; align-items:center; gap:10px; padding:13px 16px; border-radius:14px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.14);">
+      <svg class="icon" viewBox="0 0 24 24" style="width:16px; height:16px; color:#93A2B8; stroke-width:2.2; flex-shrink:0;"><circle cx="12" cy="12" r="9"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+      <span style="flex:1; font-size:13px; font-weight:600;">Copied to clipboard</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

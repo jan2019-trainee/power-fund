@@ -1,0 +1,185 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    a { color: #F5A623; }
+    .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .pf-fade { opacity: 0; animation: pfFadeUp .5s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfFadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    .pf-nav-item:hover { background: rgba(255,255,255,0.05) !important; }
+  </style>
+</helmet>
+
+<div style="position:relative; width:1440px; height:900px; overflow:hidden; background:#0D1B2A; border-radius:16px; border:1px solid rgba(255,255,255,0.08); font-family:'Inter',sans-serif; color:#EDEFF2; display:flex;">
+
+  <!-- SIDEBAR -->
+  <div style="width:240px; flex-shrink:0; height:100%; background:rgba(255,255,255,0.02); border-right:1px solid rgba(255,255,255,0.08); display:flex; flex-direction:column; padding:24px 16px;">
+    <div style="display:flex; align-items:center; gap:10px; padding:0 8px 28px;">
+      <div style="width:32px; height:32px; border-radius:9px; background:linear-gradient(135deg,#F5A623,#4CD9C0); display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:15px; color:#14213D;">P</div>
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:15px;">Power Fund</div>
+    </div>
+    <div style="display:flex; flex-direction:column; gap:2px;">
+      <div class="pf-nav-item" style="display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:10px; cursor:pointer;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:18px; height:18px; color:#93A2B8;"><path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9a1 1 0 0 0 1 1h3v-6h4v6h3a1 1 0 0 0 1-1v-9"/></svg>
+        <span style="font-size:13.5px; font-weight:500; color:#93A2B8;">Home</span>
+      </div>
+      <div class="pf-nav-item" style="display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:10px; cursor:pointer;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:18px; height:18px; color:#93A2B8;"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg>
+        <span style="font-size:13.5px; font-weight:500; color:#93A2B8;">Rounds</span>
+      </div>
+      <div class="pf-nav-item" style="display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:10px; cursor:pointer;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:18px; height:18px; color:#93A2B8;"><circle cx="9" cy="8" r="3.2"/><path d="M2.8 20.2c.5-3.6 3-5.6 6.2-5.6s5.7 2 6.2 5.6"/><circle cx="17.3" cy="8.6" r="2.4"/><path d="M15.9 14.3c2.3.5 4 2.3 4.3 5.4"/></svg>
+        <span style="font-size:13.5px; font-weight:500; color:#93A2B8;">Members</span>
+      </div>
+      <div class="pf-nav-item" style="display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:10px; cursor:pointer;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:18px; height:18px; color:#93A2B8;"><line x1="8" y1="7" x2="20" y2="7"/><line x1="8" y1="12" x2="20" y2="12"/><line x1="8" y1="17" x2="20" y2="17"/><circle cx="4" cy="7" r="1" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="4" cy="17" r="1" fill="currentColor" stroke="none"/></svg>
+        <span style="font-size:13.5px; font-weight:500; color:#93A2B8;">Activity</span>
+      </div>
+      <div class="pf-nav-item" style="display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:10px; background:rgba(245,166,35,0.12); cursor:pointer;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:18px; height:18px; color:#F5A623;"><polyline points="3 16 9 10 13 14 21 5"/><polyline points="15 5 21 5 21 11"/></svg>
+        <span style="font-size:13.5px; font-weight:600; color:#F5A623;">Insights</span>
+      </div>
+    </div>
+    <div style="flex:1;"></div>
+    <div style="display:flex; align-items:center; gap:10px; padding:12px; border-radius:12px; background:rgba(76,175,131,0.1); border:1px solid rgba(76,175,131,0.3); margin-bottom:8px;">
+      <div style="width:34px; height:34px; border-radius:10px; background:rgba(76,175,131,0.16); display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:16px; height:16px; color:#4CAF83;"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.4-2"/></svg>
+      </div>
+      <div style="min-width:0;">
+        <div style="font-size:12.5px; font-weight:600;">Treasurer mode</div>
+        <div style="font-size:11px; color:#4CAF83;">Active</div>
+      </div>
+    </div>
+    <div class="pf-nav-item" style="display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:10px; cursor:pointer;">
+      <div style="width:28px; height:28px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:11px;">C</div>
+      <span style="font-size:13px; font-weight:500; color:#EDEFF2;">Menu &amp; settings</span>
+    </div>
+  </div>
+
+  <!-- MAIN -->
+  <div style="flex:1; height:100%; overflow-y:auto; padding:32px 40px;">
+    <div class="pf-fade" style="margin-bottom:24px;">
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:24px;">Insights</div>
+      <div style="font-size:13px; color:#93A2B8; margin-top:2px;">Fund-wide performance across all 5 rounds</div>
+    </div>
+
+    <!-- stat tiles -->
+    <div class="pf-fade" style="animation-delay:.04s; display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:24px;">
+      <div style="padding:18px; border-radius:16px; background:rgba(20,42,66,0.5); border:1px solid rgba(255,255,255,0.1);">
+        <div style="font-size:11px; color:#93A2B8; margin-bottom:8px;">Total collected</div>
+        <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:22px;">&#8369;48,000</div>
+        <div style="font-size:11px; color:#4CAF83; margin-top:4px;">of &#8369;150,000 target</div>
+      </div>
+      <div style="padding:18px; border-radius:16px; background:rgba(20,42,66,0.5); border:1px solid rgba(255,255,255,0.1);">
+        <div style="font-size:11px; color:#93A2B8; margin-bottom:8px;">Rounds completed</div>
+        <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:22px;">1 <span style="font-size:14px; color:#93A2B8; font-weight:500;">/ 5</span></div>
+        <div style="font-size:11px; color:#93A2B8; margin-top:4px;">Round 2 in progress</div>
+      </div>
+      <div style="padding:18px; border-radius:16px; background:rgba(20,42,66,0.5); border:1px solid rgba(255,255,255,0.1);">
+        <div style="font-size:11px; color:#93A2B8; margin-bottom:8px;">Avg. on-time rate</div>
+        <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:22px;">91%</div>
+        <div style="font-size:11px; color:#4CAF83; margin-top:4px;">&#8593; 4pts vs Round 1</div>
+      </div>
+      <div style="padding:18px; border-radius:16px; background:rgba(20,42,66,0.5); border:1px solid rgba(255,255,255,0.1);">
+        <div style="font-size:11px; color:#93A2B8; margin-bottom:8px;">Overdue right now</div>
+        <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:22px; color:#E15353;">1</div>
+        <div style="font-size:11px; color:#93A2B8; margin-top:4px;">Dan &middot; Round 2</div>
+      </div>
+    </div>
+
+    <div class="pf-fade" style="animation-delay:.08s; display:flex; gap:16px; margin-bottom:24px;">
+      <!-- bar chart -->
+      <div style="flex:1.4; padding:22px; border-radius:18px; background:rgba(20,42,66,0.4); border:1px solid rgba(255,255,255,0.1);">
+        <div style="font-size:12.5px; font-weight:600; margin-bottom:16px;">Amount collected per round</div>
+        <svg width="100%" height="180" viewBox="0 0 560 180" preserveAspectRatio="xMidYMid meet">
+          <defs><linearGradient id="pfBattGradD" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#4CD9C0"/><stop offset="100%" stop-color="#F5A623"/></linearGradient></defs>
+
+          <!-- R1: full, paid out -->
+          <rect x="53" y="8" width="24" height="12" rx="4" fill="#4CAF83"/>
+          <rect x="30" y="20" width="70" height="150" rx="10" fill="rgba(76,175,131,0.08)" stroke="#4CAF83" stroke-width="2"/>
+          <clipPath id="dbcR1"><rect x="34" y="24" width="62" height="142" rx="7"/></clipPath>
+          <g clip-path="url(#dbcR1)"><rect x="34" y="24" width="62" height="142" fill="#4CAF83"/></g>
+
+          <!-- R2: 60%, collecting -->
+          <rect x="163" y="8" width="24" height="12" rx="4" fill="#F5A623"/>
+          <rect x="140" y="20" width="70" height="150" rx="10" fill="rgba(255,255,255,0.03)" stroke="#F5A623" stroke-width="2"/>
+          <clipPath id="dbcR2"><rect x="144" y="24" width="62" height="142" rx="7"/></clipPath>
+          <g clip-path="url(#dbcR2)"><rect x="144" y="80.8" width="62" height="85.2" fill="url(#pfBattGradD)"/></g>
+
+          <!-- R3-5: empty, upcoming -->
+          <rect x="273" y="8" width="24" height="12" rx="4" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="1.5"/>
+          <rect x="250" y="20" width="70" height="150" rx="10" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="1.5" stroke-dasharray="5 5"/>
+
+          <rect x="383" y="8" width="24" height="12" rx="4" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="1.5"/>
+          <rect x="360" y="20" width="70" height="150" rx="10" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="1.5" stroke-dasharray="5 5"/>
+
+          <rect x="493" y="8" width="24" height="12" rx="4" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="1.5"/>
+          <rect x="470" y="20" width="70" height="150" rx="10" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="1.5" stroke-dasharray="5 5"/>
+        </svg>
+        <div style="display:flex; justify-content:space-around; margin-top:4px;">
+          <span style="font-size:11px; color:#93A2B8;">R1</span><span style="font-size:11px; color:#93A2B8;">R2</span><span style="font-size:11px; color:#93A2B8;">R3</span><span style="font-size:11px; color:#93A2B8;">R4</span><span style="font-size:11px; color:#93A2B8;">R5</span>
+        </div>
+      </div>
+
+      <!-- donut -->
+      <div style="flex:1; padding:22px; border-radius:18px; background:rgba(20,42,66,0.4); border:1px solid rgba(255,255,255,0.1); display:flex; flex-direction:column; align-items:center;">
+        <div style="font-size:12.5px; font-weight:600; margin-bottom:16px; align-self:flex-start;">This round's status</div>
+        <svg width="140" height="140" viewBox="0 0 120 120">
+          <circle cx="60" cy="60" r="48" fill="none" stroke="rgba(255,255,255,0.08)" stroke-width="16"/>
+          <circle cx="60" cy="60" r="48" fill="none" stroke="#4CAF83" stroke-width="16" stroke-dasharray="301.6" stroke-dashoffset="60.3" transform="rotate(-90 60 60)"/>
+          <circle cx="60" cy="60" r="48" fill="none" stroke="#9B7FE0" stroke-width="16" stroke-dasharray="301.6" stroke-dashoffset="241.3" transform="rotate(102 60 60)"/>
+          <circle cx="60" cy="60" r="48" fill="none" stroke="#E15353" stroke-width="16" stroke-dasharray="301.6" stroke-dashoffset="271.4" transform="rotate(174 60 60)"/>
+        </svg>
+        <div style="display:flex; gap:14px; margin-top:14px; flex-wrap:wrap; justify-content:center;">
+          <span style="font-size:11px; color:#93A2B8;"><span style="display:inline-block; width:8px; height:8px; border-radius:2px; background:#4CAF83; margin-right:5px;"></span>Paid (2)</span>
+          <span style="font-size:11px; color:#93A2B8;"><span style="display:inline-block; width:8px; height:8px; border-radius:2px; background:#9B7FE0; margin-right:5px;"></span>In review (1)</span>
+          <span style="font-size:11px; color:#93A2B8;"><span style="display:inline-block; width:8px; height:8px; border-radius:2px; background:#E15353; margin-right:5px;"></span>Overdue (1)</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- leaderboard -->
+    <div class="pf-fade" style="animation-delay:.12s; padding:22px; border-radius:18px; background:rgba(20,42,66,0.4); border:1px solid rgba(255,255,255,0.1);">
+      <div style="font-size:12.5px; font-weight:600; margin-bottom:14px;">On-time contribution rate by member</div>
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <span style="width:60px; font-size:12.5px; font-weight:600;">Ana</span>
+          <div style="flex:1; height:8px; border-radius:5px; background:rgba(255,255,255,0.08); overflow:hidden;"><div style="width:100%; height:100%; background:#4CAF83;"></div></div>
+          <span style="width:36px; font-size:12px; color:#93A2B8; text-align:right;">100%</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <span style="width:60px; font-size:12.5px; font-weight:600;">Ben</span>
+          <div style="flex:1; height:8px; border-radius:5px; background:rgba(255,255,255,0.08); overflow:hidden;"><div style="width:98%; height:100%; background:#4CAF83;"></div></div>
+          <span style="width:36px; font-size:12px; color:#93A2B8; text-align:right;">98%</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <span style="width:60px; font-size:12.5px; font-weight:600;">Cathy</span>
+          <div style="flex:1; height:8px; border-radius:5px; background:rgba(255,255,255,0.08); overflow:hidden;"><div style="width:88%; height:100%; background:#9B7FE0;"></div></div>
+          <span style="width:36px; font-size:12px; color:#93A2B8; text-align:right;">88%</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <span style="width:60px; font-size:12.5px; font-weight:600;">Dan</span>
+          <div style="flex:1; height:8px; border-radius:5px; background:rgba(255,255,255,0.08); overflow:hidden;"><div style="width:74%; height:100%; background:#E15353;"></div></div>
+          <span style="width:36px; font-size:12px; color:#93A2B8; text-align:right;">74%</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <span style="width:60px; font-size:12.5px; font-weight:600;">Elena</span>
+          <div style="flex:1; height:8px; border-radius:5px; background:rgba(255,255,255,0.08); overflow:hidden;"><div style="width:92%; height:100%; background:#4CAF83;"></div></div>
+          <span style="width:36px; font-size:12px; color:#93A2B8; text-align:right;">92%</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

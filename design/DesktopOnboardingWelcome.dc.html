@@ -1,0 +1,49 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .pf-fade { opacity: 0; animation: pfFadeUp .5s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfFadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pfDrift { 0%, 100% { transform: translate(-6%, -4%) scale(1); } 50% { transform: translate(5%, 3%) scale(1.08); } }
+    .pf-cta:hover { filter: brightness(1.08); }
+    .pf-cta:active { transform: scale(0.98); }
+  </style>
+</helmet>
+
+<div style="position:relative; width:1440px; height:900px; overflow:hidden; background:#0D1B2A; border-radius:16px; border:1px solid rgba(255,255,255,0.08); font-family:'Inter',sans-serif; color:#EDEFF2; display:flex; align-items:center; justify-content:center;">
+
+  <div style="position:absolute; top:-140px; left:-120px; width:460px; height:460px; border-radius:50%; background:radial-gradient(circle, rgba(245,166,35,0.18), transparent 70%); filter:blur(40px); animation:pfDrift 20s ease-in-out infinite;"></div>
+  <div style="position:absolute; bottom:-160px; right:-140px; width:460px; height:460px; border-radius:50%; background:radial-gradient(circle, rgba(76,217,192,0.14), transparent 70%); filter:blur(40px); animation:pfDrift 24s ease-in-out infinite reverse;"></div>
+
+  <div class="pf-fade" style="position:relative; width:520px; text-align:center;">
+    <div style="width:88px; height:88px; border-radius:24px; background:linear-gradient(135deg,#F5A623,#4CD9C0); margin:0 auto 28px; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:34px; color:#14213D;">P</div>
+
+    <div style="font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:32px; margin-bottom:14px;">Welcome to Power Fund</div>
+    <div style="font-size:15px; color:#93A2B8; line-height:1.6; margin-bottom:40px;">A simple way to track your group's paluwagan &mdash; contributions, rounds, and payouts, all in one place. Let's walk through how it works.</div>
+
+    <button class="pf-cta" style="width:100%; height:52px; border:none; border-radius:16px; background:linear-gradient(135deg,#F5A623,#e0951d); color:#14213D; font-family:'Inter',sans-serif; font-weight:700; font-size:14.5px; cursor:pointer; margin-bottom:14px;">Get started</button>
+    <a href="#" style="font-size:13px; font-weight:600; color:#93A2B8; text-decoration:none;">Skip for now</a>
+
+    <div style="display:flex; justify-content:center; gap:8px; margin-top:36px;">
+      <div style="width:22px; height:6px; border-radius:3px; background:#F5A623;"></div>
+      <div style="width:6px; height:6px; border-radius:3px; background:rgba(255,255,255,0.18);"></div>
+      <div style="width:6px; height:6px; border-radius:3px; background:rgba(255,255,255,0.18);"></div>
+      <div style="width:6px; height:6px; border-radius:3px; background:rgba(255,255,255,0.18);"></div>
+      <div style="width:6px; height:6px; border-radius:3px; background:rgba(255,255,255,0.18);"></div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

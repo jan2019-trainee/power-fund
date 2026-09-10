@@ -174,6 +174,137 @@ works with no extra Vercel configuration. `vercel.json` sets the cache headers
 the service worker needs (`sw.js` and `index.html` are served `no-cache`); it is
 picked up automatically.
 
+## Turning on member sign-in (Google)
+
+Member accounts are gated by `AUTH_MODE` in `js/config.js` (`off` | `optional` |
+`required`). This is the setup the treasurer does once, in two dashboards.
+
+**1. Google Cloud — create the OAuth client**
+
+- [console.cloud.google.com](https://console.cloud.google.com) → new project.
+- **APIs & Services → OAuth consent screen** (Google has been reorganising this
+  into *Google Auth Platform* with separate Branding / Audience / Clients
+  pages — same three things, different labels). Choose **External**, fill in
+  the app name and your email.
+- Leave publishing status **Testing** and add each member's Google address
+  under **Test users**. In Testing mode only listed addresses can sign in,
+  which suits a five-person fund and avoids Google's verification review.
+- Add **no scopes**. The defaults (email, profile, openid) are all this needs,
+  and adding more is what triggers review.
+- **Credentials → Create Credentials → OAuth client ID → Web application.**
+- Under **Authorized redirect URIs** add your Supabase project's callback —
+  note this is *Supabase's* URL, not the app's:
+
+  ```
+  https://<your-project-ref>.supabase.co/auth/v1/callback
+  ```
+
+- Copy the **Client ID** and **Client Secret**.
+
+**2. Supabase — enable the provider**
+
+- **Authentication → Providers → Google**: toggle on, paste the ID and secret.
+- **Authentication → URL Configuration → Redirect URLs**: add every URL the
+  app is opened at. `js/database.js` sends back
+  `window.location.origin + window.location.pathname`, so `/` and
+  `/index.html` are **separate entries**, and each Vercel preview URL is its
+  own origin:
+
+  ```
+  https://<your-app>.vercel.app/
+  https://<your-app>.vercel.app/index.html
+  https://<project>-git-<branch>-<scope>.vercel.app/
+  https://<project>-git-<branch>-<scope>.vercel.app/index.html
+  http://localhost:8791/index.html
+  ```
+
+- Leave **Site URL** as production. That gives you a free diagnostic: if
+  signing in dumps you on the production site, the URL you actually opened was
+  not in the list above and Supabase fell back to Site URL.
+
+**3. The app**
+
+Set `AUTH_MODE` in `js/config.js` and redeploy:
+
+- `"optional"` first. A first visit **opens on the sign-in screen**, with a
+  **Not now** that steps past it (remembered per device), and the app stays
+  fully usable without an account. This is the mode to share the link in:
+  everyone sees the login without being told where to find it, and anyone not
+  yet on the roster can still use the app.
+- `"required"` once **every member's address is on file**. Without one, that
+  member hits a full-screen dead-end with no way into the app. It does *not*
+  have to wait for migration 011 — the coupling runs one way only: 011 without
+  `required` shows every member a load error, while `required` without 011 is
+  just a gate in front of rules Postgres is not enforcing yet.
+
+**4. The addresses**
+
+A member's Google login is matched to their row **by email** (migration 008).
+Record the addresses in the app rather than by hand: **Menu → Account → Member
+sign-in**. It lists every member with
+
+- the address their login is matched against, editable in place,
+- whether they have signed in yet, or whether no address is on file,
+- **Unlink**, on a member who has signed in — the way back if the wrong Google
+  account claimed the row (nothing else changes: payments, proofs and history
+  all stay), and
+- how far the rollout has got: how many addresses are on file, how many people
+  have signed in, and whether a treasurer is flagged. Those are the same three
+  things `011_preflight.sql` refuses to lock down without — the migration
+  stays the authority, this just saves you running it to find out.
+
+### Transferring the role
+
+The treasurer is `members.is_treasurer` — a flag Postgres checks, not the PIN.
+Handing someone the PIN gives them treasurer mode in the UI and, once
+migration 011 is applied, **no ability to write anything**: every
+treasurer-only policy keys off the flag, and RLS cannot see a PIN.
+
+So the role moves from **Menu → Security → Transfer treasurer role**. Pick a
+member, confirm with the PIN, and the flag moves. You stop being the treasurer
+the moment it saves. Only members who have **signed in** are offered — the
+role is matched to a login, so the flag on an unlinked row would give the fund
+a treasurer nobody can be.
+
+The new treasurer needs the PIN too (or can set their own from Menu →
+Security). The PIN is the daily unlock; the flag is the permission.
+
+**This panel is admin-only, and admin is not the PIN.** The treasurer PIN is
+shared with the whole group by design, so gating this on it would let any
+member put their own address on somebody else's row. It is gated instead on a
+Google-verified login owning a row with `is_treasurer` — the same flag
+migration 011's policies use. That account also gets treasurer mode
+automatically, without typing a PIN it out-ranks; **Lock treasurer mode** in
+Menu → Security still works and lasts until reload, which is how you check
+what the other members see. (If *nobody* is flagged yet, the panel falls back
+to the PIN, so a fund that never ran 008's one-off can still bootstrap.)
+
+Members who are not the treasurer **do not see the Unlock button at all**. It
+still appears to anyone the app cannot identify — signed out, not linked, or
+auth off — because it is the only route to the PIN modal and so to the master
+PIN, which is the fund's way back in if the treasurer PIN is lost.
+
+Blank is a legitimate state: a member with no address simply cannot sign in
+yet. Addresses are stored lowercased, because that is how they are compared.
+The **activity log records the member's name and never the address** — it is
+read by the whole group and lands in the CSV export and the backup file.
+
+**5. When it goes wrong**
+
+| Symptom | Cause |
+| --- | --- |
+| "Google sign-in isn't switched on for this fund yet" | The provider toggle in step 2 |
+| Google says `redirect_uri_mismatch` | Step 1's URI must match character for character |
+| Returns to the app still signed out | The opened URL is missing from Redirect URLs |
+| "You're not on this fund's roster" | That address is on no `members` row |
+| "This fund isn't ready for sign-ins yet" | No member has an email recorded at all |
+| "Someone else has already linked this member" | That row is claimed — **Unlink** it in Menu → Account → Member sign-in |
+
+To check what a deploy is actually serving without trusting a dashboard, open
+`/js/config.js` on the deployed URL and read the `AUTH_MODE` line. It is
+network-first in the service worker and `max-age=0` in `vercel.json`, so
+neither layer can serve you a stale copy.
+
 ## Install as an app (PWA)
 
 The site is a Progressive Web App. Once it is served over HTTPS (Vercel does this
@@ -204,6 +335,12 @@ change and want installed devices to get it, bump the `CACHE` string at the top 
 [`scripts/make-icons.py`](scripts/make-icons.py) (`pip install pillow`, then
 `python scripts/make-icons.py`) — edit that script to change the mark.
 
+**The backup file is sensitive.** "Backup data (JSON)" now contains members'
+email addresses, the account numbers their payouts are sent to, and links to
+their payment screenshots. Keep it somewhere private — it is the fund's
+ledger. It does NOT contain the PINs; those are unreachable from the browser
+once migration 010 is applied.
+
 ## Security limitations — read this
 
 This app has **no authentication**. That is a deliberate choice to keep it simple
@@ -217,19 +354,45 @@ for five people who trust each other.
   user-level protection**, because there are no users to distinguish.
 - Uploads to the `payment-proofs` (screenshots) and `payment-assets` (payment QR)
   buckets are likewise open read/write.
-- The **treasurer PIN is not security**. It is a soft UI lock stored in plain text
-  in the `app_settings` table; anyone technical can bypass it. Use it only to stop
-  accidental edits. This includes the **Payment QR** upload — technically any
-  visitor with the anon key could replace the QR, so treat the site URL as the
-  secret and keep an eye on the activity log.
+- The **treasurer PIN is not security**. It is a soft UI lock; anyone technical
+  can bypass it. Use it only to stop accidental edits. This includes the
+  **Payment QR** upload — technically any visitor with the anon key could
+  replace the QR, so treat the site URL as the secret and keep an eye on the
+  activity log.
+- The PIN digits are **no longer served to the browser** once migration 010 is
+  applied: they move to `app_secrets`, a table with RLS on and no policy, and
+  are only reachable through `pf_check_pin()` / `pf_set_pin()`. Before 010 they
+  were readable by anyone with the site URL.
 
 **What actually protects the data:** keeping the site URL private. Treat the
 Vercel URL like a shared password — share it only with the 5 members, don't post
 it publicly, and don't submit it to search engines.
 
-If you ever need real protection (per-person logins, audit trail, locked-down
-writes), add Supabase Auth and rewrite the RLS policies to check `auth.uid()`.
-That is out of scope for this version.
+**Member accounts are being added** (migration 008), and they are the route to
+real protection — per-person logins, then RLS policies that check `auth.uid()`
+instead of `using (true)`. That work is deliberately staged, and where it has
+got to is controlled by one setting, `AUTH_MODE` in `js/config.js`:
+
+| `AUTH_MODE` | What it does |
+| --- | --- |
+| `"off"` *(shipped default)* | No auth anywhere. Everything above still applies, unchanged. |
+| `"optional"` | A "Sign in with Google" row appears in Menu and signing in works, but the app is fully usable without it. Use this to test on a real phone without locking the other four members out. |
+| `"required"` | No session, no app: the sign-in screen replaces everything. |
+
+Before switching off `"off"`, both of these must be true, or **every member is
+locked out, treasurer included**:
+
+1. Google is enabled under Supabase → Authentication → Providers.
+2. This site's URL is listed under Authentication → URL Configuration →
+   Redirect URLs.
+
+Note what a login does and does not buy you today. RLS is **still**
+`using (true) with check (true)`, so a signed-in member is not yet restricted
+to their own rows, and **the PINs are still readable in plaintext** by anyone
+with the anon key. Signing in currently proves who you are; it does not yet
+stop anyone from writing anything. Tightening RLS and moving the PINs out of
+the client's reach is a later migration — that is the step that turns the login
+into actual protection.
 
 **Never commit:** the `service_role` key, the database password (kept locally in
 `supabase-db-password.local.txt`, which is git-ignored), or real credentials in

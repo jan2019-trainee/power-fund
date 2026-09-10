@@ -1,0 +1,81 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .pf-modal { opacity: 0; animation: pfModalIn .32s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfModalIn { from { opacity: 0; transform: translate(-50%,-50%) translateY(10px) scale(0.98); } to { opacity: 1; transform: translate(-50%,-50%) translateY(0) scale(1); } }
+    .pf-x:hover { background: rgba(255,255,255,0.08) !important; }
+    textarea { font-family:'Inter',sans-serif; }
+    .pf-cta:active { transform: scale(0.98); }
+    @keyframes pfFade { 0%,80% { opacity: 1; } 100% { opacity: 0; } }
+    .pf-copied { animation: pfFade 2.2s ease forwards; }
+  </style>
+</helmet>
+
+<div style="position:relative; width:1440px; height:900px; overflow:hidden; background:#0D1B2A; border-radius:16px; border:1px solid rgba(255,255,255,0.08); font-family:'Inter',sans-serif; color:#EDEFF2;">
+
+  <div style="opacity:0.35; filter:blur(1.5px); display:flex; height:100%;">
+    <div style="width:240px; height:100%; background:rgba(255,255,255,0.02); border-right:1px solid rgba(255,255,255,0.08);"></div>
+    <div style="flex:1; padding:32px 40px;"><div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:24px;">Menu</div></div>
+  </div>
+  <div style="position:absolute; inset:0; background:rgba(5,10,18,0.6);"></div>
+
+  <div class="pf-modal" style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:520px; background:linear-gradient(180deg, rgba(20,42,66,0.98), rgba(13,27,42,0.99)); border:1px solid rgba(255,255,255,0.12); border-radius:22px; box-shadow:0 30px 80px -20px rgba(0,0,0,0.7); padding:28px 30px;">
+
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:18px;">
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:17px;">Share fund status</div>
+      <button class="pf-x" style="width:32px; height:32px; border-radius:9px; background:none; border:none; display:flex; align-items:center; justify-content:center; cursor:pointer;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:16px; height:16px; color:#93A2B8;"><path d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <textarea id="pf-share-text" readonly rows="8" style="width:100%; border-radius:14px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.1); color:#EDEFF2; font-size:12.5px; line-height:1.6; padding:16px; margin-bottom:14px; resize:none;">Power Fund Tracker — Status as of Sep 8
+
+Round 2 of 5 · Collecting · ₱18,000 / ₱30,000 (60%)
+Recipient this round: Ben
+
+Ana — Paid ✓
+Ben — Paid ✓
+Cathy — Submitted, awaiting review
+Dan — Overdue
+Elena — Not due yet
+
+Total collected so far: ₱48,000 / ₱150,000</textarea>
+
+    <div style="display:flex; align-items:center; gap:12px;">
+      <button id="pf-copy-btn" class="pf-cta" style="flex:1; height:48px; border:none; border-radius:14px; background:linear-gradient(135deg,#F5A623,#e0951d); color:#14213D; font-family:'Inter',sans-serif; font-weight:700; font-size:13.5px; cursor:pointer;">Copy to clipboard</button>
+      <span id="pf-copied-msg" style="font-size:12px; color:#4CAF83; font-weight:600; opacity:0;">Copied!</span>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {
+  componentDidMount() {
+    var btn = document.getElementById('pf-copy-btn');
+    var textarea = document.getElementById('pf-share-text');
+    var msg = document.getElementById('pf-copied-msg');
+    if (btn) btn.addEventListener('click', function () {
+      textarea.select();
+      msg.style.opacity = '1';
+      msg.classList.remove('pf-copied');
+      void msg.offsetWidth;
+      msg.classList.add('pf-copied');
+      setTimeout(function () { msg.style.opacity = '0'; }, 2200);
+    });
+  }
+}
+</script>
+</body>
+</html>

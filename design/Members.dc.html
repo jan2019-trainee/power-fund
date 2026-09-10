@@ -1,0 +1,214 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    a { color: #F5A623; }
+    a:hover { color: #ffb733; }
+    .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .pf-fade { opacity: 0; animation: pfFadeUp .5s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfFadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pfDrift1 { 0%, 100% { transform: translate(-8%, -6%) scale(1); } 50% { transform: translate(6%, 4%) scale(1.1); } }
+    @keyframes pfPulseRing {
+      0%, 100% { box-shadow: 0 0 0 2.5px #F5A623, 0 0 0 2.5px rgba(245,166,35,0); }
+      50% { box-shadow: 0 0 0 2.5px #F5A623, 0 0 0 8px rgba(245,166,35,0.22); }
+    }
+    .pf-row:active { background: rgba(255,255,255,0.05) !important; }
+    .pf-chevron { transition: transform .2s ease; }
+    .pf-chevron.open { transform: rotate(90deg); }
+    @keyframes pfPanelIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+    .pf-panel { animation: pfPanelIn .2s ease both; }
+    @media (prefers-reduced-motion: reduce) {
+      .pf-fade { animation: none; opacity: 1; }
+      .pf-glow1 { animation: none; }
+      .pf-pending-ring { animation: none; }
+    }
+  </style>
+</helmet>
+
+<div style="position:relative; width:390px; height:1040px; overflow:hidden; background:#0D1B2A; border-radius:38px; border:1px solid rgba(255,255,255,0.08); font-family:'Inter',sans-serif; color:#EDEFF2;">
+
+  <div class="pf-glow1" style="position:absolute; top:-90px; right:-100px; width:280px; height:280px; border-radius:50%; background:radial-gradient(circle, rgba(245,166,35,0.16), transparent 70%); filter:blur(32px); animation:pfDrift1 18s ease-in-out infinite;"></div>
+
+  <div style="position:relative; z-index:1; padding:28px 20px 24px; height:100%; overflow:hidden;">
+
+    <div class="pf-fade" style="display:flex; align-items:center; gap:10px; margin-bottom:20px;">
+      <button style="width:32px; height:32px; border-radius:50%; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:15px; height:15px; color:#EDEFF2;"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <div>
+        <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:20px;">Members</div>
+        <div style="font-size:12.5px; color:#93A2B8;">5 members &middot; sorted by payout order</div>
+      </div>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:10px;">
+
+      <!-- Ana: order 1, already paid out -->
+      <div class="pf-fade" style="animation-delay:.03s; border-radius:16px; background:rgba(20,42,66,0.5); border:1px solid rgba(255,255,255,0.1); overflow:hidden;">
+        <button class="pf-row" data-member="a" style="width:100%; display:flex; align-items:center; gap:12px; padding:13px 14px; background:none; border:none; cursor:pointer; text-align:left; color:#EDEFF2; font-family:'Inter',sans-serif;">
+          <div style="position:relative; width:46px; height:46px; flex-shrink:0;">
+            <div style="width:46px; height:46px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:16px; box-shadow:0 0 0 2.5px #4CAF83, 0 0 14px 1px rgba(76,175,131,0.4);">A</div>
+            <div style="position:absolute; top:-3px; left:-3px; width:17px; height:17px; border-radius:50%; background:#0D1B2A; border:1.5px solid rgba(255,255,255,0.18); display:flex; align-items:center; justify-content:center; font-size:9px; font-weight:700; color:#93A2B8;">1</div>
+          </div>
+          <div style="flex:1; min-width:0;">
+            <div style="display:flex; align-items:center; gap:6px; margin-bottom:2px;">
+              <span style="font-size:14.5px; font-weight:600;">Ana</span>
+              <span style="font-size:9.5px; font-weight:700; color:#4CAF83; background:rgba(76,175,131,0.14); padding:2px 7px; border-radius:20px;">Paid out</span>
+            </div>
+            <div style="font-size:11.5px; color:#93A2B8;">Payout order #1 &middot; Round 2: paid</div>
+          </div>
+          <svg id="pf-chevron-a" class="icon pf-chevron" viewBox="0 0 24 24" style="width:15px; height:15px; color:#93A2B8; flex-shrink:0;"><polyline points="9 6 15 12 9 18"/></svg>
+        </button>
+        <div id="pf-panel-a" class="pf-panel" style="display:none; padding:0 14px 14px; font-size:11.5px; color:#93A2B8; line-height:1.7; border-top:1px solid rgba(255,255,255,0.06); padding-top:10px;">
+          <div><b style="color:#EDEFF2;">Round 1</b> &mdash; 6 of 6 paid &middot; received the payout</div>
+          <div><b style="color:#EDEFF2;">Round 2</b> &mdash; Cycle 7: <span style="color:#4CAF83; font-weight:600;">paid</span> (Sep 1)</div>
+          <div><b style="color:#EDEFF2;">Rounds 3&ndash;5</b> &mdash; not started</div>
+        </div>
+      </div>
+
+      <!-- Ben: order 2, this round's recipient -->
+      <div class="pf-fade" style="animation-delay:.06s; border-radius:16px; background:rgba(245,166,35,0.08); border:1px solid rgba(245,166,35,0.35); overflow:hidden;">
+        <button class="pf-row" data-member="b" style="width:100%; display:flex; align-items:center; gap:12px; padding:13px 14px; background:none; border:none; cursor:pointer; text-align:left; color:#EDEFF2; font-family:'Inter',sans-serif;">
+          <div style="position:relative; width:46px; height:46px; flex-shrink:0;">
+            <div style="width:46px; height:46px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:16px; box-shadow:0 0 0 2.5px #4CAF83, 0 0 14px 1px rgba(76,175,131,0.4);">B</div>
+            <div style="position:absolute; top:-3px; left:-3px; width:17px; height:17px; border-radius:50%; background:#0D1B2A; border:1.5px solid rgba(255,255,255,0.18); display:flex; align-items:center; justify-content:center; font-size:9px; font-weight:700; color:#93A2B8;">2</div>
+          </div>
+          <div style="flex:1; min-width:0;">
+            <div style="display:flex; align-items:center; gap:6px; margin-bottom:2px;">
+              <span style="font-size:14.5px; font-weight:600;">Ben</span>
+              <span style="font-size:9.5px; font-weight:700; color:#F5A623; background:rgba(245,166,35,0.16); padding:2px 7px; border-radius:20px;">This round</span>
+            </div>
+            <div style="font-size:11.5px; color:#93A2B8;">Payout order #2 &middot; Round 2: paid</div>
+          </div>
+          <svg id="pf-chevron-b" class="icon pf-chevron" viewBox="0 0 24 24" style="width:15px; height:15px; color:#93A2B8; flex-shrink:0;"><polyline points="9 6 15 12 9 18"/></svg>
+        </button>
+        <div id="pf-panel-b" class="pf-panel" style="display:none; padding:0 14px 14px; font-size:11.5px; color:#93A2B8; line-height:1.7; border-top:1px solid rgba(255,255,255,0.08); padding-top:10px;">
+          <div><b style="color:#EDEFF2;">Round 1</b> &mdash; 6 of 6 paid</div>
+          <div><b style="color:#EDEFF2;">Round 2</b> &mdash; Cycle 7: <span style="color:#4CAF83; font-weight:600;">paid</span> (Sep 1) &middot; this round's recipient</div>
+          <div><b style="color:#EDEFF2;">Rounds 3&ndash;5</b> &mdash; not started</div>
+        </div>
+      </div>
+
+      <!-- Cathy: pending — shown expanded by default -->
+      <div class="pf-fade" style="animation-delay:.09s; border-radius:16px; background:rgba(20,42,66,0.5); border:1px solid rgba(255,255,255,0.1); overflow:hidden;">
+        <button class="pf-row" data-member="c" style="width:100%; display:flex; align-items:center; gap:12px; padding:13px 14px; background:none; border:none; cursor:pointer; text-align:left; color:#EDEFF2; font-family:'Inter',sans-serif;">
+          <div style="position:relative; width:46px; height:46px; flex-shrink:0;">
+            <div class="pf-pending-ring" style="width:46px; height:46px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:16px; animation:pfPulseRing 1.8s ease-in-out infinite;">C</div>
+            <div style="position:absolute; top:-3px; left:-3px; width:17px; height:17px; border-radius:50%; background:#0D1B2A; border:1.5px solid rgba(255,255,255,0.18); display:flex; align-items:center; justify-content:center; font-size:9px; font-weight:700; color:#93A2B8;">3</div>
+          </div>
+          <div style="flex:1; min-width:0;">
+            <div style="font-size:14.5px; font-weight:600; margin-bottom:2px;">Cathy</div>
+            <div style="font-size:11.5px; color:#93A2B8;">Payout order #3 &middot; Round 2: <span style="color:#F5A623; font-weight:600;">pending review</span></div>
+          </div>
+          <svg id="pf-chevron-c" class="icon pf-chevron open" viewBox="0 0 24 24" style="width:15px; height:15px; color:#93A2B8; flex-shrink:0;"><polyline points="9 6 15 12 9 18"/></svg>
+        </button>
+        <div id="pf-panel-c" class="pf-panel" style="display:block; padding:0 14px 14px; font-size:11.5px; color:#93A2B8; line-height:1.7; border-top:1px solid rgba(255,255,255,0.06); padding-top:10px;">
+          <div><b style="color:#EDEFF2;">Round 1</b> &mdash; 6 of 6 paid</div>
+          <div><b style="color:#EDEFF2;">Round 2</b> &mdash; Cycle 7: <span style="color:#F5A623; font-weight:600;">pending review</span> (Sep 1) &middot; Cycle 8: not due (Sep 15) &middot; +4 more this round</div>
+          <div><b style="color:#EDEFF2;">Rounds 3&ndash;5</b> &mdash; not started</div>
+        </div>
+      </div>
+
+      <!-- Dan: overdue -->
+      <div class="pf-fade" style="animation-delay:.12s; border-radius:16px; background:rgba(225,83,83,0.06); border:1px solid rgba(225,83,83,0.3); overflow:hidden;">
+        <button class="pf-row" data-member="d" style="width:100%; display:flex; align-items:center; gap:12px; padding:13px 14px; background:none; border:none; cursor:pointer; text-align:left; color:#EDEFF2; font-family:'Inter',sans-serif;">
+          <div style="position:relative; width:46px; height:46px; flex-shrink:0;">
+            <div style="width:46px; height:46px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:16px; box-shadow:0 0 0 2.5px #E15353;">D</div>
+            <div style="position:absolute; top:-3px; left:-3px; width:17px; height:17px; border-radius:50%; background:#0D1B2A; border:1.5px solid rgba(255,255,255,0.18); display:flex; align-items:center; justify-content:center; font-size:9px; font-weight:700; color:#93A2B8;">4</div>
+          </div>
+          <div style="flex:1; min-width:0;">
+            <div style="display:flex; align-items:center; gap:6px; margin-bottom:2px;">
+              <span style="font-size:14.5px; font-weight:600;">Dan</span>
+              <span style="font-size:9.5px; font-weight:700; color:#E15353; background:rgba(225,83,83,0.14); padding:2px 7px; border-radius:20px;">Overdue</span>
+            </div>
+            <div style="font-size:11.5px; color:#93A2B8;">Payout order #4 &middot; Round 2: unpaid</div>
+          </div>
+          <svg id="pf-chevron-d" class="icon pf-chevron" viewBox="0 0 24 24" style="width:15px; height:15px; color:#93A2B8; flex-shrink:0;"><polyline points="9 6 15 12 9 18"/></svg>
+        </button>
+        <div id="pf-panel-d" class="pf-panel" style="display:none; padding:0 14px 14px; font-size:11.5px; color:#93A2B8; line-height:1.7; border-top:1px solid rgba(225,83,83,0.2); padding-top:10px;">
+          <div><b style="color:#EDEFF2;">Round 1</b> &mdash; 6 of 6 paid</div>
+          <div><b style="color:#EDEFF2;">Round 2</b> &mdash; Cycle 7: <span style="color:#E15353; font-weight:600;">overdue</span> (Sep 1) &middot; Cycle 8: not due (Sep 15) &middot; +4 more this round</div>
+          <div><b style="color:#EDEFF2;">Rounds 3&ndash;5</b> &mdash; not started</div>
+        </div>
+      </div>
+
+      <!-- Elena: upcoming -->
+      <div class="pf-fade" style="animation-delay:.15s; border-radius:16px; background:rgba(20,42,66,0.5); border:1px solid rgba(255,255,255,0.1); overflow:hidden;">
+        <button class="pf-row" data-member="e" style="width:100%; display:flex; align-items:center; gap:12px; padding:13px 14px; background:none; border:none; cursor:pointer; text-align:left; color:#EDEFF2; font-family:'Inter',sans-serif;">
+          <div style="position:relative; width:46px; height:46px; flex-shrink:0;">
+            <div style="width:46px; height:46px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:16px; box-shadow:0 0 0 1.5px rgba(255,255,255,0.14); color:#93A2B8;">E</div>
+            <div style="position:absolute; top:-3px; left:-3px; width:17px; height:17px; border-radius:50%; background:#0D1B2A; border:1.5px solid rgba(255,255,255,0.18); display:flex; align-items:center; justify-content:center; font-size:9px; font-weight:700; color:#93A2B8;">5</div>
+          </div>
+          <div style="flex:1; min-width:0;">
+            <div style="font-size:14.5px; font-weight:600; margin-bottom:2px; color:#EDEFF2;">Elena</div>
+            <div style="font-size:11.5px; color:#93A2B8;">Payout order #5 &middot; Round 2: not due yet</div>
+          </div>
+          <svg id="pf-chevron-e" class="icon pf-chevron" viewBox="0 0 24 24" style="width:15px; height:15px; color:#93A2B8; flex-shrink:0;"><polyline points="9 6 15 12 9 18"/></svg>
+        </button>
+        <div id="pf-panel-e" class="pf-panel" style="display:none; padding:0 14px 14px; font-size:11.5px; color:#93A2B8; line-height:1.7; border-top:1px solid rgba(255,255,255,0.06); padding-top:10px;">
+          <div><b style="color:#EDEFF2;">Round 1</b> &mdash; 6 of 6 paid</div>
+          <div><b style="color:#EDEFF2;">Round 2</b> &mdash; Cycle 7: not due yet (Sep 1)</div>
+          <div><b style="color:#EDEFF2;">Rounds 3&ndash;5</b> &mdash; not started</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div style="height:100px;"></div>
+  </div>
+
+  <!-- bottom tab bar -->
+  <div style="position:absolute; left:0; right:0; bottom:0; height:78px; background:rgba(13,27,42,0.86); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); border-top:1px solid rgba(255,255,255,0.08); display:flex; align-items:center; justify-content:space-around; padding-bottom:10px; z-index:2;">
+    <button style="background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px 12px;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#93A2B8;"><path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9a1 1 0 0 0 1 1h3v-6h4v6h3a1 1 0 0 0 1-1v-9"/></svg>
+      <span style="font-size:10px; font-weight:600; color:#93A2B8;">Home</span>
+    </button>
+    <button style="background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px 10px;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#93A2B8;"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg>
+      <span style="font-size:10px; font-weight:600; color:#93A2B8;">Rounds</span>
+    </button>
+    <button style="background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px 10px;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#93A2B8;"><line x1="8" y1="7" x2="20" y2="7"/><line x1="8" y1="12" x2="20" y2="12"/><line x1="8" y1="17" x2="20" y2="17"/><circle cx="4" cy="7" r="1" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="4" cy="17" r="1" fill="currentColor" stroke="none"/></svg>
+      <span style="font-size:10px; font-weight:600; color:#93A2B8;">Activity</span>
+    </button>
+    <button style="background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px 12px;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#93A2B8;"><polyline points="3 16 9 10 13 14 21 5"/><polyline points="15 5 21 5 21 11"/></svg>
+      <span style="font-size:10px; font-weight:600; color:#93A2B8;">Insights</span>
+    </button>
+    <button style="background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px 12px;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#93A2B8;"><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>
+      <span style="font-size:10px; font-weight:600; color:#93A2B8;">Menu</span>
+    </button>
+  </div>
+
+</div>
+</x-dc>
+<script data-dc-script>
+class Component extends DCLogic {
+  componentDidMount() {
+    var ids = ['a', 'b', 'c', 'd', 'e'];
+    ids.forEach(function (id) {
+      var row = document.querySelector('[data-member="' + id + '"]');
+      var panel = document.getElementById('pf-panel-' + id);
+      var chevron = document.getElementById('pf-chevron-' + id);
+      if (!row || !panel || !chevron) return;
+      row.addEventListener('click', function () {
+        var open = panel.style.display === 'block';
+        panel.style.display = open ? 'none' : 'block';
+        chevron.classList.toggle('open', !open);
+      });
+    });
+  }
+}
+</script>
+</body>
+</html>

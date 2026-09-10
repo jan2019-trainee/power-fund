@@ -1,0 +1,196 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    a { color: #F5A623; }
+    a:hover { color: #ffb733; }
+    .icon { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .pf-fade { opacity: 0; animation: pfFadeUp .5s cubic-bezier(.22,1,.36,1) both; }
+    @keyframes pfFadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pfDrift1 { 0%, 100% { transform: translate(-8%, -6%) scale(1); } 50% { transform: translate(6%, 4%) scale(1.1); } }
+    .pf-bar { animation: pfBarGrow .8s cubic-bezier(.22,1,.36,1) both; transform-box: fill-box; transform-origin: bottom; }
+    @keyframes pfBarGrow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+    @keyframes pfBattPulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+    .pf-batt-bolt { animation: pfBattPulse 1.8s ease-in-out infinite; }
+    @media (prefers-reduced-motion: reduce) {
+      .pf-fade { animation: none; opacity: 1; }
+      .pf-glow1 { animation: none; }
+      .pf-bar { animation: none; }
+      .pf-batt-bolt { animation: none; opacity: 1; }
+    }
+  </style>
+</helmet>
+
+<div style="position:relative; width:390px; height:980px; overflow:hidden; background:#0D1B2A; border-radius:38px; border:1px solid rgba(255,255,255,0.08); font-family:'Inter',sans-serif; color:#EDEFF2;">
+
+  <div class="pf-glow1" style="position:absolute; top:-90px; left:-100px; width:300px; height:300px; border-radius:50%; background:radial-gradient(circle, rgba(245,166,35,0.22), transparent 70%); filter:blur(32px); animation:pfDrift1 18s ease-in-out infinite;"></div>
+
+  <div style="position:relative; z-index:1; padding:28px 20px 24px; height:100%; overflow:hidden;">
+
+    <div class="pf-fade" style="margin-bottom:20px;">
+      <div style="font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:20px; margin-bottom:3px;">Insights</div>
+      <div style="font-size:12.5px; color:#93A2B8;">How the group is doing</div>
+    </div>
+
+    <div class="pf-fade" style="animation-delay:.05s; display:flex; gap:12px; margin-bottom:22px;">
+      <div style="flex:1; padding:16px; border-radius:16px; background:rgba(20,42,66,0.55); border:1px solid rgba(255,255,255,0.1);">
+        <div style="font-size:11px; color:#93A2B8; text-transform:uppercase; letter-spacing:.04em; margin-bottom:8px;">On-time rate</div>
+        <div style="font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:26px; margin-bottom:6px;">91%</div>
+        <div style="display:flex; align-items:center; gap:4px; color:#4CAF83; font-size:11px; font-weight:600;">
+          <svg class="icon" viewBox="0 0 24 24" style="width:11px; height:11px;"><polyline points="3 16 9 10 13 14 21 5"/><polyline points="15 5 21 5 21 11"/></svg>
+          +4% vs last round
+        </div>
+      </div>
+      <div style="flex:1; padding:16px; border-radius:16px; background:rgba(20,42,66,0.55); border:1px solid rgba(255,255,255,0.1);">
+        <div style="font-size:11px; color:#93A2B8; text-transform:uppercase; letter-spacing:.04em; margin-bottom:8px;">Total raised</div>
+        <div style="font-family:'Space Grotesk',sans-serif; font-weight:800; font-size:21px; margin-bottom:6px;">&#8369;48,000</div>
+        <div style="height:5px; border-radius:3px; background:rgba(255,255,255,0.08); overflow:hidden; margin-bottom:6px;">
+          <div style="height:100%; width:32%; border-radius:3px; background:linear-gradient(90deg,#F5A623,#4CD9C0);"></div>
+        </div>
+        <div style="font-size:10.5px; color:#93A2B8;">of &#8369;150,000 goal</div>
+      </div>
+    </div>
+
+    <div class="pf-fade" style="animation-delay:.1s; margin-bottom:22px;">
+      <div style="font-family:'Space Grotesk',sans-serif; font-size:15px; font-weight:600; margin-bottom:12px;">Member standing</div>
+      <div style="padding:14px 16px; border-radius:16px; background:rgba(20,42,66,0.5); border:1px solid rgba(255,255,255,0.1); display:flex; flex-direction:column; gap:12px;">
+
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:26px; height:26px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:11px; flex-shrink:0;">A</div>
+          <span style="width:44px; font-size:12.5px; color:#EDEFF2; flex-shrink:0;">Ana</span>
+          <div style="flex:1; height:7px; border-radius:4px; background:rgba(255,255,255,0.08); overflow:hidden;"><div style="height:100%; width:100%; border-radius:4px; background:#4CAF83;"></div></div>
+          <span style="font-size:11.5px; font-weight:700; color:#4CAF83; width:32px; text-align:right; flex-shrink:0;">100%</span>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:26px; height:26px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:11px; flex-shrink:0;">B</div>
+          <span style="width:44px; font-size:12.5px; color:#EDEFF2; flex-shrink:0;">Ben</span>
+          <div style="flex:1; height:7px; border-radius:4px; background:rgba(255,255,255,0.08); overflow:hidden;"><div style="height:100%; width:98%; border-radius:4px; background:#4CAF83;"></div></div>
+          <span style="font-size:11.5px; font-weight:700; color:#4CAF83; width:32px; text-align:right; flex-shrink:0;">98%</span>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:26px; height:26px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:11px; flex-shrink:0;">E</div>
+          <span style="width:44px; font-size:12.5px; color:#EDEFF2; flex-shrink:0;">Elena</span>
+          <div style="flex:1; height:7px; border-radius:4px; background:rgba(255,255,255,0.08); overflow:hidden;"><div style="height:100%; width:92%; border-radius:4px; background:#4CAF83;"></div></div>
+          <span style="font-size:11.5px; font-weight:700; color:#4CAF83; width:32px; text-align:right; flex-shrink:0;">92%</span>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:26px; height:26px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:11px; flex-shrink:0;">C</div>
+          <span style="width:44px; font-size:12.5px; color:#EDEFF2; flex-shrink:0;">Cathy</span>
+          <div style="flex:1; height:7px; border-radius:4px; background:rgba(255,255,255,0.08); overflow:hidden;"><div style="height:100%; width:88%; border-radius:4px; background:#F5A623;"></div></div>
+          <span style="font-size:11.5px; font-weight:700; color:#F5A623; width:32px; text-align:right; flex-shrink:0;">88%</span>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:26px; height:26px; border-radius:50%; background:#1B3A57; display:flex; align-items:center; justify-content:center; font-family:'Space Grotesk',sans-serif; font-weight:600; font-size:11px; flex-shrink:0;">D</div>
+          <span style="width:44px; font-size:12.5px; color:#EDEFF2; flex-shrink:0;">Dan</span>
+          <div style="flex:1; height:7px; border-radius:4px; background:rgba(255,255,255,0.08); overflow:hidden;"><div style="height:100%; width:74%; border-radius:4px; background:#E15353;"></div></div>
+          <span style="font-size:11.5px; font-weight:700; color:#E15353; width:32px; text-align:right; flex-shrink:0;">74%</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="pf-fade" style="animation-delay:.15s;">
+      <div style="font-family:'Space Grotesk',sans-serif; font-size:15px; font-weight:600; margin-bottom:12px;">Fund timeline</div>
+      <div style="padding:16px; border-radius:16px; background:rgba(20,42,66,0.5); border:1px solid rgba(255,255,255,0.1);">
+        <svg width="0" height="0" style="position:absolute;"><defs><linearGradient id="pfBattGrad" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#4CD9C0"/><stop offset="100%" stop-color="#F5A623"/></linearGradient></defs></svg>
+        <div style="display:flex; align-items:flex-end; justify-content:space-between; height:132px; margin-bottom:10px;">
+
+          <div style="display:flex; flex-direction:column; align-items:center; gap:6px;">
+            <span style="font-size:9px; color:#4CAF83; font-weight:700;">&#8369;30k</span>
+            <svg width="34" height="104" viewBox="0 0 34 104">
+              <rect x="12" y="0" width="10" height="6" rx="2" fill="#4CAF83"/>
+              <rect x="2" y="6" width="30" height="98" rx="8" fill="rgba(76,175,131,0.1)" stroke="#4CAF83" stroke-width="2"/>
+              <clipPath id="bcR1"><rect x="5" y="9" width="24" height="92" rx="5"/></clipPath>
+              <g clip-path="url(#bcR1)"><rect class="pf-bar" x="5" y="9" width="24" height="92" fill="#4CAF83"/></g>
+            </svg>
+            <span style="font-size:10.5px; color:#93A2B8; font-weight:600;">R1</span>
+          </div>
+
+          <div style="display:flex; flex-direction:column; align-items:center; gap:6px;">
+            <span style="font-size:9px; color:#F5A623; font-weight:700; display:flex; align-items:center; gap:2px;">
+              <svg class="icon pf-batt-bolt" viewBox="0 0 24 24" style="width:8px; height:8px; color:#F5A623; stroke-width:3;"><polygon points="13 2 3 14 11 14 9 22 21 10 13 10 13 2" fill="#F5A623" stroke="none"/></svg>
+              &#8369;18k
+            </span>
+            <svg width="34" height="104" viewBox="0 0 34 104">
+              <rect x="12" y="0" width="10" height="6" rx="2" fill="#F5A623"/>
+              <rect x="2" y="6" width="30" height="98" rx="8" fill="rgba(255,255,255,0.03)" stroke="#F5A623" stroke-width="2"/>
+              <clipPath id="bcR2"><rect x="5" y="9" width="24" height="92" rx="5"/></clipPath>
+              <g clip-path="url(#bcR2)"><rect class="pf-bar" style="animation-delay:.08s;" x="5" y="45.8" width="24" height="55.2" fill="url(#pfBattGrad)"/></g>
+            </svg>
+            <span style="font-size:10.5px; color:#EDEFF2; font-weight:700;">R2</span>
+          </div>
+
+          <div style="display:flex; flex-direction:column; align-items:center; gap:6px;">
+            <span style="font-size:9px; color:transparent;">&nbsp;</span>
+            <svg width="34" height="104" viewBox="0 0 34 104">
+              <rect x="12" y="0" width="10" height="6" rx="2" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="1.5"/>
+              <rect x="2" y="6" width="30" height="98" rx="8" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="1.5" stroke-dasharray="4 4"/>
+            </svg>
+            <span style="font-size:10.5px; color:#93A2B8;">R3</span>
+          </div>
+
+          <div style="display:flex; flex-direction:column; align-items:center; gap:6px;">
+            <span style="font-size:9px; color:transparent;">&nbsp;</span>
+            <svg width="34" height="104" viewBox="0 0 34 104">
+              <rect x="12" y="0" width="10" height="6" rx="2" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="1.5"/>
+              <rect x="2" y="6" width="30" height="98" rx="8" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="1.5" stroke-dasharray="4 4"/>
+            </svg>
+            <span style="font-size:10.5px; color:#93A2B8;">R4</span>
+          </div>
+
+          <div style="display:flex; flex-direction:column; align-items:center; gap:6px;">
+            <span style="font-size:9px; color:transparent;">&nbsp;</span>
+            <svg width="34" height="104" viewBox="0 0 34 104">
+              <rect x="12" y="0" width="10" height="6" rx="2" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="1.5"/>
+              <rect x="2" y="6" width="30" height="98" rx="8" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="1.5" stroke-dasharray="4 4"/>
+            </svg>
+            <span style="font-size:10.5px; color:#93A2B8;">R5</span>
+          </div>
+        </div>
+        <div style="font-size:11.5px; color:#93A2B8; text-align:center; padding-top:10px; border-top:1px solid rgba(255,255,255,0.08);">1 of 5 rounds completed &middot; Round 2 in progress</div>
+      </div>
+      <div style="height:90px;"></div>
+    </div>
+  </div>
+
+  <!-- bottom tab bar -->
+  <div style="position:absolute; left:0; right:0; bottom:0; height:78px; background:rgba(13,27,42,0.86); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); border-top:1px solid rgba(255,255,255,0.08); display:flex; align-items:center; justify-content:space-around; padding-bottom:10px; z-index:2;">
+    <button style="background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px 10px;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#93A2B8;"><path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9a1 1 0 0 0 1 1h3v-6h4v6h3a1 1 0 0 0 1-1v-9"/></svg>
+      <span style="font-size:10px; font-weight:600; color:#93A2B8;">Home</span>
+    </button>
+    <button style="background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px 10px;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#93A2B8;"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg>
+      <span style="font-size:10px; font-weight:600; color:#93A2B8;">Rounds</span>
+    </button>
+    <button style="background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px 10px;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#93A2B8;"><line x1="8" y1="7" x2="20" y2="7"/><line x1="8" y1="12" x2="20" y2="12"/><line x1="8" y1="17" x2="20" y2="17"/><circle cx="4" cy="7" r="1" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="4" cy="17" r="1" fill="currentColor" stroke="none"/></svg>
+      <span style="font-size:10px; font-weight:600; color:#93A2B8;">Activity</span>
+    </button>
+    <button style="background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px 12px;">
+      <div style="width:36px; height:24px; border-radius:10px; background:rgba(245,166,35,0.14); display:flex; align-items:center; justify-content:center;">
+        <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#F5A623;"><polyline points="3 16 9 10 13 14 21 5"/><polyline points="15 5 21 5 21 11"/></svg>
+      </div>
+      <span style="font-size:10px; font-weight:700; color:#F5A623;">Insights</span>
+    </button>
+    <button style="background:none; border:none; display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; padding:6px 12px;">
+      <svg class="icon" viewBox="0 0 24 24" style="width:19px; height:19px; color:#93A2B8;"><circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>
+      <span style="font-size:10px; font-weight:600; color:#93A2B8;">Menu</span>
+    </button>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

@@ -233,6 +233,13 @@
   let memberEmailValues = {};
   let memberAccountsError = null;
 
+  /* Transfer treasurer role. `members.is_treasurer` is what Postgres checks
+   * (010's helpers, 011's policies), and until now it could only be changed by
+   * hand in SQL — so the role could only be handed over by whoever held the
+   * Supabase password. */
+  let transferRoleModalOpen = false;
+  let transferRolePick = null;
+
   let lightboxSrc = null; // image URL shown full-screen in the zoom lightbox
 
   let qrModalOpen = false; // treasurer "Payment QR code" panel
@@ -867,6 +874,33 @@
    *
    *  `unlockedViaMaster` is cleared on purpose — this is not the recovery path,
    *  and leaving it set would put the recovery banner up for no reason. */
+  /** Should the header offer treasurer mode at all?
+   *
+   *  Hidden from a member the app can POSITIVELY IDENTIFY as somebody other
+   *  than the treasurer. That is the only case it is hidden in, and the
+   *  direction matters: every uncertain case shows the button.
+   *
+   *  Why so cautious — the button is the only route to the PIN modal, and the
+   *  PIN modal is the only route to the MASTER PIN, which is the fund's
+   *  recovery path. Hiding it from someone we merely cannot identify (auth
+   *  off, signed out, a link that broke, nobody flagged yet) would take the
+   *  fund's own way back in away with it. So: hide it when we know it is not
+   *  their button, show it whenever we do not know.
+   *
+   *  Under migration 011 this stops being cosmetic — a non-treasurer's writes
+   *  are refused by Postgres regardless — but hiding it first means they meet
+   *  a button that is not theirs, rather than an error that looks like a bug. */
+  function canUnlockTreasurer() {
+    if (unlocked) return true; // never strand somebody inside the mode
+    const mine = editableMember();
+    if (!mine) return true; // not linked: no identity to judge them by
+    if (mine.is_treasurer) return true;
+    // A linked member who is not flagged — but with NOBODY flagged, the fund
+    // has no treasurer account yet and the PIN is still the only authority
+    // that exists. Same bootstrap escape hatch as isTreasurerAccount().
+    return !((state && state.members) || []).some((m) => m.is_treasurer);
+  }
+
   function applyAdminAutoUnlock() {
     if (treasurerLockedByChoice || unlocked) return;
     const mine = editableMember();
@@ -2094,12 +2128,15 @@
     if (kind === "reset") return doReset();
     if (kind === "restore") return doRestoreBackup(ctx.data);
     if (kind === "unlink") return doUnlinkMember(ctx.memberId);
+    if (kind === "transferRole") return doTransferRole(ctx.toId);
   }
 
   // ===================================================================
   // Treasurer PIN
   // ===================================================================
   function toggleUnlock() {
+    // Exported on PowerFund, so hiding the button is not the gate.
+    if (!canUnlockTreasurer()) return;
     if (unlocked) {
       unlocked = false;
       unlockedViaMaster = false;
@@ -2959,6 +2996,132 @@
       });
       await reload();
       showSuccess("Account unlinked.");
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+
+  // ===================================================================
+  // Transfer treasurer role
+  //
+  // `members.is_treasurer` is the real permission: 010's pf_is_treasurer()
+  // reads it, and after 011 every treasurer-only policy in Postgres keys off
+  // it. The PIN cannot do this job — RLS runs inside the database on a request
+  // that carries a Google session and nothing else, so no policy can ask
+  // whether somebody typed a PIN.
+  //
+  // Which is why handing over the PIN does NOT hand over the role once 011 is
+  // applied: the new person gets treasurer mode in the UI and is refused every
+  // write. This screen moves the flag, so the role actually moves.
+  //
+  // No migration needed. 010's guard already says the treasurer "may reorder,
+  // flag and re-address anyone", so the treasurer changing somebody's
+  // is_treasurer is permitted today.
+  // ===================================================================
+
+  function openTransferRole() {
+    if (!isTreasurerAccount()) return; // exported handler; see openWhoAmIPicker
+    transferRolePick = null;
+    transferRoleModalOpen = true;
+    render();
+  }
+  function closeTransferRole() {
+    transferRoleModalOpen = false;
+    transferRolePick = null;
+    render();
+  }
+  function pickTransferRole(memberId) {
+    transferRolePick = memberId || null;
+    render();
+  }
+
+  /** Only a member who could actually hold the role: linked (the flag is
+   *  meaningless on a row no login owns — pf_is_treasurer() matches on
+   *  auth_user_id, so flagging an unlinked row would create a fund with a
+   *  treasurer nobody can be) and not already the treasurer. */
+  function transferCandidates() {
+    return sortedMembers().filter((m) => m.auth_user_id && !m.is_treasurer);
+  }
+
+  function confirmTransferRole() {
+    if (!isTreasurerAccount() || !transferRolePick) return;
+    const to = state.members.find((m) => String(m.id) === String(transferRolePick));
+    if (!to) return;
+    const me = editableMember();
+    openConfirm({
+      kind: "transferRole",
+      ctx: { toId: to.id },
+      title: `Make ${to.name} the treasurer?`,
+      bodyHtml:
+        `<b>${escapeHtml(to.name)}</b> will be able to confirm payments, reject them, ` +
+        `release payouts and change fund settings.<br><br>` +
+        `<b>You will not.</b> ${escapeHtml(
+          (me && me.name) || "You"
+        )} keeps every payment and all history, but stops being the treasurer ` +
+        `the moment this saves — including losing this screen.<br><br>` +
+        `Tell ${escapeHtml(to.name)} the treasurer PIN, or ask them to change it ` +
+        `from Menu → Security once they are in.`,
+      confirmLabel: `Make ${to.name} treasurer`,
+      // The PIN is not the authority here — the flag is — but this is a
+      // permission change, and every other irreversible action in the app
+      // asks for it. Being the odd one out would be the surprise.
+      requirePin: true,
+    });
+  }
+
+  async function doTransferRole(toId) {
+    if (busy || !isTreasurerAccount()) return;
+    const to = state.members.find((m) => String(m.id) === String(toId));
+    const me = editableMember();
+    if (!to || !me) return;
+
+    busy = true;
+    render();
+    try {
+      // ORDER IS NOT ARBITRARY. Grant first, then resign.
+      //
+      // Both directions can fail half-way — two network calls, no transaction
+      // across them — so the question is which half-state to be left in:
+      //
+      //   grant then resign : fails -> TWO treasurers. Visible in the panel,
+      //                       flagged by 011's preflight, and either of them
+      //                       can finish the job. Self-healing.
+      //   resign then grant : fails -> NOBODY is treasurer. Nobody can confirm
+      //                       a payment, release a payout, or set the flag
+      //                       back, because setting it requires being the
+      //                       treasurer. Only recoverable in SQL.
+      //
+      // So: grant first, always.
+      await window.DB.updateMember(to.id, { is_treasurer: true });
+      await window.DB.updateMember(me.id, { is_treasurer: false });
+      await logActivity(`Treasurer role transferred from ${me.name} to ${to.name}`, {
+        type: "admin",
+        memberId: to.id,
+      });
+      closeTransferRole();
+      await reload();
+
+      // Not the treasurer any more: drop treasurer mode rather than leaving
+      // the buttons up. After 011 they would be refused by Postgres anyway,
+      // and before it they would work — which is worse, not better.
+      unlocked = false;
+      unlockedViaMaster = false;
+      treasurerLockedByChoice = false;
+
+      // Verify rather than assume. If the second write did not land we are in
+      // the two-treasurer state above, and saying "done" would hide it.
+      const flagged = (state.members || []).filter((m) => m.is_treasurer);
+      if (flagged.length === 1 && String(flagged[0].id) === String(to.id)) {
+        showSuccess(`${to.name} is now the treasurer.`);
+      } else {
+        showError(
+          `${to.name} is now a treasurer, but ${me.name} still is too — the second ` +
+            `change didn't save. Either of you can finish it from Menu → Security.`
+        );
+      }
     } catch (e) {
       showError(e.message);
     } finally {
@@ -4349,6 +4512,7 @@
       shareModalOpen ||
       editNamesModalOpen ||
       memberAccountsModalOpen ||
+      transferRoleModalOpen ||
       reorderModalOpen ||
       restoreState != null ||
       lightboxSrc ||
@@ -4380,6 +4544,7 @@
     if (reorderModalOpen) return closeReorderModal();
     if (editNamesModalOpen) return closeEditNamesModal();
     if (memberAccountsModalOpen) return closeMemberAccountsModal();
+    if (transferRoleModalOpen) return closeTransferRole();
     if (shareModalOpen) return closeShareModal();
     if (startRoundConfirming) return cancelStartRound();
   }
@@ -4911,15 +5076,20 @@
         <p class="subtitle subtitle-short">${escapeHtml(short)}</p>`;
         })()}
       </div>
-      <button class="unlock-btn ${
-        unlocked ? "unlocked" : ""
-      }" onclick="PowerFund.toggleUnlock()" aria-label="${
-        unlocked ? "Treasurer mode is on — tap to lock" : "Unlock treasurer mode"
-      }">
-        ${icon(unlocked ? "unlocked" : "lock", 13)}<span>${
-          unlocked ? "Treasurer" : "Unlock"
-        }</span>
-      </button>
+      ${
+        canUnlockTreasurer()
+          ? `<button class="unlock-btn ${unlocked ? "unlocked" : ""}"
+               onclick="PowerFund.toggleUnlock()" aria-label="${
+                 unlocked
+                   ? "Treasurer mode is on — tap to lock"
+                   : "Unlock treasurer mode"
+               }">
+              ${icon(unlocked ? "unlocked" : "lock", 13)}<span>${
+                unlocked ? "Treasurer" : "Unlock"
+              }</span>
+            </button>`
+          : ""
+      }
     </div>`;
 
     // Optional mode with an account this fund does not recognise. Not a wall
@@ -6049,6 +6219,71 @@
       </div>`;
     }
 
+    // ADMIN: move `members.is_treasurer` — the flag Postgres actually checks.
+    if (transferRoleModalOpen && isTreasurerAccount()) {
+      const me = editableMember();
+      const cands = transferCandidates();
+      // A member who has never signed in cannot hold the role: pf_is_treasurer()
+      // matches on auth_user_id, so the flag on an unlinked row would produce a
+      // fund whose treasurer nobody can actually be. Say so rather than listing
+      // them and failing later.
+      const unlinked = sortedMembers().filter((m) => !m.auth_user_id && !m.is_treasurer);
+
+      html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeTransferRole()">
+        <div class="modal transfer-role-modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <h3 id="dlg-title">Transfer treasurer role</h3>
+          <p class="modal-sub">The treasurer is a permission in the database, not
+            the PIN. Move it here and the new treasurer can really confirm
+            payments and release payouts — telling someone the PIN does not do
+            that.</p>
+          ${
+            me
+              ? `<p class="transfer-current">${icon("unlocked", 13)} Currently
+                   <b>${escapeHtml(me.name)}</b> — you</p>`
+              : ""
+          }
+          ${
+            cands.length
+              ? cands
+                  .map(
+                    (m) => `<button type="button" class="transfer-row${
+                      String(transferRolePick) === String(m.id) ? " picked" : ""
+                    }" onclick="PowerFund.pickTransferRole('${String(m.id).replace(
+                      /'/g,
+                      "\\'"
+                    )}')">
+                      ${memberAvatar(m.name, "idle", 30, m.avatar_url)}
+                      <span class="transfer-row-name">${escapeHtml(m.name)}</span>
+                      <span class="transfer-row-mark">${
+                        String(transferRolePick) === String(m.id) ? icon("check", 14) : ""
+                      }</span>
+                    </button>`
+                  )
+                  .join("")
+              : `<p class="transfer-empty">Nobody else has signed in yet, so there
+                   is nobody who can take the role. The treasurer has to be a
+                   member with an account — the database matches the role to a
+                   login, not to a name.</p>`
+          }
+          ${
+            unlinked.length
+              ? `<p class="transfer-note">Not listed: ${escapeHtml(
+                  unlinked.map((m) => m.name).join(", ")
+                )} — ${
+                  unlinked.length === 1 ? "hasn't" : "haven't"
+                } signed in yet.</p>`
+              : ""
+          }
+          <div class="modal-actions">
+            <button class="modal-btn-primary" onclick="PowerFund.confirmTransferRole()" ${
+              busy || !transferRolePick ? "disabled" : ""
+            }>Continue</button>
+            <button class="modal-btn-secondary" onclick="PowerFund.closeTransferRole()">Cancel</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
     // Treasurer: payment QR code panel
     if (qrModalOpen && unlocked) {
       const current = qrImageUrl();
@@ -6641,6 +6876,10 @@
     openReorderModal,
     closeReorderModal,
     skipSignInPrompt,
+    openTransferRole,
+    closeTransferRole,
+    pickTransferRole,
+    confirmTransferRole,
     openEditNamesModal,
     openMemberAccountsModal,
     closeMemberAccountsModal,

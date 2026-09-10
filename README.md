@@ -253,6 +253,22 @@ sign-in**. It lists every member with
   things `011_preflight.sql` refuses to lock down without — the migration
   stays the authority, this just saves you running it to find out.
 
+### Transferring the role
+
+The treasurer is `members.is_treasurer` — a flag Postgres checks, not the PIN.
+Handing someone the PIN gives them treasurer mode in the UI and, once
+migration 011 is applied, **no ability to write anything**: every
+treasurer-only policy keys off the flag, and RLS cannot see a PIN.
+
+So the role moves from **Menu → Security → Transfer treasurer role**. Pick a
+member, confirm with the PIN, and the flag moves. You stop being the treasurer
+the moment it saves. Only members who have **signed in** are offered — the
+role is matched to a login, so the flag on an unlinked row would give the fund
+a treasurer nobody can be.
+
+The new treasurer needs the PIN too (or can set their own from Menu →
+Security). The PIN is the daily unlock; the flag is the permission.
+
 **This panel is admin-only, and admin is not the PIN.** The treasurer PIN is
 shared with the whole group by design, so gating this on it would let any
 member put their own address on somebody else's row. It is gated instead on a
@@ -262,6 +278,11 @@ automatically, without typing a PIN it out-ranks; **Lock treasurer mode** in
 Menu → Security still works and lasts until reload, which is how you check
 what the other members see. (If *nobody* is flagged yet, the panel falls back
 to the PIN, so a fund that never ran 008's one-off can still bootstrap.)
+
+Members who are not the treasurer **do not see the Unlock button at all**. It
+still appears to anyone the app cannot identify — signed out, not linked, or
+auth off — because it is the only route to the PIN modal and so to the master
+PIN, which is the fund's way back in if the treasurer PIN is lost.
 
 Blank is a legitimate state: a member with no address simply cannot sign in
 yet. Addresses are stored lowercased, because that is how they are compared.

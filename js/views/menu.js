@@ -95,6 +95,19 @@ window.PFViews.menu = function (ctx) {
           ? "The group's way back in if the treasurer PIN is forgotten"
           : "Not set — there is currently no way back from a forgotten PIN"
       ),
+      // ADMIN ONLY. The role is `members.is_treasurer`, which Postgres checks
+      // and the PIN cannot express — so handing over the PIN hands over the
+      // buttons and none of the power once migration 011 is applied.
+      ...(isAdmin
+        ? [
+            row(
+              "users",
+              "Transfer treasurer role",
+              "PowerFund.openTransferRole()",
+              "Hand the role to another member who has signed in"
+            ),
+          ]
+        : []),
       row(
         "lock",
         "Lock treasurer mode",

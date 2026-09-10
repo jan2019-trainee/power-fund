@@ -2005,23 +2005,33 @@ async function signInAdmin(browser, errors) {
   await withAuthMode(notAdmin, "optional", { signedIn: true, email: "sarah@example.com" });
   await notAdmin.goto(BASE, { waitUntil: "domcontentloaded" });
   await notAdmin.waitForTimeout(2500);
+  // Stronger than "the PIN does not reveal the panel": a linked non-treasurer
+  // cannot reach treasurer mode at all now, so the PIN-holder-sees-admin-tools
+  // scenario is not reachable through the UI in the first place.
   check(
     "signin-admin/a non-treasurer login is NOT auto-unlocked",
-    /unlock/i.test(await notAdmin.locator(".unlock-btn").innerText())
+    (await notAdmin.locator(".mode-card.on").count()) === 0 &&
+      (await notAdmin.locator(".unlock-btn").count()) === 0
   );
-  await unlockTreasurer(notAdmin);
   await notAdmin.locator(".tab-item", { hasText: "Menu" }).click();
   await notAdmin.waitForTimeout(400);
   check(
-    "signin-admin/the PIN alone does not reveal Member sign-in",
+    "signin-admin/a non-treasurer never sees Member sign-in",
     (await notAdmin.locator(".menu-row", { hasText: "Member sign-in" }).count()) === 0
+  );
+  // Nor the role transfer, which is the other admin-only surface.
+  check(
+    "signin-admin/nor Transfer treasurer role",
+    (await notAdmin.locator(".menu-row", { hasText: "Transfer treasurer role" }).count()) === 0
   );
   // The handler is exported on PowerFund, so hiding the row is not the gate.
   await notAdmin.evaluate(() => window.PowerFund.openMemberAccountsModal());
+  await notAdmin.evaluate(() => window.PowerFund.openTransferRole());
   await notAdmin.waitForTimeout(400);
   check(
-    "signin-admin/the handler refuses a non-treasurer outright",
-    (await notAdmin.locator(".member-accounts-modal").count()) === 0
+    "signin-admin/both handlers refuse a non-treasurer outright",
+    (await notAdmin.locator(".member-accounts-modal").count()) === 0 &&
+      (await notAdmin.locator(".transfer-role-modal").count()) === 0
   );
   await notAdmin.close();
 
@@ -2152,6 +2162,200 @@ async function accountLinking(browser, errors) {
       /roster/i.test(await soft.locator(".save-warning-banner").first().innerText())
   );
   await soft.close();
+}
+
+/** The unlock button is hidden from a member the app can identify as somebody
+ *  other than the treasurer — and shown in every case it cannot, because it is
+ *  the only route to the PIN modal and so to the MASTER PIN, the fund's
+ *  recovery path. */
+async function unlockVisibility(browser, errors) {
+  // A linked non-treasurer: hidden.
+  const member = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  member.on("pageerror", (e) => errors.push(`unlock-vis/member: ${e}`));
+  const r1 = rosterWithEmails();
+  r1[1].auth_user_id = FAKE_USER_ID; // Sarah; Regine is flagged
+  await serve(member, { ...M.TABLE_DATA, members: r1 });
+  await withAuthMode(member, "optional", { signedIn: true, email: "sarah@example.com" });
+  await member.goto(BASE, { waitUntil: "domcontentloaded" });
+  await member.waitForTimeout(2500);
+  check(
+    "unlock-vis/a linked non-treasurer never sees Unlock",
+    (await member.locator(".unlock-btn").count()) === 0
+  );
+  // Hiding a button is not a gate — the handler is on window.
+  await member.evaluate(() => window.PowerFund.toggleUnlock());
+  await member.waitForTimeout(400);
+  check(
+    "unlock-vis/and the handler refuses them too",
+    (await member.locator(".modal-overlay").count()) === 0
+  );
+  await member.close();
+
+  // The flagged treasurer: shown, and already unlocked.
+  const tre = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  tre.on("pageerror", (e) => errors.push(`unlock-vis/treasurer: ${e}`));
+  const r2 = rosterWithEmails();
+  r2[0].auth_user_id = FAKE_USER_ID;
+  await serve(tre, { ...M.TABLE_DATA, members: r2 });
+  await withAuthMode(tre, "optional", { signedIn: true, email: "regine@example.com" });
+  await tre.goto(BASE, { waitUntil: "domcontentloaded" });
+  await tre.waitForTimeout(2500);
+  check(
+    "unlock-vis/the treasurer still gets the button",
+    (await tre.locator(".unlock-btn").count()) === 1
+  );
+  await tre.close();
+
+  // NOT SIGNED IN: shown. This is the lockout guard — the button is the only
+  // route to the PIN modal, and the PIN modal is the only route to the master
+  // PIN. Hiding it from someone merely unidentified would take the fund's own
+  // way back in with it.
+  const anon = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  anon.on("pageerror", (e) => errors.push(`unlock-vis/anon: ${e}`));
+  await serve(anon, { ...M.TABLE_DATA, members: rosterWithEmails() });
+  await withAuthMode(anon, "optional");
+  await anon.goto(BASE, { waitUntil: "domcontentloaded" });
+  await anon.waitForTimeout(2200);
+  check(
+    "unlock-vis/an unidentified visitor still gets it (master-PIN route)",
+    (await anon.locator(".unlock-btn").count()) === 1
+  );
+  await anon.close();
+
+  // NOBODY FLAGGED: shown, even to a linked member. The fund has no treasurer
+  // account yet, so the PIN is the only authority that exists.
+  const boot = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  boot.on("pageerror", (e) => errors.push(`unlock-vis/bootstrap: ${e}`));
+  const r3 = rosterWithEmails().map((m) => ({ ...m, is_treasurer: false }));
+  r3[1].auth_user_id = FAKE_USER_ID;
+  await serve(boot, { ...M.TABLE_DATA, members: r3 });
+  await withAuthMode(boot, "optional", { signedIn: true, email: "sarah@example.com" });
+  await boot.goto(BASE, { waitUntil: "domcontentloaded" });
+  await boot.waitForTimeout(2500);
+  check(
+    "unlock-vis/with nobody flagged, the PIN is still the way in",
+    (await boot.locator(".unlock-btn").count()) === 1
+  );
+  await boot.close();
+}
+
+/** Transfer treasurer role — moving `members.is_treasurer`, the flag Postgres
+ *  checks. The PIN cannot express this, which is the whole point. */
+async function transferRole(browser, errors) {
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`transfer: ${e}`));
+  const members = rosterWithEmails();
+  members[0].auth_user_id = FAKE_USER_ID; // Regine, the flagged treasurer
+  members[1].auth_user_id = "22222222-2222-2222-2222-222222222222"; // Sarah, linked
+  members[3].auth_user_id = null; // Clara has never signed in
+  // A PIN really is set here: the confirm step asks for it, and M.SETTINGS
+  // ships with treasurer_pin null (which is the never-set-up fund).
+  const data = {
+    ...M.TABLE_DATA,
+    members,
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234" },
+  };
+
+  await serve(page, data);
+  const writes = [];
+  await page.route("**/rest/v1/members**", async (route) => {
+    const req = route.request();
+    if (req.method() === "GET") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(data.members),
+      });
+    }
+    let body = {};
+    try {
+      body = JSON.parse(req.postData() || "{}");
+    } catch (e) {}
+    const target = data.members.find((m) => req.url().includes(m.id));
+    writes.push({ name: target && target.name, body });
+    Object.assign(target || {}, body);
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([target || {}]),
+    });
+  });
+  await withAuthMode(page, "optional", { signedIn: true, email: "regine@example.com" });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
+  await page.locator(".tab-item", { hasText: "Menu" }).click();
+  await page.waitForTimeout(400);
+
+  const rowSel = page.locator(".menu-row", { hasText: "Transfer treasurer role" });
+  check("transfer/Security offers it to the admin", (await rowSel.count()) === 1);
+  await rowSel.first().click();
+  await page.waitForTimeout(400);
+  check(
+    "transfer/it names the current holder",
+    /Regine/.test(await page.locator(".transfer-current").innerText())
+  );
+  // The role is matched to a LOGIN (pf_is_treasurer reads auth_user_id), so a
+  // member who has never signed in cannot hold it and must not be offered.
+  check(
+    "transfer/only members who have signed in are offered",
+    (await page.locator(".transfer-row").count()) === 1 &&
+      /Sarah/.test(await page.locator(".transfer-row").innerText())
+  );
+  check(
+    "transfer/and it says why the others are missing",
+    /Clara/.test(await page.locator(".transfer-note").innerText())
+  );
+  check(
+    "transfer/Continue is disabled until somebody is picked",
+    await page.locator(".modal-btn-primary", { hasText: "Continue" }).isDisabled()
+  );
+
+  await page.locator(".transfer-row").first().click();
+  await page.waitForTimeout(300);
+  await page.locator(".modal-btn-primary", { hasText: "Continue" }).click();
+  await page.waitForTimeout(400);
+  const confirmText = await page.locator(".modal[role=dialog]").last().innerText();
+  check(
+    "transfer/the confirm spells out that YOU lose the role",
+    /will not/i.test(confirmText) && /Sarah/.test(confirmText)
+  );
+  check(
+    "transfer/and asks for the PIN, like every other irreversible action",
+    (await page.locator(".modal[role=dialog] input").count()) > 0
+  );
+
+  // Filled by selector, not typed: the confirm dialog does not focus its PIN
+  // field, so keyboard input would land nowhere. (Noted for QA — it means the
+  // phone keyboard does not come up on its own either.)
+  await page.locator('.modal input[placeholder="Treasurer PIN"]').fill("1234");
+  await page.waitForTimeout(200);
+  await page.locator(".confirm-yes").click();
+  await page.waitForTimeout(1800);
+
+  // ORDER IS THE POINT. Grant first, then resign: a failure between the two
+  // leaves two treasurers (visible, self-healing) rather than none (which
+  // nobody can undo, because setting the flag requires being the treasurer).
+  const flagWrites = writes.filter((w) => "is_treasurer" in w.body);
+  check(
+    "transfer/grants the new treasurer BEFORE resigning",
+    flagWrites.length === 2 &&
+      flagWrites[0].name === "Sarah" &&
+      flagWrites[0].body.is_treasurer === true &&
+      flagWrites[1].name === "Regine" &&
+      flagWrites[1].body.is_treasurer === false,
+    JSON.stringify(flagWrites)
+  );
+  // Losing the role must drop treasurer mode: before 011 those buttons would
+  // still work, which is worse than being refused.
+  check(
+    "transfer/the outgoing treasurer loses treasurer mode",
+    (await page.locator(".mode-card.on").count()) === 0
+  );
+  check(
+    "transfer/and the unlock button with it",
+    (await page.locator(".unlock-btn").count()) === 0
+  );
+  await page.close();
 }
 
 /** The optional-mode first-run sign-in prompt. Exists so a shared link
@@ -3225,6 +3429,8 @@ async function bootFailure(browser) {
   await signInAdmin(browser, errors);
   await accountLinking(browser, errors);
   console.log("\nOnboarding");
+  await unlockVisibility(browser, errors);
+  await transferRole(browser, errors);
   await signInPrompt(browser, errors);
   await onboarding(browser, errors);
   console.log("\nBackup round-trip");

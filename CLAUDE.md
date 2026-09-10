@@ -541,6 +541,52 @@ exported handlers — is gated on it, never on `unlocked`.
   route to their own name and photo is Menu → Account → **Edit my profile**,
   which already existed for exactly this reason. Two smoke tests had to move
   to a non-treasurer login because of this.
+- **The unlock button is hidden** from a member the app can positively
+  identify as not the treasurer (`canUnlockTreasurer()`), and `toggleUnlock()`
+  refuses them — the button is not the gate. **Shown in every uncertain
+  case**: auth off, signed out, not linked, or nobody flagged. The direction
+  is deliberate and is a recovery decision, not a UX one — the button is the
+  only route to the PIN modal, and the PIN modal is the only route to the
+  MASTER PIN. Hiding it from somebody merely unidentified would take the
+  fund's own way back in with it. Do not "tighten" this to hide it whenever
+  the viewer is not the flagged treasurer.
+
+## Transferring the treasurer role
+
+**A product decision the owner took explicitly**, after the conflict below was
+put to them: the role moves by moving `members.is_treasurer`, and only members
+who have signed in may hold it.
+
+**The conflict that prompted it.** The owner's model was "everyone can enter
+treasurer mode with the PIN, and the role transfers by handing over the PIN".
+That works today and **stops working the moment 011 is applied**: every
+treasurer-only policy keys off `is_treasurer`, the PIN appears nowhere in
+them, and RLS cannot see a PIN at all — a policy runs inside Postgres on a
+request carrying a Google session and nothing else. So after 011 the PIN would
+transfer the buttons and none of the power, which is worse than either
+alternative because it looks like it worked. Recorded here because it is
+exactly the kind of thing `CLAUDE.md` rule 9 says to flag rather than decide.
+
+Menu → Security → **Transfer treasurer role** (admin only). Three things in it
+worth not undoing:
+
+- **Grant first, then resign.** Two network calls with no transaction across
+  them, so the only question is which half-state to fail into. Grant-then-
+  resign leaves TWO treasurers: visible in the sign-in panel, caught by 011's
+  preflight, and either of them can finish the job. Resign-then-grant leaves
+  NONE — and nobody can set the flag back, because setting it requires being
+  the treasurer. That is SQL-only recovery. The order is the safety property.
+- **It verifies afterwards** and reports the two-treasurer state plainly
+  rather than saying "done". A test asserts the write order.
+- **Only linked members are offered.** `pf_is_treasurer()` matches on
+  `auth_user_id`, so flagging an unlinked row would produce a fund whose
+  treasurer nobody can actually be. The screen names who is missing and why.
+
+Losing the role drops `unlocked` immediately — before 011 those buttons would
+still *work*, which is worse than being refused.
+
+No migration needed: 010's guard already lets the treasurer "reorder, flag and
+re-address anyone".
 
 ## The optional-mode sign-in prompt
 

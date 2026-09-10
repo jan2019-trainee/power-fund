@@ -115,15 +115,48 @@ body {
   border-left: 3px solid var(--border);
   border-radius: 12px;
 }
+/* Icon tile · name + status word over a detail line · Change, all on one row,
+   as the mockup draws it. No wrap: the row was wrapping the "Change" link onto
+   its own line and stacking a long sentence, which made the state with nothing
+   to do the tallest card on the screen. */
 .my-status-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 11px;
+  flex-wrap: nowrap;
 }
-.my-status-text { font-size: 13.5px; color: var(--text-primary); line-height: 1.5; }
+.my-status-icon {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+}
+.my-status-icon .icon { display: block; }
+.my-status-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 13.5px;
+  color: var(--text-primary);
+  line-height: 1.35;
+}
+.my-status-line { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .my-status-text b { font-family: 'Space Grotesk', sans-serif; }
+.my-status-detail {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .my-status-change {
   flex-shrink: 0;
   background: none;
@@ -138,7 +171,10 @@ body {
 }
 .my-status-change:hover { color: var(--accent); }
 .my-status-cta {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   width: 100%;
   margin-top: 10px;
   padding: 11px 14px;
@@ -158,6 +194,39 @@ body {
 .my-status-pending { border-left-color: var(--pending-review); }
 .my-status-due { border-left-color: var(--accent); }
 .my-status-overdue { border-left-color: var(--danger); }
+
+/* The tile and the status word carry the same hue, so the state is legible
+   from the icon alone and confirmed by the word — never colour on its own. */
+.my-status-paid .my-status-icon,
+.my-status-done .my-status-icon { background: var(--success-soft); color: var(--success); }
+.my-status-pending .my-status-icon { background: var(--pending-review-soft); color: var(--pending-review); }
+.my-status-due .my-status-icon { background: var(--accent-soft); color: var(--accent); }
+.my-status-overdue .my-status-icon,
+.my-status-rejected .my-status-icon { background: var(--danger-soft); color: var(--danger); }
+.my-status-paid .my-status-line b,
+.my-status-done .my-status-line b { color: var(--success); }
+.my-status-pending .my-status-line b { color: var(--pending-review); }
+.my-status-due .my-status-line b { color: var(--accent); }
+.my-status-overdue .my-status-line b,
+.my-status-rejected .my-status-line b { color: var(--danger); }
+
+/* Paying ahead is optional, so it does not wear the primary treatment — the
+   card would otherwise shout at a member who owes nothing. */
+.my-status-cta.optional {
+  background: none;
+  box-shadow: none;
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 12.5px;
+  min-height: 40px;
+  padding: 9px 12px;
+}
+.my-status-cta.optional:hover {
+  filter: none;
+  border-color: var(--accent);
+  color: var(--accent);
+}
 .my-status-rejected { border-left-color: var(--danger); }
 
 /* PINNED, and above the modal layer. This sat in normal document flow with no
@@ -342,12 +411,26 @@ body {
   flex-wrap: wrap;
   gap: 8px;
 }
+/* The collected figure and its "/ ₱30,000 goal" qualifier. The qualifier is
+   one phrase: it may drop to a second line as a unit, but it must never split
+   so that "goal" strands on its own — which is what happened at the funded
+   amount, where both figures are their widest. */
 .battery-amount {
   font-family: 'Space Grotesk', sans-serif;
   font-size: 30px;
   font-weight: 700;
+  line-height: 1.15;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 8px;
 }
-.battery-amount span { color: var(--text-muted); font-size: 17px; font-weight: 500; }
+.battery-amount span {
+  color: var(--text-muted);
+  font-size: 17px;
+  font-weight: 500;
+  white-space: nowrap;
+}
 .battery-meta { color: var(--text-muted); font-size: 13px; }
 
 .battery-shell {
@@ -1583,6 +1666,41 @@ textarea:focus-visible,
 }
 
 /* ---- Hero: lead with the round, then money, then "to go", then who-paid ---- */
+/* One pill carrying round, position and state — the mockup's header. */
+.hero-round-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  max-width: 100%;
+}
+.hero-round-pill > span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hero-round-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+.hero-round-pill .icon { flex: 0 0 auto; display: block; }
+.hero-round-pill.collecting { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); }
+.hero-round-pill.payout_pending { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.hero-round-pill.completed { color: var(--success); border-color: color-mix(in srgb, var(--success) 40%, transparent); }
+.spark-up { color: var(--success); font-weight: 600; }
+
 .hero-round-line {
   display: flex;
   align-items: center;
@@ -2291,7 +2409,15 @@ body::after {
   letter-spacing: 0.04em;
   color: var(--text-muted);
 }
-.hero-gauge-meta { font-size: 13px; color: var(--text-muted); line-height: 1.6; }
+.hero-gauge-meta {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.hero-gauge-meta .icon { flex: 0 0 auto; margin-top: 3px; }
 .hero-gauge-meta b { color: var(--text-primary); }
 
 /* Motion — entrance for the view's own content, plus the slow ambient drift
@@ -2679,10 +2805,12 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   margin-top: -1px;
 }
 .roster-mark .icon { display: block; }
-.roster-mark.check { color: var(--success); }
-.roster-mark.clock { color: var(--pending-review); }
-.roster-mark.alert { color: var(--danger); }
-.roster-mark.rejected { color: var(--danger); }
+/* rm- prefixed: a bare .check/.clock modifier collides with the legacy
+   cycle-cell classes of the same name, which carry their own 28px box. */
+.roster-mark.rm-check { color: var(--success); }
+.roster-mark.rm-clock { color: var(--pending-review); }
+.roster-mark.rm-alert { color: var(--danger); }
+.roster-mark.rm-rejected { color: var(--danger); }
 
 .rounds-link {
   width: 100%;

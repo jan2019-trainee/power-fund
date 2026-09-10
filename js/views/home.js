@@ -14,7 +14,7 @@ window.PFViews.home = function (ctx) {
     members, rounds, allDone, curRound, curStatus, curCollected,
     heroRecipient, pct, prevPendingRounds, canStartNext, pendingCount,
     overdueCount, remainingToGo, payCycle, payCycleDue, cyclePaidCount,
-    myMember, myStatus, ROUND_PILL, state, unlocked, busy,
+    myMember, myStatus, ROUND_PILL, ROUND_PILL_WORD, state, unlocked, busy,
     attentionQueueExpanded, overdueListOpen, startRoundConfirming,
     escapeHtml, inlineArg, icon, batteryCell, memberAvatar,
     sparkline, C,
@@ -95,12 +95,30 @@ window.PFViews.home = function (ctx) {
   // am I on this device" — never forced, never gates anything. ----------
   html += (function () {
     if (myMember && myStatus) {
+      // The mockup's shape: a tinted icon tile, the name and status word on
+      // one line with the detail beneath, and "Change" to the right. Compact —
+      // the old card stacked a long single sentence over a full-width button,
+      // which made the most common state (nothing to do) the tallest thing on
+      // the screen.
+      const optional = myStatus.kind === "paid";
       return `<div class="my-status-card my-status-${myStatus.kind}">
         <div class="my-status-row">
-          <span class="my-status-text"><span class="status-dot"></span><b>${escapeHtml(
-            myMember.name
-          )}</b> — ${myStatus.label}</span>
-          <button type="button" class="my-status-change" onclick="PowerFund.openWhoAmIPicker()">Not you?</button>
+          ${
+            myStatus.mark
+              ? `<span class="my-status-icon">${icon(myStatus.mark, 16)}</span>`
+              : ""
+          }
+          <span class="my-status-text">
+            <span class="my-status-line">${escapeHtml(myMember.name)} · <b>${escapeHtml(
+              myStatus.word || myStatus.label
+            )}</b></span>
+            ${
+              myStatus.detail
+                ? `<span class="my-status-detail">${escapeHtml(myStatus.detail)}</span>`
+                : ""
+            }
+          </span>
+          <button type="button" class="my-status-change" onclick="PowerFund.openWhoAmIPicker()">Change</button>
         </div>
         ${
           // Suppressed while a rejection is showing: the rejected card directly
@@ -108,11 +126,13 @@ window.PFViews.home = function (ctx) {
           // same cycle. Two buttons in two colours doing one job, on the one
           // screen where the member is already asking why their money vanished.
           myStatus.actionCycle && !myRejection
-            ? `<button type="button" class="my-status-cta" onclick="PowerFund.openContributeModal('${inlineArg(
+            ? `<button type="button" class="my-status-cta${
+                optional ? " optional" : ""
+              }" onclick="PowerFund.openContributeModal('${inlineArg(
                 myMember.id
-              )}', ${myStatus.actionCycle})">＋ ${
-                myStatus.kind === "paid" ? "Pay ahead" : "Record my payment"
-              } — ${C.peso(C.CONTRIBUTION_AMOUNT)}</button>`
+              )}', ${myStatus.actionCycle})">${icon("plus", 14)}<span>${
+                optional ? "Pay ahead" : "Record my payment"
+              } — ${C.peso(C.CONTRIBUTION_AMOUNT)}</span></button>`
             : ""
         }
       </div>`;
@@ -372,20 +392,25 @@ window.PFViews.home = function (ctx) {
   html += `<div class="battery-hero ${allDone ? "fund-complete" : ""}">
     <div class="hero-round-line">
       ${
+        // One pill carrying round, position and state — "ROUND 2 OF 5 ·
+        // COLLECTING" — instead of a heading plus a separate status chip. The
+        // recipient moves to the footer line below; it is useful but it is not
+        // the headline, and on a phone it pushed the state chip onto its own
+        // row.
         allDone
-          ? `<span class="hero-round-num">${icon(
+          ? `<span class="hero-round-pill completed">${icon(
               "party",
-              17
-            )}<span>Fund complete — all ${C.TOTAL_ROUNDS} rounds paid out</span></span>`
-          : `<span class="hero-round-num">Round ${curRound} of ${C.TOTAL_ROUNDS}${
-              heroRecipient ? ` — ${escapeHtml(heroRecipient.name)}` : ""
-            }</span> ${ROUND_PILL[curStatus]}`
+              13
+            )}<span>Fund complete · all ${C.TOTAL_ROUNDS} rounds paid out</span></span>`
+          : `<span class="hero-round-pill ${curStatus}"><span class="hero-round-dot"></span><span>Round ${curRound} of ${
+              C.TOTAL_ROUNDS
+            } · ${escapeHtml(ROUND_PILL_WORD[curStatus] || curStatus)}</span></span>`
       }
     </div>
     <div class="battery-amount">${
       allDone
         ? `${C.peso(C.TARGET_AMOUNT)} <span>/ ${C.peso(C.TARGET_AMOUNT)}</span>`
-        : `${C.peso(curCollected)} <span>/ ${C.peso(C.GOAL_PER_ROUND)}</span>`
+        : `${C.peso(curCollected)} <span>/ ${C.peso(C.GOAL_PER_ROUND)} goal</span>`
     }</div>
     <div class="hero-gauge" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(
       pct
@@ -411,8 +436,18 @@ window.PFViews.home = function (ctx) {
     </div>
     <div class="hero-gauge-meta">${
       allDone
-        ? "<b>Fund fully funded</b>"
-        : `<b>${C.peso(remainingToGo)}</b> still to collect this round`
+        ? `${icon("users", 13)}<span><b>Fund fully funded</b> · ${C.peso(
+            C.TARGET_AMOUNT
+          )} paid out</span>`
+        : // The mockup's line, plus the recipient the pill above displaced.
+          // The cycle's own date is deliberately not repeated here: the
+          // member's status card states their date, and Rounds carries every
+          // date — a third copy only lengthened the line into a wrap.
+          `${icon("users", 13)}<span><b>${cyclePaidCount} of ${
+            members.length
+          } members paid</b> · ${C.peso(remainingToGo)} to go${
+            heroRecipient ? ` · payout to ${escapeHtml(heroRecipient.name)}` : ""
+          }</span>`
     }</div>
     ${
       pendingCount || overdueCount
@@ -425,20 +460,6 @@ window.PFViews.home = function (ctx) {
               ? `<b style="color:#E15353">${overdueCount} overdue</b>`
               : ""
           }</div>`
-        : ""
-    }
-    ${
-      // Just the count line. The per-member badges that used to sit here were
-      // a second row of the same information the Members strip below already
-      // carries — that strip is now colour-coded by this cycle's payment
-      // status, so one row of circles answers "who still owes" instead of a
-      // row of name pills and a row of avatars saying the same thing.
-      payCycle
-        ? `<div class="cycle-status">
-             <div class="cycle-status-head">${
-               payCycleDue ? C.formatDate(payCycleDue) : `Cycle ${payCycle}`
-             } · <b>${cyclePaidCount} / ${members.length} paid</b> this cycle</div>
-           </div>`
         : ""
     }
     <button class="share-btn" onclick="PowerFund.openShareModal()">${icon(
@@ -513,33 +534,39 @@ window.PFViews.home = function (ctx) {
           const overdue =
             payCycle != null &&
             C.isOverdue(state.contributions, state.cycles, m.id, payCycle);
-          const ring =
-            cycleStatus === 2
-              ? "paid"
-              : cycleStatus === 1
-              ? "pending"
-              : cycleStatus === 3
-              ? "rejected"
-              : overdue
-              ? "overdue"
-              : "idle";
-          const said =
-            cycleStatus === 2
-              ? "paid this cycle"
-              : cycleStatus === 1
-              ? "sent, awaiting review"
-              : cycleStatus === 3
-              ? "rejected — needs sending again"
-              : overdue
-              ? "overdue"
-              : payCycle == null
-              ? "nothing due"
-              : "not paid yet";
+          // payCycle is null once the round is fully funded (or the fund is
+          // finished), which only happens when every member has paid every
+          // cycle in it — so that is "paid", not "nothing to show". They were
+          // all rendering neutral with no glyph on exactly the screen that
+          // says the round is complete.
+          const allPaid = payCycle == null;
+          const ring = allPaid
+            ? "paid"
+            : cycleStatus === 2
+            ? "paid"
+            : cycleStatus === 1
+            ? "pending"
+            : cycleStatus === 3
+            ? "rejected"
+            : overdue
+            ? "overdue"
+            : "idle";
+          const said = allPaid
+            ? "paid up"
+            : cycleStatus === 2
+            ? "paid this cycle"
+            : cycleStatus === 1
+            ? "sent, awaiting review"
+            : cycleStatus === 3
+            ? "rejected — needs sending again"
+            : overdue
+            ? "overdue"
+            : "not paid yet";
           // The glyph beside the name, as the mockup draws it (✓ Ana · ◷ You ·
           // ⚠ Dan · Elena). Nothing for a cycle that simply isn't due — that
           // is not a state anyone needs to act on.
           const mark =
-            cycleStatus === 2
+            allPaid || cycleStatus === 2
               ? "check"
               : cycleStatus === 1
               ? "clock"
@@ -558,8 +585,13 @@ window.PFViews.home = function (ctx) {
             </span>
             <span class="roster-name">${
               mark
-                ? `<span class="roster-mark ${
-                    cycleStatus === 3 ? "rejected" : mark
+                ? // Namespaced modifier: a bare "check" here collided with the
+                  // unrelated legacy .check cycle-cell class (style.css), which
+                  // carries its own 28px box — so the tick rendered nearly
+                  // three times its size and squeezed the name into an
+                  // ellipsis.
+                  `<span class="roster-mark rm-${
+                    cycleStatus === 3 && !allPaid ? "rejected" : mark
                   }">${icon(mark, 10)}</span>`
                 : ""
             }<span class="roster-name-text">${escapeHtml(shown)}</span></span>

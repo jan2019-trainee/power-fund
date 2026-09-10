@@ -1245,6 +1245,29 @@ async function qaFixes(browser, errors) {
     }
     return { rowFlex: cs.display, rowClip: cs.textOverflow, textClip: ts.textOverflow, dy };
   });
+  // A bare .check/.clock modifier collides with the legacy cycle-cell classes
+  // of the same name, which carry a 28px box — the tick rendered ~3x size and
+  // ellipsised the name. Assert the glyph stays glyph-sized and nothing clips.
+  const glyphFit = await chips.evaluate(() =>
+    [...document.querySelectorAll(".roster-chip")].map((c) => {
+      const t = c.querySelector(".roster-name-text");
+      const m = c.querySelector(".roster-mark");
+      return {
+        mark: m ? Math.round(m.getBoundingClientRect().width) : 0,
+        clipped: t.scrollWidth > t.clientWidth + 1,
+      };
+    })
+  );
+  check(
+    "qa/status glyph keeps its declared size",
+    glyphFit.every((g) => g.mark === 0 || g.mark <= 14),
+    JSON.stringify(glyphFit)
+  );
+  check(
+    "qa/member names are not clipped by the glyph",
+    glyphFit.every((g) => !g.clipped),
+    JSON.stringify(glyphFit)
+  );
   check(
     "qa/glyph and name share an optical centre",
     !!nameBox && nameBox.rowFlex === "flex" && nameBox.textClip === "ellipsis" && nameBox.dy <= 1.5,

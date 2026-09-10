@@ -1993,7 +1993,25 @@
         <path d="M${xy[0]} L${xy.join(" L")} L${W} ${H} L0 ${H} Z" fill="url(#sparkFill)"/>
         <polyline points="${xy.join(" ")}" fill="none" stroke="url(#sparkStroke)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
       </svg>
-      <div class="hero-spark-total">${Calc.peso(max)} collected to date</div>
+      <div class="hero-spark-total">${(function () {
+        // The mockup's caption is momentum ("↗ +₱4,500 this week"), not a
+        // running total the ₱ figure above already states. Real money: the
+        // sum of confirmed contributions whose paid_at falls in the last 7
+        // days. Falls back to the total when nothing landed this week, so a
+        // quiet week reads as quiet rather than as zero.
+        const now = Date.now();
+        const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+        // Bounded at both ends. paid_at is written at confirm time so it should
+        // never be in the future, but a clock skew or an imported row would
+        // otherwise land inside "this week" forever and inflate the figure.
+        const week = paid.reduce(
+          (n, p) => (p.t >= weekAgo && p.t <= now ? n + p.amt : n),
+          0
+        );
+        return week > 0
+          ? `<span class="spark-up">↗ +${Calc.peso(week)}</span> this week`
+          : `${Calc.peso(max)} collected to date`;
+      })()}</div>
     </div>`;
   }
 
@@ -3240,6 +3258,9 @@
       if (allDone) {
         myStatus = {
           kind: "done",
+          word: "Fund complete",
+          detail: `All ${C.TOTAL_ROUNDS} rounds collected and paid out — thanks!`,
+          mark: "party",
           label: `All ${C.TOTAL_ROUNDS} rounds complete — thanks, ${escapeHtml(
             myMember.name
           )}!`,
@@ -3251,6 +3272,9 @@
         // that only happens once every member has paid every cycle in it.
         myStatus = {
           kind: "paid",
+          word: "Paid up",
+          detail: `Round ${curRound} is fully funded — nothing to send`,
+          mark: "check",
           label: `You're paid up — Round ${curRound} is fully funded`,
           actionCycle: null,
         };
@@ -3263,6 +3287,11 @@
         if (myOverdue > 0) {
           myStatus = {
             kind: "overdue",
+            word: "Overdue",
+            detail: `${myOverdue} cycle${
+              myOverdue === 1 ? "" : "s"
+            } unpaid past the due date`,
+            mark: "alert",
             label: `Payment overdue — ${myOverdue} cycle${
               myOverdue === 1 ? "" : "s"
             } unpaid past due`,
@@ -3271,11 +3300,23 @@
         } else if (myCycleStatus === C.STATUS_PENDING) {
           myStatus = {
             kind: "pending",
+            word: "Submitted",
+            detail: "Awaiting treasurer verification",
+            mark: "clock",
             label: "Submitted — awaiting treasurer verification",
             actionCycle: null,
           };
         } else if (myCycleStatus === C.STATUS_PAID) {
-          myStatus = { kind: "paid", label: "You're paid up", actionCycle: null };
+          myStatus = {
+            kind: "paid",
+            word: "Paid",
+            detail: `This cycle is confirmed${
+              payCycleDue ? " — " + C.formatDate(payCycleDue) : ""
+            }`,
+            mark: "check",
+            label: "You're paid up",
+            actionCycle: null,
+          };
         } else if (myCycleStatus === C.STATUS_REJECTED) {
           // The card used to read "Payment due" here, so the one state that
           // needs explaining looked identical to a cycle nobody had touched.
@@ -3283,6 +3324,9 @@
           // just has to agree with it.
           myStatus = {
             kind: "rejected",
+            word: "Not accepted",
+            detail: "Please send this payment again",
+            mark: "alert",
             label: "Payment not accepted — please send it again",
             actionCycle: null,
           };
@@ -3306,11 +3350,25 @@
           myStatus = dueSoon
             ? {
                 kind: "due",
+                word: "Payment due",
+                detail: payCycleDue
+                  ? `Due ${C.formatDate(payCycleDue)}${
+                      daysToDue <= 0
+                        ? " — today"
+                        : daysToDue === 1
+                        ? " — tomorrow"
+                        : ` — in ${daysToDue} days`
+                    }`
+                  : "Due now",
+                mark: "bell",
                 label: `Payment due${payCycleDue ? " " + C.formatDate(payCycleDue) : ""}`,
                 actionCycle: payCycle,
               }
             : {
                 kind: "paid",
+                word: "All caught up",
+                detail: `Next payment ${C.formatDate(payCycleDue)}`,
+                mark: "check",
                 label: `You're all caught up — next payment ${C.formatDate(
                   payCycleDue
                 )}`,
@@ -3339,6 +3397,14 @@
       collecting: pill("collecting", "Collecting"),
       payout_pending: pill("pending", "Payout Pending"),
       completed: pill("completed", "Completed"),
+    };
+    // Just the word, for Home's single "Round 2 of 5 · Collecting" pill, which
+    // builds its own chip rather than nesting one.
+    const ROUND_PILL_WORD = {
+      not_started: "Not started",
+      collecting: "Collecting",
+      payout_pending: "Payout pending",
+      completed: "Completed",
     };
 
     let html = "";
@@ -3424,7 +3490,7 @@
       members, rounds, curCycle, allDone, curRound, curStatus, curCollected,
       heroRecipient, pct, prevPendingRounds, canStartNext, pendingCount,
       overdueCount, remainingToGo, payCycle, payCycleDue, cyclePaidCount,
-      myMember, myStatus, ROUND_PILL,
+      myMember, myStatus, ROUND_PILL, ROUND_PILL_WORD,
       // UI state, snapshotted so a view can't mutate it mid-render
       state, unlocked, busy, openRound, myMemberId, attentionQueueExpanded,
       overdueListOpen, startRoundConfirming, isWide, selectedMemberId,

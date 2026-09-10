@@ -39,9 +39,19 @@ window.PFViews.members = function (ctx) {
     </button>`;
   }
 
-  html += `<div class="view-head">
-    <h2 class="view-title">Members</h2>
-    <p class="view-sub">${members.length} members · sorted by payout order</p>
+  html += `<div class="view-head${isWide ? " view-head-row" : ""}">
+    <div class="view-head-text">
+      <h2 class="view-title">Members</h2>
+      <p class="view-sub">${members.length} members · sorted by payout order</p>
+    </div>
+    ${
+      // DesktopMembers puts Reorder payout order in the header. It rewrites who
+      // receives which round, so it stays behind the treasurer PIN — on mobile
+      // it lives in Menu → Group, which is the only place with room for it.
+      isWide && unlocked
+        ? `<button type="button" class="head-action" onclick="PowerFund.openReorderModal()">Reorder payout order</button>`
+        : ""
+    }
   </div>`;
 
   const list = `<div class="member-list">${members
@@ -312,7 +322,7 @@ function payoutDest(m, ctx) {
 
 /** Desktop's right-hand pane: the same record, with room for the numbers. */
 function memberDetail(m, ctx, cyclesDueSoFar) {
-  const { state, escapeHtml, memberAvatar, memberStanding, getPayout, C } = ctx;
+  const { state, unlocked, escapeHtml, memberAvatar, memberStanding, getPayout, C } = ctx;
   const paidOut = getPayout(m.member_order).released;
   const standing = memberStanding(m.id, cyclesDueSoFar, paidOut);
   const total = C.totalPerMember(state.contributions, m.id);
@@ -323,6 +333,14 @@ function memberDetail(m, ctx, cyclesDueSoFar) {
     if (C.statusOf(state.contributions, m.id, c) === C.STATUS_PAID) paidSoFar++;
   }
   const payoutDue = C.dueDateOf(state.cycles, m.member_order * C.CYCLES_PER_ROUND);
+  // The earliest cycle this member has a claim waiting on, if any.
+  let pendingCycle = null;
+  for (let c = 1; c <= C.TOTAL_CYCLES; c++) {
+    if (C.statusOf(state.contributions, m.id, c) === 1) {
+      pendingCycle = c;
+      break;
+    }
+  }
 
   // The ring colour is never the only cue — the same standing is spelled out.
   const STANDING_WORD = {
@@ -343,6 +361,17 @@ function memberDetail(m, ctx, cyclesDueSoFar) {
   }</p>
     </div>
     <span class="detail-standing standing-${standing}">${STANDING_WORD[standing]}</span>
+    ${
+      // DesktopMembers puts "Review payment" right here when this member has a
+      // claim waiting. It opens the same review sheet as everywhere else — the
+      // one place a payment is confirmed or rejected — so there is no second
+      // path to the money. Treasurer only, because reviewing is their act.
+      unlocked && pendingCycle != null
+        ? `<button type="button" class="detail-review-btn" onclick="PowerFund.openReviewModal('${inlineArgSafe(
+            m.id
+          )}', ${pendingCycle})">Review payment</button>`
+        : ""
+    }
   </div>
 
   <div class="stat-grid detail-stats">

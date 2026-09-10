@@ -253,7 +253,29 @@ window.PFViews.rounds = function (ctx) {
     // accordion that pushes everything below it down the page.
     if (isWide) {
       listHtml += headerHtml + `</div>`;
-      if (isOpen) detailHtml += bodyHtml;
+      if (isOpen) {
+        // DesktopRounds gives the detail pane its own header: which round, its
+        // state, who receives it, and how much of the goal is raised — none of
+        // which the pane repeats from the list beside it.
+        const word =
+          rStatus === "completed"
+            ? "Paid out"
+            : rStatus === "payout_pending"
+            ? "Payout pending"
+            : rStatus === "collecting"
+            ? "Collecting"
+            : "Upcoming";
+        detailHtml += `<div class="rounds-detail-head">
+          <div class="view-head-text">
+            <h3 class="rounds-detail-title">Round ${r} · ${word}</h3>
+            <p class="rounds-detail-sub">Recipient: ${
+              recipient ? escapeHtml(recipient.name) : "—"
+            } · ${C.peso(roundCollected)} / ${C.peso(C.GOAL_PER_ROUND)} raised</p>
+          </div>
+          <button type="button" class="head-action" onclick="PowerFund.exportRoundCsv(${r})">Export round CSV</button>
+        </div>`;
+        detailHtml += bodyHtml;
+      }
     } else {
       html += headerHtml + bodyHtml + `</div>`;
     }

@@ -639,6 +639,24 @@ window.DB = (function () {
     return unwrap(res, "Couldn't save the master PIN");
   }
 
+  /** The account the payment QR belongs to (migration 006). Members need a
+   *  name and number to check the QR against before sending money — a QR
+   *  image on its own is opaque. */
+  async function saveQrAccount(fields) {
+    const res = await client
+      .from("app_settings")
+      .upsert({ id: 1, ...fields }, { onConflict: "id" })
+      .select()
+      .single();
+    if (res.error && /qr_bank|qr_account/i.test(res.error.message || "")) {
+      throw new Error(
+        "This database doesn't have the QR account columns yet — run " +
+          "supabase/migrations/006_redesign_foundation.sql first."
+      );
+    }
+    return unwrap(res, "Couldn't save the account details");
+  }
+
   async function updateTreasurerPin(pin) {
     return unwrap(
       await client
@@ -893,6 +911,7 @@ window.DB = (function () {
     addActivityLog,
     getSettings,
     updateTreasurerPin,
+    saveQrAccount,
     updateMasterPin,
     loadEverything,
     resetAll,

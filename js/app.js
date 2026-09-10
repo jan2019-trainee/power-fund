@@ -106,9 +106,16 @@
   //     typeValue, pinValue, error, ctx }
   let confirmDialog = null;
 
-  let pinModalMode = null; // null | 'setup' | 'enter' | 'change'
+  let pinModalMode = null; // null | 'setup' | 'enter' | 'change' | 'master'
   let pinInputValue = "";
   let pinError = null;
+  // Where we are inside a PIN-setting flow: 'current' (prove you know the old
+  // one) → 'new' → 'confirm' → 'done'. 'enter' never uses these. Setting a PIN
+  // used to save the FIRST value typed, so one mistyped digit replaced the
+  // group's PIN with something nobody knew.
+  let pinStep = "new";
+  let pinNewValue = "";
+  let pinShake = false;
   // Treasurer mode was entered with the master PIN rather than the group's own.
   // Only used to nudge them toward setting a working PIN again — it grants no
   // different powers, because the master PIN exists precisely so a locked-out
@@ -150,6 +157,7 @@
   let lightboxSrc = null; // image URL shown full-screen in the zoom lightbox
 
   let qrModalOpen = false; // treasurer "Payment QR code" panel
+  let qrAccountFields = null; // { qr_bank, qr_account_name, qr_account_number }
   let qrNewFile = null; // File the treasurer picked
   let qrNewPreview = null; // object URL for the preview
   let qrUploadMsg = null; // success / info line inside the QR panel
@@ -286,25 +294,9 @@
     clearTimeout(successTimer);
     console.error("App error:", msg);
     render();
-    // The banner renders at the top of the document. A treasurer confirming a
-    // payment from the bottom of Rounds would never see it, so put it in front
-    // of them. render() assigns innerHTML on its last line, so the node exists
-    // only after this call returns — hence the next frame.
-    requestAnimationFrame(() => {
-      const el = document.getElementById("appErrorBanner");
-      if (!el) return;
-      const reduce =
-        window.matchMedia &&
-        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      try {
-        el.scrollIntoView({
-          behavior: reduce ? "auto" : "smooth",
-          block: "center",
-        });
-      } catch (e) {
-        el.scrollIntoView();
-      }
-    });
+    // The banner is a fixed-position toast now, so it is already in front of
+    // whoever triggered the failure — no scroll needed, and scrolling a fixed
+    // element would only move the page out from under them.
   }
 
   /** Run the failed action again, clearing the banner first so a second
@@ -1061,13 +1053,39 @@
       const row = [c, due ? C.formatDate(due) : ""];
       members.forEach((m) => {
         const s = C.statusOf(state.contributions, m.id, c);
-        row.push(s === 2 ? "Paid" : s === 1 ? "Pending" : "Unpaid");
+        // Rejected is its own state — reporting it as "Unpaid" hides that the
+        // member submitted and the treasurer turned it down.
+        row.push(s === 2 ? "Paid" : s === 1 ? "Pending" : s === 3 ? "Rejected" : "Unpaid");
       });
       row.push(C.cycleTotal(state.contributions, c));
       rows.push(row);
     }
     const csv = rows.map((r) => r.map(csvEscape).join(",")).join("\r\n");
     downloadFile(csv, `power-fund-summary-${todayStamp()}.csv`, "text/csv");
+    showSuccess("Summary CSV saved to your downloads.");
+  }
+
+  /** One round's cycles only — the same columns as the full summary, scoped to
+   *  the round the detail pane is showing (DesktopRounds' "Export round CSV"). */
+  function exportRoundCsv(round) {
+    const r = Number(round);
+    if (!(r >= 1 && r <= C.TOTAL_ROUNDS)) return;
+    const members = sortedMembers();
+    const { startCycle, endCycle } = C.roundCycleRange(r);
+    const rows = [["Cycle", "Due Date", ...members.map((m) => m.name), "Cycle Total"]];
+    for (let c = startCycle; c <= endCycle; c++) {
+      const due = C.dueDateOf(state.cycles, c);
+      const row = [c, due ? C.formatDate(due) : ""];
+      members.forEach((m) => {
+        const st = C.statusOf(state.contributions, m.id, c);
+        row.push(st === 2 ? "Paid" : st === 1 ? "Pending" : st === 3 ? "Rejected" : "Unpaid");
+      });
+      row.push(C.cycleTotal(state.contributions, c));
+      rows.push(row);
+    }
+    const csv = rows.map((x) => x.map(csvEscape).join(",")).join("\r\n");
+    downloadFile(csv, `power-fund-round-${r}-${todayStamp()}.csv`, "text/csv");
+    showSuccess(`Round ${r} CSV saved to your downloads.`);
   }
 
   function downloadBackup() {
@@ -1114,6 +1132,7 @@
       `power-fund-backup-${todayStamp()}.json`,
       "application/json"
     );
+    showSuccess("Backup file saved to your downloads.");
   }
 
   function pickRestoreFile() {
@@ -1271,6 +1290,8 @@
     }
     pinInputValue = "";
     pinError = null;
+    pinNewValue = "";
+    pinStep = "new";
     pinModalMode = state.settings && state.settings.treasurer_pin ? "enter" : "setup";
     render();
   }
@@ -1279,6 +1300,8 @@
     pinModalMode = null;
     pinInputValue = "";
     pinError = null;
+    pinNewValue = "";
+    pinStep = "new";
     render();
   }
 
@@ -1299,6 +1322,8 @@
     }
     pinInputValue = "";
     pinError = null;
+    pinNewValue = "";
+    pinStep = "new";
     pinModalMode = "master";
     render();
   }
@@ -1306,67 +1331,120 @@
   function openChangePin() {
     pinInputValue = "";
     pinError = null;
+    pinNewValue = "";
+    // Changing an existing PIN starts by proving you know it — otherwise
+    // anyone who finds an unlocked phone can lock the group out of its own
+    // treasurer mode.
+    pinStep = state.settings && state.settings.treasurer_pin ? "current" : "new";
     pinModalMode = "change";
     render();
   }
 
+  /** Wrong entry: bounce the dots and clear, rather than silently doing
+   *  nothing. The shake clears itself on the next render pass. */
+  function pinReject(message) {
+    pinError = message;
+    pinInputValue = "";
+    pinShake = true;
+    render();
+    setTimeout(() => {
+      pinShake = false;
+      if (pinModalMode) render();
+    }, 420);
+  }
+
   async function submitPin() {
-    if (pinModalMode === "master") {
-      if (!unlocked) {
+    // ---- Setting or changing a PIN: current → new → confirm → done -------
+    // Never saves the first value typed. A confirm step is the whole point:
+    // one mistyped digit used to become the group's PIN, and the only way
+    // back was a master PIN that may never have been set.
+    if (
+      pinModalMode === "setup" ||
+      pinModalMode === "change" ||
+      pinModalMode === "master"
+    ) {
+      if (pinModalMode === "master" && !unlocked) {
         pinError = "Treasurer mode must be unlocked to change the master PIN.";
         return render();
       }
-      if (!pinInputValue || pinInputValue.length < 4) {
-        pinError = "The master PIN must be at least 4 digits.";
+
+      if (pinStep === "current") {
+        const current = (state.settings || {}).treasurer_pin;
+        if (!pinInputValue || pinInputValue !== current) {
+          return pinReject("That isn't the current PIN.");
+        }
+        pinStep = "new";
+        pinInputValue = "";
+        pinError = null;
         return render();
       }
-      if (state.settings && pinInputValue === state.settings.treasurer_pin) {
-        // Same digits for both defeats the point: the master PIN exists to be
-        // usable when the treasurer PIN is the thing that has been lost.
-        pinError = "Use different digits from the treasurer PIN.";
+
+      if (pinStep === "new") {
+        if (!pinInputValue || pinInputValue.length < 4) {
+          pinError = "PIN must be at least 4 digits.";
+          return render();
+        }
+        if (
+          pinModalMode === "master" &&
+          state.settings &&
+          pinInputValue === state.settings.treasurer_pin
+        ) {
+          // Same digits for both defeats the point: the master PIN exists to
+          // be usable when the treasurer PIN is the thing that has been lost.
+          pinError = "Use different digits from the treasurer PIN.";
+          return render();
+        }
+        pinNewValue = pinInputValue;
+        pinStep = "confirm";
+        pinInputValue = "";
+        pinError = null;
         return render();
       }
-      const rotating = hasMasterPin();
-      try {
-        await window.DB.updateMasterPin(pinInputValue);
-        // The digits are never logged — only that it changed, and by whom.
-        await logActivity(
-          rotating ? "Master PIN was changed" : "Master PIN was set",
-          { type: "admin" }
-        );
-        closePinModal();
-        await reload();
-        showSuccess(
-          rotating ? "Master PIN updated." : "Master PIN set. Keep it somewhere safe."
-        );
-      } catch (e) {
-        pinError = e.message;
-        render();
+
+      if (pinStep === "confirm") {
+        if (pinInputValue !== pinNewValue) {
+          // Back one step, not back to the start — retyping the current PIN
+          // to recover from a typo is punishment, not safety.
+          pinStep = "new";
+          pinNewValue = "";
+          return pinReject("Those didn't match. Choose the new PIN again.");
+        }
+        const isMaster = pinModalMode === "master";
+        const wasChange = pinModalMode === "change";
+        const rotating = isMaster && hasMasterPin();
+        try {
+          if (isMaster) await window.DB.updateMasterPin(pinNewValue);
+          else await window.DB.updateTreasurerPin(pinNewValue);
+          // The digits are never logged — only that it changed.
+          await logActivity(
+            isMaster
+              ? rotating
+                ? "Master PIN was changed"
+                : "Master PIN was set"
+              : wasChange
+              ? "Treasurer PIN was changed"
+              : "Treasurer PIN was set for the first time",
+            { type: "admin" }
+          );
+          if (!isMaster) unlocked = true;
+          pinStep = "done";
+          pinInputValue = "";
+          pinNewValue = "";
+          pinError = null;
+          render();
+          await reload();
+        } catch (e) {
+          pinError = e.message;
+          render();
+        }
+        return;
       }
+
+      if (pinStep === "done") return closePinModal();
       return;
     }
-    if (pinModalMode === "setup" || pinModalMode === "change") {
-      if (!pinInputValue || pinInputValue.length < 4) {
-        pinError = "PIN must be at least 4 digits.";
-        return render();
-      }
-      const wasChange = pinModalMode === "change";
-      try {
-        await window.DB.updateTreasurerPin(pinInputValue);
-        await logActivity(
-          wasChange
-            ? "Treasurer PIN was changed"
-            : "Treasurer PIN was set for the first time",
-          { type: "admin" }
-        );
-        unlocked = true;
-        closePinModal();
-        await reload();
-      } catch (e) {
-        pinError = e.message;
-        render();
-      }
-    } else {
+
+    {
       // enter
       const settings = state.settings || {};
       const entered = pinInputValue;
@@ -1398,9 +1476,9 @@
         );
         return;
       }
-      pinError = "Incorrect PIN. Try again.";
-      pinInputValue = "";
-      render();
+      // Same shake-and-clear as the wizard's wrong-PIN step, so a rejected
+      // entry looks rejected rather than looking like a dead button.
+      pinReject("Incorrect PIN. Try again.");
     }
   }
 
@@ -1768,21 +1846,51 @@
     render();
   }
 
+  /** The one rule set for member names, shared by the live check and the save.
+   *  Returns a message, or null when the current values are savable. */
+  function editNamesProblem() {
+    if (!state || !state.members) return null;
+    const trimmed = state.members.map((m) => (editNamesValues[m.id] || "").trim());
+    if (trimmed.some((v) => !v)) return "All names must be filled in.";
+    const lower = trimmed.map((n) => n.toLowerCase());
+    if (new Set(lower).size !== lower.length) return "Names must be unique.";
+    return null;
+  }
+
+  /** Validate as the treasurer types. This patches the two affected nodes by
+   *  hand rather than calling render(): render() reassigns innerHTML, which
+   *  would destroy the input being typed into and lose the caret. */
+  function refreshEditNamesValidity() {
+    editNamesError = editNamesProblem();
+    const box = document.getElementById("editNamesError");
+    if (box) {
+      box.textContent = editNamesError || "";
+      box.hidden = !editNamesError;
+    }
+    const save = document.getElementById("editNamesSave");
+    if (save) save.disabled = busy || !!editNamesError;
+    // Flag the duplicates themselves, so "Names must be unique" points somewhere.
+    const seen = {};
+    state.members.forEach((m) => {
+      const v = (editNamesValues[m.id] || "").trim().toLowerCase();
+      seen[v] = (seen[v] || 0) + 1;
+    });
+    document.querySelectorAll(".edit-names-modal .name-input").forEach((el) => {
+      const v = (el.value || "").trim().toLowerCase();
+      el.classList.toggle("invalid", !v || seen[v] > 1);
+    });
+  }
+
   async function saveEditNames() {
     if (busy) return;
+    const problem = editNamesProblem();
+    if (problem) {
+      editNamesError = problem;
+      return render();
+    }
     const trimmed = {};
     for (const m of state.members) {
-      const v = (editNamesValues[m.id] || "").trim();
-      if (!v) {
-        editNamesError = "All names must be filled in.";
-        return render();
-      }
-      trimmed[m.id] = v;
-    }
-    const lower = Object.values(trimmed).map((n) => n.toLowerCase());
-    if (new Set(lower).size !== lower.length) {
-      editNamesError = "Names must be unique.";
-      return render();
+      trimmed[m.id] = (editNamesValues[m.id] || "").trim();
     }
     const changes = [];
     state.members.forEach((m) => {
@@ -1993,7 +2101,9 @@
           </linearGradient>
         </defs>
         <path d="M${xy[0]} L${xy.join(" L")} L${W} ${H} L0 ${H} Z" fill="url(#sparkFill)"/>
-        <polyline points="${xy.join(" ")}" fill="none" stroke="url(#sparkStroke)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+        <polyline class="spark-line" points="${xy.join(
+          " "
+        )}" fill="none" stroke="url(#sparkStroke)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
       </svg>
       <div class="hero-spark-total">${(function () {
         // The mockup's caption is momentum ("↗ +₱4,500 this week"), not a
@@ -2198,7 +2308,8 @@
     };
 
     // Title and filter chips are shared; the body below differs per shell.
-    const head = `<div class="view-head">
+    const head = `<div class="view-head${isWide ? " view-head-row" : ""}">
+      <div class="view-head-text">
       <h2 class="view-title">Activity</h2>
       <p class="view-sub">${"Every contribution, payout &amp; admin action"} · ${
         // Don't print a total the table isn't showing: with the round filter
@@ -2208,6 +2319,14 @@
           ? `${log.length} ${log.length === 1 ? "entry" : "entries"} loaded`
           : `showing ${visible.length} of ${log.length} loaded`
       }</p>
+      </div>
+      ${
+        // The design puts Export CSV in the desktop header; the phone shell
+        // keeps it in Menu, where there is room for it.
+        isWide
+          ? `<button type="button" class="head-action" onclick="PowerFund.exportCsv()">Export CSV</button>`
+          : ""
+      }
     </div>
     <div class="activity-chips">${Object.entries(filterLabels)
       .map(
@@ -2809,12 +2928,51 @@
     if (!unlocked) return;
     qrModalOpen = true;
     qrUploadMsg = null;
+    // The account the QR belongs to (migration 006). These columns existed
+    // from that migration but nothing ever wrote them, so a member scanning
+    // the QR had no name or number to check it against — the verification
+    // the design added them for.
+    const st = state.settings || {};
+    qrAccountFields = {
+      qr_bank: st.qr_bank || "",
+      qr_account_name: st.qr_account_name || "",
+      qr_account_number: st.qr_account_number || "",
+    };
     clearQrSelection();
     render();
+  }
+
+  function setQrAccountField(field, value) {
+    if (!qrAccountFields) return;
+    qrAccountFields[field] = value;
+  }
+
+  async function saveQrAccount() {
+    if (busy || !qrAccountFields) return;
+    busy = true;
+    render();
+    try {
+      await window.DB.saveQrAccount({
+        qr_bank: qrAccountFields.qr_bank.trim() || null,
+        qr_account_name: qrAccountFields.qr_account_name.trim() || null,
+        qr_account_number: qrAccountFields.qr_account_number.trim() || null,
+      });
+      await logActivity("Treasurer updated the payment account details", {
+        type: "admin",
+      });
+      await reload();
+      showSuccess("Account details saved — members will see them beside the QR.");
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      busy = false;
+      render();
+    }
   }
   function closeQrModal() {
     qrModalOpen = false;
     qrUploadMsg = null;
+    qrAccountFields = null;
     clearQrSelection();
     clearSubmitState();
     render();
@@ -3000,14 +3158,26 @@
     const due = C.dueDateOf(state.cycles, curCycle);
     const now = new Date();
 
+    // Five buckets, not three. "Not yet paid" lumped together three different
+    // situations — a rejected claim the member has to resend, a genuinely late
+    // payment, and someone whose cycle simply isn't due yet — and the group
+    // chat read all three as the same nudge.
     const paid = [];
     const pending = [];
-    const unpaid = [];
+    const rejected = [];
+    const overdue = [];
+    const notDue = [];
     members.forEach((m) => {
       const s = C.statusOf(state.contributions, m.id, curCycle);
-      if (s === 2) paid.push(m.name);
-      else if (s === 1) pending.push(m.name);
-      else unpaid.push(m.name);
+      if (s === 2) return paid.push(m.name);
+      if (s === 1) return pending.push(m.name);
+      if (s === 3) return rejected.push(m.name);
+      // Overdue is a fact about the member, not about today's date: they may
+      // be current on this cycle's clock and still owe an earlier one.
+      if (C.memberOverdueCount(state.contributions, state.cycles, m.id) > 0) {
+        return overdue.push(m.name);
+      }
+      notDue.push(m.name);
     });
 
     let text = `⚡ ${fundName()} Update — ${C.formatDate(now)}\n`;
@@ -3025,11 +3195,10 @@
     if (due && status === "collecting") text += `Cycle due: ${C.formatDate(due)}\n`;
     text += `\n`;
     if (paid.length) text += `✅ Paid: ${paid.join(", ")}\n`;
-    if (pending.length) text += `⏳ Pending review: ${pending.join(", ")}\n`;
-    if (unpaid.length) {
-      const late = due && (C.isSameDay(due, now) || due < now);
-      text += `${late ? "⚠️" : "⏰"} Not yet paid: ${unpaid.join(", ")}\n`;
-    }
+    if (pending.length) text += `🟣 Pending review: ${pending.join(", ")}\n`;
+    if (rejected.length) text += `❌ Needs resending: ${rejected.join(", ")}\n`;
+    if (overdue.length) text += `🔴 Overdue: ${overdue.join(", ")}\n`;
+    if (notDue.length) text += `⏰ Not yet due: ${notDue.join(", ")}\n`;
     text += `\nThis round: ${C.peso(roundCollected)} / ${C.peso(C.GOAL_PER_ROUND)}`;
     return text;
   }
@@ -3193,13 +3362,81 @@
     }
   }
 
+  /** The boot failure screen, drawn to the design's NoConnection artboard.
+   *  The headline only claims "No connection" when the failure really looks
+   *  like one — a dead network, or a fetch that never reached Supabase. Any
+   *  other boot failure (a missing table, a bad key) keeps its own message,
+   *  because telling someone to check their wifi would send them the wrong way. */
+  function bootErrorHtml(msg) {
+    const text = String(msg || "");
+    const offline =
+      typeof navigator !== "undefined" && navigator.onLine === false;
+    const looksNetwork =
+      offline || /network|fetch|connection|offline|timeout|unreachable/i.test(text);
+    const title = looksNetwork ? "No connection" : "Couldn't load your fund";
+    // The network case gets the design's own wording and nothing else: the
+    // app's internal message for a dead connection says the same thing, and
+    // printing both read as two separate faults. A non-network failure keeps
+    // its real message, which is the only clue to what actually went wrong.
+    const body = looksNetwork
+      ? "We couldn't load your fund data. Check your internet connection and try again."
+      : text;
+    return `<div class="boot-error">
+      <div class="boot-error-card">
+        <div class="boot-error-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M1 9l2 2c4.9-4.9 12.1-4.9 17 0l2-2C15.9 2.9 8.1 2.9 1 9Z" opacity="0.4"/>
+            <path d="M5 13l2 2c2.8-2.8 7.2-2.8 10 0l2-2c-4-4-10-4-14 0Z" opacity="0.4"/>
+            <path d="M9 17l2 2c1-1 3-1 4 0"/>
+            <line x1="3" y1="3" x2="21" y2="21"/>
+          </svg>
+        </div>
+        <h1 class="boot-error-title">${escapeHtml(title)}</h1>
+        <p class="boot-error-sub">${escapeHtml(body)}</p>
+        <button type="button" class="boot-error-cta" onclick="PowerFund.retry()">Try again</button>
+      </div>
+    </div>`;
+  }
+
+  /** Count-up on a figure that changed, as the design's Main artboard does for
+   *  the fund balance. render() reassigns innerHTML every pass, so without the
+   *  key/last-value bookkeeping below the number would re-animate on every
+   *  unrelated re-render — a tap on a filter chip would replay the balance. */
+  const countedValues = Object.create(null);
+  function runCountUps() {
+    const reduce =
+      window.matchMedia &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    document.querySelectorAll(".count-up").forEach((el) => {
+      const key = el.getAttribute("data-count-key") || "";
+      const target = Number(el.getAttribute("data-count"));
+      if (!isFinite(target)) return;
+      const from = countedValues[key];
+      countedValues[key] = target;
+      // Nothing moved, or motion is unwelcome: the rendered figure is already
+      // the right one, so leave it alone.
+      if (reduce || from === target) return;
+      const start = from == null ? 0 : from;
+      const t0 = performance.now();
+      const dur = 900;
+      const tick = (t) => {
+        // The node is replaced on every render; stop the moment ours is gone,
+        // or a stale frame would overwrite a newer figure.
+        if (!el.isConnected) return;
+        const p = Math.min(1, (t - t0) / dur);
+        const eased = 1 - Math.pow(1 - p, 3);
+        el.textContent = C.peso(Math.round(start + (target - start) * eased));
+        if (p < 1) requestAnimationFrame(tick);
+        else el.textContent = C.peso(target);
+      };
+      requestAnimationFrame(tick);
+    });
+  }
+
   function renderView(app) {
     if (!state) {
       app.innerHTML = appError
-        ? `<div class="loading">
-             <div class="save-error-banner">⚠️ ${escapeHtml(appError)}</div>
-             <button class="reset-btn" style="margin-top:16px" onclick="PowerFund.retry()">Try again</button>
-           </div>`
+        ? bootErrorHtml(appError)
         : `<div class="loading"><div class="loading-spinner" aria-hidden="true"></div><p>Loading fund data…</p></div>`;
       return;
     }
@@ -3457,20 +3694,6 @@
       </button>
     </div>`;
 
-    if (appError) {
-      // role="alert" so a screen reader announces a failed write on insertion.
-      // Without it — and without the scroll below — a save that failed while
-      // the user was further down the page was completely silent, and they
-      // would reasonably assume the money went through.
-      html += `<div class="save-error-banner" role="alert" id="appErrorBanner">${icon(
-        "alert",
-        15
-      )}<span>${escapeHtml(appError)}</span>${
-        appErrorRetry
-          ? ` <button type="button" class="banner-retry" onclick="PowerFund.retryLastAction()">Retry</button>`
-          : ""
-      }<button type="button" class="warn-dismiss" onclick="PowerFund.dismissError()" aria-label="Dismiss">✕</button></div>`;
-    }
     if (appWarning) {
       html += `<div class="save-warning-banner" role="status" aria-live="polite">${icon(
         "alert",
@@ -3528,18 +3751,39 @@
 
     html += renderTabBar(currentView, isWide, myMember);
 
-    // Transient confirmation. Rendered last so it sits above the nav, and
-    // announced politely rather than assertively — it confirms something the
-    // user just did, it doesn't interrupt them.
-    if (appSuccess) {
-      // Both are pinned to the bottom, so the toast has to sit above the
-      // action button rather than on top of it.
+    // Toasts, in one stack. The design bottom-anchors them above the tab bar on
+    // the phone and to the bottom-right corner on desktop, and puts failures in
+    // the same stack as confirmations — so when both are live they sit one
+    // above the other instead of one hiding the other.
+    if (appError || appSuccess) {
+      // The stack is pinned to the bottom, so it has to clear the floating
+      // action button rather than sit on top of it.
       const cta = viewHtml.indexOf("floating-cta") !== -1 ? " above-cta" : "";
-      html += `<div class="toast${cta}" role="status" aria-live="polite">
-        <span class="toast-icon">${icon("check", 15)}</span>
-        <span class="toast-text">${escapeHtml(appSuccess)}</span>
-        <button type="button" class="toast-x" onclick="PowerFund.dismissSuccess()" aria-label="Dismiss">✕</button>
-      </div>`;
+      html += `<div class="toast-stack${cta}">`;
+      if (appError) {
+        // role="alert" so a screen reader announces a failed write on
+        // insertion. Without it a save that failed while the user was further
+        // down the page was completely silent, and they would reasonably
+        // assume the money went through. A failure never auto-dismisses.
+        html += `<div class="save-error-banner" role="alert" id="appErrorBanner">${icon(
+          "alert",
+          15
+        )}<span>${escapeHtml(appError)}</span>${
+          appErrorRetry
+            ? ` <button type="button" class="banner-retry" onclick="PowerFund.retryLastAction()">Retry</button>`
+            : ""
+        }<button type="button" class="warn-dismiss" onclick="PowerFund.dismissError()" aria-label="Dismiss">✕</button></div>`;
+      }
+      if (appSuccess) {
+        // Announced politely rather than assertively — it confirms something
+        // the user just did, it doesn't interrupt them.
+        html += `<div class="toast" role="status" aria-live="polite">
+          <span class="toast-icon">${icon("check", 15)}</span>
+          <span class="toast-text">${escapeHtml(appSuccess)}</span>
+          <button type="button" class="toast-x" onclick="PowerFund.dismissSuccess()" aria-label="Dismiss">✕</button>
+        </div>`;
+      }
+      html += `</div>`;
     }
 
     // ---- Modals ----
@@ -3607,6 +3851,22 @@
                        ? `Scan with ${escapeHtml(state.settings.qr_bank)}`
                        : "Scan to pay"
                    }</p>
+                   ${(function () {
+                     // The account behind the QR. Without it a member is
+                     // scanning an opaque image and trusting it — the design
+                     // added these fields precisely so the name can be checked
+                     // before money leaves the wallet.
+                     const st = state.settings || {};
+                     const line = [st.qr_bank, st.qr_account_number]
+                       .filter(Boolean)
+                       .join(" · ");
+                     if (!line && !st.qr_account_name) return "";
+                     return `<p class="qr-card-acct">${
+                       st.qr_account_name
+                         ? `<b>${escapeHtml(st.qr_account_name)}</b>`
+                         : ""
+                     }${line ? `<span>${escapeHtml(line)}</span>` : ""}</p>`;
+                   })()}
                    <p class="qr-card-hint">Tap to enlarge</p>
                    <a href="${escapeHtml(
                      qrUrl
@@ -3681,6 +3941,9 @@
                    <label class="file-chip-change">Change
                      <input type="file" accept="image/*" onchange="PowerFund.onProofSelected(this)" hidden>
                    </label>
+                   <label class="file-chip-change">Camera
+                     <input type="file" accept="image/*" capture="environment" onchange="PowerFund.onProofSelected(this)" hidden>
+                   </label>
                  </div>`
               : `<label class="proof-upload">
                    <span class="proof-upload-label">${icon(
@@ -3688,6 +3951,13 @@
                      14
                    )}<span>Attach your payment screenshot</span></span>
                    <input type="file" accept="image/*" onchange="PowerFund.onProofSelected(this)" hidden>
+                 </label>
+                 <label class="proof-upload proof-upload-camera">
+                   <span class="proof-upload-label">${icon(
+                     "qr",
+                     14
+                   )}<span>Take a photo instead</span></span>
+                   <input type="file" accept="image/*" capture="environment" onchange="PowerFund.onProofSelected(this)" hidden>
                  </label>
                  <p class="proof-required-hint">The treasurer checks this before confirming, so it has to show the amount and the date.</p>`
           }
@@ -3807,11 +4077,37 @@
     }
 
     if (pinModalMode) {
+      // A multi-step flow needs per-STEP wording, not one title for the whole
+      // thing — "Change treasurer PIN" over a keypad tells you nothing about
+      // which of the three PINs it currently wants.
+      const settingPin =
+        pinModalMode === "setup" ||
+        pinModalMode === "change" ||
+        pinModalMode === "master";
+      const isMasterFlow = pinModalMode === "master";
+      const stepTitles = {
+        current: "Enter your current PIN",
+        new: isMasterFlow
+          ? hasMasterPin()
+            ? "Choose a new master PIN"
+            : "Choose a master PIN"
+          : "Choose a new PIN",
+        confirm: isMasterFlow ? "Confirm the master PIN" : "Confirm the new PIN",
+        done: isMasterFlow ? "Master PIN saved" : "PIN changed",
+      };
+      const stepSubs = {
+        current: "Confirm it is you before the PIN is replaced.",
+        new: "At least 4 digits. You will type it again to confirm.",
+        confirm: "Type the same digits once more so a typo cannot lock you out.",
+        done: isMasterFlow
+          ? "Keep it somewhere safe and separate from the treasurer PIN."
+          : "Everyone unlocking treasurer mode uses this from now on.",
+      };
       const titles = {
-        setup: "Create a treasurer PIN",
+        setup: settingPin ? stepTitles[pinStep] : "Create a treasurer PIN",
         enter: "Enter treasurer PIN",
-        change: "Change treasurer PIN",
-        master: hasMasterPin() ? "Change the master PIN" : "Set a master PIN",
+        change: settingPin ? stepTitles[pinStep] : "Change treasurer PIN",
+        master: settingPin ? stepTitles[pinStep] : "Set a master PIN",
       };
       const subs = {
         setup:
@@ -3820,19 +4116,23 @@
           state.settings && state.settings.master_pin
             ? "Enter the PIN to unlock treasurer actions. Forgotten it? The group's master PIN also works, then set a new one from Menu → Change PIN."
             : "Enter the PIN to unlock treasurer actions. A forgotten PIN can't be recovered — ask whoever else in the group has it.",
-        change: "Set a new PIN. This replaces the current one for everyone.",
-        master:
-          "The master PIN is the group's way back in if the treasurer PIN is " +
-          "forgotten. It also unlocks treasurer mode, so keep it somewhere safe " +
-          "and separate — ideally with a second person in the group.",
+        change: settingPin
+          ? stepSubs[pinStep]
+          : "Set a new PIN. This replaces the current one for everyone.",
+        master: settingPin
+          ? pinStep === "new"
+            ? "The group's way back in if the treasurer PIN is forgotten. It also unlocks treasurer mode, so keep it safe and separate."
+            : stepSubs[pinStep]
+          : "Set a master PIN.",
       };
+      if (settingPin) titles.setup = stepTitles[pinStep];
       // There is deliberately no PIN recovery: any reset that worked without
       // the PIN would let whoever is holding the phone take treasurer control.
       // That is a fine trade only if people are told BEFORE they forget, so
       // the warning sits on the screens where a PIN is chosen.
       const hasMaster = hasMasterPin();
       const noRecovery =
-        pinModalMode === "enter" || pinModalMode === "master"
+        pinModalMode === "enter" || isMasterFlow || pinStep !== "new"
           ? ""
           : `<p class="pin-warning">${icon("alert", 14)}<span>${
               hasMaster
@@ -3855,7 +4155,7 @@
           `<span class="pin-dot ${i < pinInputValue.length ? "filled" : ""}"></span>`
       ).join("");
       const keypad =
-        `<div class="pin-dots" role="img" aria-label="${pinInputValue.length} digit${
+        `<div class="pin-dots${pinShake ? " shake" : ""}" role="img" aria-label="${pinInputValue.length} digit${
           pinInputValue.length === 1 ? "" : "s"
         } entered">${dots}</div>` +
         `<div class="pin-keypad">` +
@@ -3869,22 +4169,82 @@
         `<button type="button" class="pin-key" onclick="PowerFund.pinKey('0')">0</button>` +
         `<button type="button" class="pin-key pin-key-util" onclick="PowerFund.pinKey('back')" aria-label="Delete last digit">⌫</button>` +
         `</div>`;
+      // Which steps this flow has, so the progress bar counts only real ones:
+      // setting a first PIN has no current-PIN step to prove.
+      const flowSteps =
+        pinModalMode === "change" && (state.settings || {}).treasurer_pin
+          ? ["current", "new", "confirm"]
+          : ["new", "confirm"];
+      const stepIndex = flowSteps.indexOf(pinStep);
+      const progress =
+        settingPin && pinStep !== "done"
+          ? `<div class="pin-steps" role="img" aria-label="Step ${
+              stepIndex + 1
+            } of ${flowSteps.length}">${flowSteps
+              .map(
+                (st, i) =>
+                  `<span class="pin-step ${
+                    i < stepIndex ? "done" : i === stepIndex ? "now" : ""
+                  }"></span>`
+              )
+              .join("")}</div>`
+          : "";
+
+      // A fund that never sets a master PIN has no way back in if the
+      // treasurer PIN is forgotten — the exact lockout the master PIN exists
+      // to close. The only moment we know a treasurer is present, unlocked and
+      // thinking about PINs is right after they set one, so offer it here.
+      // Offered, not forced: it is skippable, and Menu → Security still has it.
+      const offerMaster =
+        pinStep === "done" && pinModalMode === "setup" && !hasMasterPin();
+      const doneCard =
+        pinStep === "done" && settingPin
+          ? `<div class="pin-done">
+               <span class="pin-done-icon">${icon("check", 20)}</span>
+               <p class="pin-done-text">${escapeHtml(stepSubs.done)}</p>
+             </div>${
+               offerMaster
+                 ? `<p class="pin-master-offer">${icon(
+                     "alert",
+                     14
+                   )}<span>No master PIN is set, so a forgotten treasurer PIN would lock the group out. Setting one now is the way back in.</span></p>`
+                 : ""
+             }`
+          : "";
+
       html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closePinModal()">
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
           <h3 id="dlg-title">${titles[pinModalMode]}</h3>
           <p class="modal-sub">${subs[pinModalMode]}</p>
-          ${keypad}
+          ${progress}
+          ${pinStep === "done" && settingPin ? doneCard : keypad}
           ${pinError ? `<p class="pin-error" role="alert">${escapeHtml(pinError)}</p>` : ""}
           ${noRecovery}
           <div class="modal-actions">
-            <button class="modal-btn-primary" onclick="PowerFund.submitPin()">${
+            ${
+              offerMaster
+                ? `<button class="modal-btn-primary" onclick="PowerFund.openMasterPin()">Set a master PIN</button>
+                   <button class="modal-btn-secondary" onclick="PowerFund.closePinModal()">Not now</button>`
+                : ""
+            }
+            ${offerMaster ? "" : `<button class="modal-btn-primary" onclick="PowerFund.submitPin()">${
               pinModalMode === "enter"
                 ? "Unlock"
-                : pinModalMode === "master"
-                ? "Save master PIN"
-                : "Save PIN"
-            }</button>
-            <button class="modal-btn-secondary" onclick="PowerFund.closePinModal()">Cancel</button>
+                : pinStep === "current"
+                ? "Continue"
+                : pinStep === "new"
+                ? "Next"
+                : pinStep === "confirm"
+                ? isMasterFlow
+                  ? "Save master PIN"
+                  : "Save PIN"
+                : "Done"
+            }</button>`}
+            ${
+              pinStep === "done" && settingPin
+                ? ""
+                : `<button class="modal-btn-secondary" onclick="PowerFund.closePinModal()">Cancel</button>`
+            }
           </div>
         </div>
       </div>`;
@@ -4037,6 +4397,13 @@
                   )}<span>Attach a receipt photo</span></span>`
             }
             <input type="file" accept="image/*" onchange="PowerFund.onPayoutReceiptSelected(this)" hidden>
+          </label>
+          <label class="proof-upload proof-upload-camera">
+            <span class="proof-upload-label">${icon(
+              "qr",
+              14
+            )}<span>Take a photo of the receipt</span></span>
+            <input type="file" accept="image/*" capture="environment" onchange="PowerFund.onPayoutReceiptSelected(this)" hidden>
           </label>
           <p class="payout-field-hint">${
             payoutReceiptPreview
@@ -4196,17 +4563,19 @@
           ${ordered
             .map(
               (m) => `
-            <input type="text" class="pin-input name-input" value="${escapeHtml(
-              editNamesValues[m.id] || ""
-            )}"
+            <input type="text" class="pin-input name-input" data-member="${escapeHtml(
+              m.id
+            )}" value="${escapeHtml(editNamesValues[m.id] || "")}"
                    oninput="PowerFund.setEditName('${m.id}', this.value)" placeholder="Name">
           `
             )
             .join("")}
-          ${editNamesError ? `<p class="pin-error">${escapeHtml(editNamesError)}</p>` : ""}
+          <p class="pin-error" id="editNamesError" role="alert"${
+            editNamesError ? "" : " hidden"
+          }>${escapeHtml(editNamesError || "")}</p>
           <div class="modal-actions">
-            <button class="modal-btn-primary" onclick="PowerFund.saveEditNames()" ${
-              busy ? "disabled" : ""
+            <button class="modal-btn-primary" id="editNamesSave" onclick="PowerFund.saveEditNames()" ${
+              busy || editNamesProblem() ? "disabled" : ""
             }>Save names</button>
             <button class="modal-btn-secondary" onclick="PowerFund.closeEditNamesModal()">Cancel</button>
           </div>
@@ -4260,10 +4629,42 @@
                      : "Using the QR bundled with the app."
                  }</div>
                  <label class="proof-upload">
-                   <span class="proof-upload-label">📷 Choose new QR code (JPG, PNG or WEBP · max 5 MB)</span>
+                   <span class="proof-upload-label">${icon(
+                     "upload",
+                     14
+                   )}<span>Choose new QR code (JPG, PNG or WEBP · max 5 MB)</span></span>
                    <input type="file" accept="image/jpeg,image/png,image/webp" onchange="PowerFund.onQrFileSelected(this)" hidden>
                  </label>
+                 <label class="proof-upload">
+                   <span class="proof-upload-label">${icon(
+                     "qr",
+                     14
+                   )}<span>Take a photo of the QR</span></span>
+                   <input type="file" accept="image/*" capture="environment" onchange="PowerFund.onQrFileSelected(this)" hidden>
+                 </label>
+
+                 <p class="sheet-section-label">Account details</p>
+                 <p class="qr-account-note">Shown to members beside the QR, so they can check they are paying the right account before sending.</p>
+
+                 <label class="field-label" for="qr-bank">Bank or e-wallet</label>
+                 <input id="qr-bank" class="text-input" type="text" placeholder="GCash, Maya, BPI…" value="${escapeHtml(
+                   (qrAccountFields && qrAccountFields.qr_bank) || ""
+                 )}" oninput="PowerFund.setQrAccountField('qr_bank', this.value)">
+
+                 <label class="field-label" for="qr-acct-name">Account name</label>
+                 <input id="qr-acct-name" class="text-input" type="text" placeholder="Name on the account" value="${escapeHtml(
+                   (qrAccountFields && qrAccountFields.qr_account_name) || ""
+                 )}" oninput="PowerFund.setQrAccountField('qr_account_name', this.value)">
+
+                 <label class="field-label" for="qr-acct-num">Account or mobile number</label>
+                 <input id="qr-acct-num" class="text-input" type="text" inputmode="numeric" placeholder="09XX XXX XXXX" value="${escapeHtml(
+                   (qrAccountFields && qrAccountFields.qr_account_number) || ""
+                 )}" oninput="PowerFund.setQrAccountField('qr_account_number', this.value)">
+
                  <div class="modal-actions">
+                   <button class="modal-btn-primary" onclick="PowerFund.saveQrAccount()" ${
+                     busy ? "disabled" : ""
+                   }>${busy ? "Saving…" : "Save account details"}</button>
                    <button class="modal-btn-secondary" onclick="PowerFund.closeQrModal()">Close</button>
                  </div>`
           }
@@ -4309,6 +4710,13 @@
               : `<p class="qr-empty">No QR on file yet.</p>`
           }
           <input type="file" accept="image/*" class="file-input" onchange="PowerFund.onPayoutQrFileSelected(this)">
+          <label class="proof-upload proof-upload-camera">
+            <span class="proof-upload-label">${icon(
+              "qr",
+              14
+            )}<span>Take a photo of the QR</span></span>
+            <input type="file" accept="image/*" capture="environment" onchange="PowerFund.onPayoutQrFileSelected(this)" hidden>
+          </label>
 
           <div class="modal-actions">
             <button class="modal-btn-primary" onclick="PowerFund.savePayoutDetails()" ${
@@ -4450,6 +4858,7 @@
     }
 
     app.innerHTML = html;
+    runCountUps();
 
     // Move focus into a dialog the first render it appears (a11y).
     const modalNow = isAnyModalOpen();
@@ -4586,6 +4995,8 @@
     openLightbox,
     closeLightbox,
     openQrModal,
+    setQrAccountField,
+    saveQrAccount,
     closeQrModal,
     onQrFileSelected,
     confirmQrUpload,
@@ -4627,6 +5038,7 @@
     moveMember,
     resetData,
     exportCsv,
+    exportRoundCsv,
     downloadBackup,
     pickRestoreFile,
     restoreBackup,
@@ -4669,6 +5081,7 @@
     saveEditNames,
     setEditName: (id, v) => {
       editNamesValues[id] = v;
+      refreshEditNamesValidity();
     },
   };
 

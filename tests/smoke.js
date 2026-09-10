@@ -56,12 +56,26 @@ async function serve(page, data) {
 async function unlockTreasurer(page) {
   await page.locator(".unlock-btn").click();
   await page.waitForTimeout(300);
-  if (await page.locator(".modal-overlay").count()) {
+  if (!(await page.locator(".modal-overlay").count())) return;
+  // Setting a PIN is a wizard now (choose → confirm), so walk the steps until
+  // the modal closes rather than assuming one submit is enough. Entering an
+  // existing PIN is still a single step and exits on the first pass.
+  for (let i = 0; i < 4; i++) {
+    if (!(await page.locator(".modal-overlay").count())) return;
     await page.keyboard.type("1234");
-    const confirm = page.locator(".modal-btn-primary").first();
-    if (await confirm.count()) {
-      await confirm.click();
-      await page.waitForTimeout(600);
+    const primary = page.locator(".modal-btn-primary").first();
+    if (!(await primary.count())) return;
+    await primary.click();
+    await page.waitForTimeout(500);
+    // A "PIN changed" confirmation ends the flow. After a FIRST setup with no
+    // master PIN on file the app offers to set one there — "Not now" is the
+    // way past it; otherwise the only button is Done.
+    if (await page.locator(".pin-done").count()) {
+      const notNow = page.locator(".modal-btn-secondary", { hasText: "Not now" });
+      if (await notNow.count()) await notNow.first().click();
+      else await page.locator(".modal-btn-primary").first().click();
+      await page.waitForTimeout(400);
+      return;
     }
   }
 }
@@ -351,6 +365,18 @@ async function rejectionAndMasterPin(browser, errors) {
     JSON.stringify(noteText)
   );
   check("rejection: resubmit CTA", (await page.locator(".rejected-cta").count()) === 1);
+  // MainMemberRejected draws ONE red card: the identity line moved into it and
+  // the status card is suppressed, so the screen no longer stacks two.
+  check(
+    "rejection: one red card, not two",
+    (await page.locator(".my-status-card").count()) === 0 &&
+      (await page.locator(".rejected-ident").count()) === 1
+  );
+  check(
+    "rejection: the card names who it is about",
+    (await page.locator(".rejected-who").innerText()).includes(M.MEMBERS[2].name),
+    await page.locator(".rejected-who").innerText()
+  );
 
   // Resubmitting opens the contribute sheet rather than dead-ending.
   await page.locator(".rejected-cta").click();
@@ -383,6 +409,11 @@ async function rejectionAndMasterPin(browser, errors) {
   await page.locator(".unlock-btn").click();
   await page.waitForTimeout(400);
   check("pin: keypad rendered", (await page.locator(".pin-key").count()) === 12);
+  check(
+    // This fund already has a master PIN, so it must NOT be offered again.
+    "pin: no master-PIN offer when one is already set",
+    (await page.locator(".pin-master-offer").count()) === 0
+  );
   check("pin: dots rendered", (await page.locator(".pin-dot").count()) >= 4);
 
   // A wrong PIN is refused and clears the dots.
@@ -1466,8 +1497,10 @@ async function paymentSheets(browser, errors) {
     JSON.stringify(chipText)
   );
   check(
+    // Two ways to replace it: pick another file, or shoot a fresh photo.
     "sheet/the chip offers a way to replace it",
-    (await c.locator(".file-chip-change").count()) === 1
+    (await c.locator(".file-chip-change").count()) === 2 &&
+      (await c.locator(".file-chip-change", { hasText: "Camera" }).count()) === 1
   );
   check(
     "sheet/primary action carries the amount",
@@ -1624,6 +1657,121 @@ async function paymentSheets(browser, errors) {
   await rel.close();
 }
 
+/** The desktop shell carries its header actions: Export CSV on Activity,
+ *  Reorder payout order on Members, and a titled detail header with
+ *  Export round CSV on Rounds. */
+async function desktopHeaderActions(browser, errors) {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  page.on("pageerror", (e) => errors.push(`head/: ${e}`));
+  await serve(page, { ...M.TABLE_DATA, app_settings: { ...M.SETTINGS, treasurer_pin: "1234" } });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1500);
+
+  await page.locator(".tab-bar .tab-item", { hasText: "Activity" }).click();
+  await page.waitForTimeout(300);
+  check(
+    "head/Activity carries Export CSV",
+    (await page.locator(".view-head .head-action", { hasText: "Export CSV" }).count()) === 1
+  );
+
+  await page.locator(".tab-bar .tab-item", { hasText: "Members" }).click();
+  await page.waitForTimeout(300);
+  check(
+    "head/Members hides Reorder while locked",
+    (await page.locator(".view-head .head-action").count()) === 0
+  );
+  await unlockTreasurer(page);
+  await page.locator(".tab-bar .tab-item", { hasText: "Members" }).click();
+  await page.waitForTimeout(300);
+  check(
+    "head/Members carries Reorder for the treasurer",
+    (await page
+      .locator(".view-head .head-action", { hasText: "Reorder payout order" })
+      .count()) === 1
+  );
+
+  await page.locator(".tab-bar .tab-item", { hasText: "Rounds" }).click();
+  await page.waitForTimeout(300);
+  await page.locator(".rounds-list .round").first().click();
+  await page.waitForTimeout(350);
+  check(
+    "head/Rounds detail names the round",
+    /^Round \d+ · /.test(await page.locator(".rounds-detail-title").innerText()),
+    await page.locator(".rounds-detail-title").innerText()
+  );
+  check(
+    "head/Rounds detail carries Export round CSV",
+    (await page
+      .locator(".rounds-detail-head .head-action", { hasText: "Export round CSV" })
+      .count()) === 1
+  );
+
+  // An export used to give no feedback at all — the file just appeared, or
+  // didn't. It now confirms, in the same stack failures use.
+  await page.evaluate(() => window.PowerFund.exportCsv());
+  await page.waitForTimeout(300);
+  check(
+    "head/exporting a CSV confirms it saved",
+    (await page.locator(".toast-stack .toast .toast-text").count()) === 1 &&
+      /saved/i.test(await page.locator(".toast-stack .toast .toast-text").innerText())
+  );
+
+  // Names are checked as they are typed, not only on Save — and the check
+  // patches the DOM rather than re-rendering, so the field keeps its caret.
+  await page.evaluate(() => window.PowerFund.openEditNamesModal());
+  await page.waitForTimeout(300);
+  const names = page.locator(".edit-names-modal .name-input");
+  const first = await names.first().inputValue();
+  await names.nth(1).fill(first);
+  await page.waitForTimeout(200);
+  check(
+    "names/a duplicate is called out as you type",
+    /unique/i.test(await page.locator("#editNamesError").innerText())
+  );
+  check(
+    "names/Save is disabled while the names are invalid",
+    await page.locator("#editNamesSave").isDisabled()
+  );
+  await names.nth(1).fill("");
+  await page.waitForTimeout(200);
+  check(
+    "names/an empty name is called out too",
+    /filled in/i.test(await page.locator("#editNamesError").innerText())
+  );
+  await names.nth(1).fill(first + " II");
+  await page.waitForTimeout(200);
+  check(
+    "names/valid names clear the error and re-enable Save",
+    (await page.locator("#editNamesError").isHidden()) &&
+      !(await page.locator("#editNamesSave").isDisabled())
+  );
+  await page.close();
+}
+
+/** The boot failure screen: no shell, no data, so it must stand on its own
+ *  and offer a way back. Console errors are expected here — the app really is
+ *  failing to load — so this page's errors are not collected. */
+async function bootFailure(browser) {
+  const page = await browser.newPage({ viewport: { width: 430, height: 900 } });
+  await page.route("**/rest/v1/**", (r) => r.abort());
+  await page.route("**/realtime/v1/**", (r) => r.abort());
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2000);
+  check("boot/failure draws the designed screen", (await page.locator(".boot-error").count()) === 1);
+  check(
+    "boot/failure offers a retry",
+    (await page.locator(".boot-error-cta").count()) === 1 &&
+      /try again/i.test(await page.locator(".boot-error-cta").innerText())
+  );
+  // Aborted requests read as a network failure, so the wifi headline is right.
+  check(
+    "boot/a dead network says so",
+    /No connection/i.test(await page.locator(".boot-error-title").innerText()),
+    await page.locator(".boot-error-title").innerText()
+  );
+  await page.close();
+}
+
 (async () => {
   const browser = await chromium.launch({
     executablePath: process.env.PF_CHROMIUM || undefined,
@@ -1657,6 +1805,10 @@ async function paymentSheets(browser, errors) {
   await qaFixes(browser, errors);
   console.log("\nPayment sheets");
   await paymentSheets(browser, errors);
+  console.log("\nDesktop header actions");
+  await desktopHeaderActions(browser, errors);
+  console.log("\nBoot failure");
+  await bootFailure(browser);
 
   await browser.close();
 

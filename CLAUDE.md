@@ -363,12 +363,41 @@ conclusions are not discoverable from artboard markup. See `design/README.md`.
 
 1. Design source committed · 2. Rejected payments, master PIN, PIN keypad ·
 3. Navigation shell split per breakpoint · 4. Desktop Home dashboard ·
-5. Members accordion + Menu grouping.
+5. Members accordion + Menu grouping · 6. Feedback pass (upload states,
+restore feedback, error toast with Retry, receipt enforcement, undo-confirmed
+payment) · 7. Activity date grouping and typed columns, Insights trends, fund
+name in the header · 8. Payment sheets rebuilt to their mockups · 9. Coverage
+backlog (below).
 
-Remaining: **6** — upload states, restore feedback, error toast with Retry,
-copy-reminder on payout-no-QR, receipt enforcement, undo-confirmed-payment on
-the Rounds pills. **7** — Activity date grouping and typed columns, Insights
-trends, fund name in the header.
+Phase 9, from the independent coverage audit — all closed:
+
+- **PIN wizard** — current → new → confirm → done, with a shake on a bad entry
+  and a mismatch that bounces back one step, not to the start.
+- **QR account details** (bank / account name / number) are written from the
+  app, which is what finally gave `qr_bank` a writer; a member sees them
+  beside the QR before sending.
+- **Desktop header actions** — Export CSV on Activity, Reorder payout order on
+  Members (treasurer only), and a titled Rounds detail header with Export
+  round CSV.
+- **Toasts are one stack**, bottom-anchored above the tab bar on the phone and
+  bottom-right on desktop, carrying failures and confirmations together.
+  Exports confirm; they used to save silently.
+- **Boot failure** draws the NoConnection artboard, and only says "No
+  connection" when the failure really looks like one.
+- **Member names validate as you type** — by patching the two affected nodes,
+  never by re-rendering, which would eat the caret.
+- **Camera capture** on every upload surface, offered beside the file picker.
+- Desktop modals blur what is behind them; the pending avatar pulses; the
+  sparkline draws in; the balance counts up (once per change, not per render).
+- Share text splits Overdue from Not-yet-due and breaks out rejected.
+- Fund-complete says "Paid out" in words; the rejected screen is one red card.
+- **A master PIN is offered right after the first treasurer PIN is set** —
+  skippable, and still available from Menu → Security. Before this, a fund
+  that never set one had no way back in.
+
+Still open, not a UI gap: the client reads `app_settings` with `select("*")`
+over open RLS, so `treasurer_pin` and `master_pin` reach the browser in
+plaintext. Reported, not fixed — it needs an RLS/schema decision.
 
 ## Architecture notes that bite
 

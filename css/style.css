@@ -237,12 +237,6 @@ body {
    was occluded. On the two screens where real money moves, that is the same
    silent-failure bug in a worse place. */
 .save-error-banner {
-  position: fixed;
-  top: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 60; /* over .modal-overlay (50), under the lightbox (100) */
-  width: min(calc(100% - 24px), 560px);
   margin-bottom: 0;
   padding: 11px 14px;
   border-radius: 9px;
@@ -252,10 +246,6 @@ body {
   font-size: 12.5px;
   text-align: left;
   box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.7);
-}
-@media (min-width: 900px) {
-  /* Clear of the sidebar, so it centres over the content column. */
-  .save-error-banner { left: calc(50% + 116px); }
 }
 
 .save-warning-banner {
@@ -867,6 +857,16 @@ body {
   z-index: 50;
   padding: 20px;
 }
+@media (min-width: 900px) {
+  /* The desktop artboards draw the page behind a modal dimmed AND softened
+     (opacity .35 + blur 1.5px). Mobile keeps the plain scrim: the sheet covers
+     most of the screen anyway, and blurring a full viewport costs more on a
+     phone than it buys. */
+  .modal-overlay {
+    -webkit-backdrop-filter: blur(3px);
+    backdrop-filter: blur(3px);
+  }
+}
 /* ---- Bottom sheets (mobile) ----------------------------------------------
    Contribute, Review Payment and Release Payout are drawn as bottom sheets in
    the design — the annotation asks for the GCash/Cash App shape, where the
@@ -1085,6 +1085,16 @@ body {
   min-height: 40px;
 }
 .proof-upload:hover { border-color: var(--accent); }
+/* The camera path, offered beside the file picker rather than instead of it —
+   a phone can shoot the receipt on the spot, a desktop has nothing to shoot
+   with and still needs the file chooser above. */
+.proof-upload-camera {
+  margin-top: -8px;
+  background: transparent;
+  min-height: 34px;
+  padding: 9px 12px;
+  font-size: 12.5px;
+}
 .proof-upload-label { font-size: 12.5px; color: var(--text-muted); }
 .proof-preview { max-width: 100%; max-height: 140px; border-radius: 6px; }
 
@@ -1111,6 +1121,10 @@ body {
   letter-spacing: normal;
   text-align: left;
   margin-bottom: 10px;
+}
+.name-input.invalid {
+  border-color: var(--danger);
+  background: var(--danger-soft);
 }
 .edit-names-modal { text-align: left; }
 .edit-names-modal h3, .edit-names-modal .modal-sub { text-align: center; }
@@ -2547,7 +2561,26 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
 }
 .avatar-current { box-shadow: 0 0 0 2.5px var(--success), 0 0 14px 1px rgba(76, 175, 131, 0.35); }
 .avatar-overdue { box-shadow: 0 0 0 2.5px var(--danger); }
-.avatar-pending { box-shadow: 0 0 0 2.5px var(--pending-review); }
+/* A claim waiting on the treasurer is the one state on this screen that is
+   asking for something, so the design gives it the only looping animation in
+   the app — a slow ring pulse (Main.dc.html, pfPulseRing). */
+.avatar-pending {
+  box-shadow: 0 0 0 2.5px var(--pending-review);
+  animation: pfPulseRing 1.8s ease-in-out infinite;
+}
+@keyframes pfPulseRing {
+  0%, 100% {
+    box-shadow: 0 0 0 2.5px var(--pending-review),
+      0 0 0 2.5px rgba(155, 127, 224, 0);
+  }
+  50% {
+    box-shadow: 0 0 0 2.5px var(--pending-review),
+      0 0 0 8px rgba(155, 127, 224, 0.22);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .avatar-pending { animation: none; }
+}
 /* Paid THIS cycle. Home's roster ring means only this now — it used to show
    overall standing, where "paid-out" (their round is finished) outranked
    everything, so green could mean either "has paid" or "already received
@@ -2611,6 +2644,13 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   color: var(--text-muted);
   line-height: 1.6;
 }
+.fund-complete-personal {
+  margin: 10px 0 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+.fund-complete-personal b { color: var(--text-primary); font-weight: 700; }
 .attention-title,
 .attention-group-label { display: inline-flex; align-items: center; gap: 7px; }
 
@@ -2705,6 +2745,52 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
     text-align: center;
     padding: 40px 12px;
   }
+  .rounds-detail-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  .rounds-detail-title {
+    margin: 0;
+    font-family: 'Space Grotesk', 'Inter', sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+  .rounds-detail-sub {
+    margin: 3px 0 0;
+    font-size: 12.5px;
+    color: var(--text-muted);
+  }
+}
+
+/* A header action on the desktop shell — Export CSV, Reorder payout order,
+   Export round CSV. Quiet by design: it sits beside a title, not on it. */
+.view-head-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.view-head-text { min-width: 0; }
+.head-action {
+  flex: none;
+  height: 38px;
+  padding: 0 18px;
+  border-radius: 11px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.14);
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+.head-action:hover { background: rgba(255,255,255,0.1); }
+.head-action:active { transform: scale(0.98); }
+@media (prefers-reduced-motion: reduce) {
+  .head-action:active { transform: none; }
 }
 
 /* ---------------------------------------------------------------------------
@@ -2721,6 +2807,18 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   margin-bottom: 4px;
 }
 .hero-spark .spark { width: 100%; height: 40px; display: block; }
+/* The growth line draws itself in rather than appearing whole (pfDash, Main.dc.html).
+   The dash length is a fixed over-estimate of the path — the design uses 260 for the
+   same 140x40 box — so any real path is fully covered. */
+.spark-line {
+  stroke-dasharray: 400;
+  stroke-dashoffset: 400;
+  animation: pfDash 1s ease-out 0.5s both;
+}
+@keyframes pfDash { to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .spark-line { animation: none; stroke-dashoffset: 0; }
+}
 .hero-spark-total { font-size: 11.5px; color: var(--success); font-weight: 600; margin-top: 4px; }
 
 .roster-strip-wrap { margin: 20px 0; }
@@ -2803,6 +2901,14 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
    applies to children — so a long name clipped hard instead of ellipsising,
    and the icon (a block-level SVG with no alignment of its own) drifted off
    the text's optical centre. That is the misalignment on the live app. */
+.roster-chip-word {
+  display: block;
+  margin-top: 2px;
+  font-size: 9.5px;
+  font-weight: 600;
+  color: var(--success);
+  letter-spacing: 0.2px;
+}
 .roster-name {
   display: flex;
   align-items: center;
@@ -2918,6 +3024,21 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   margin-bottom: 18px;
 }
 .detail-ident { flex: 1; min-width: 0; }
+/* The one action the design puts in this header: a claim is waiting and the
+   treasurer can open it from here instead of hunting for the cycle. */
+.detail-review-btn {
+  flex: none;
+  height: 38px;
+  padding: 0 16px;
+  border-radius: 11px;
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+}
+.detail-review-btn:hover { background: rgba(245, 166, 35, 0.22); }
 .detail-name {
   margin: 0;
   font-family: 'Space Grotesk', 'Inter', sans-serif;
@@ -3001,11 +3122,6 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
  * to act on, and in an app tracking money a failed save must not vanish.
  * ------------------------------------------------------------------------- */
 .toast {
-  position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: calc(72px + env(safe-area-inset-bottom, 0px));
-  z-index: 30;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -3020,8 +3136,8 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   animation: pfToastIn 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 @keyframes pfToastIn {
-  from { opacity: 0; transform: translateX(-50%) translateY(12px); }
-  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 .toast-icon { display: flex; color: var(--success); flex-shrink: 0; }
 .toast-text { flex: 1; min-width: 0; line-height: 1.45; }
@@ -3035,15 +3151,38 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   flex-shrink: 0;
 }
 .toast-x:hover { color: var(--text-primary); }
-.toast.above-cta { bottom: calc(148px + env(safe-area-inset-bottom, 0px)); }
+
+/* The stack itself does the positioning; its children are just cards in a
+   column. Failures and confirmations share it, so one never hides the other. */
+.toast-stack {
+  position: fixed;
+  z-index: 60; /* over .modal-overlay (50), under the lightbox (100) */
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+  width: min(520px, calc(100vw - 32px));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  pointer-events: none;
+}
+.toast-stack > * { pointer-events: auto; width: auto; max-width: none; }
+.toast-stack.above-cta { bottom: calc(148px + env(safe-area-inset-bottom, 0px)); }
 
 .save-error-banner,
 .save-warning-banner { display: flex; align-items: center; gap: 8px; }
 
 @media (min-width: 900px) {
-  /* No bottom bar to clear on desktop, and the sidebar shifts the centre. */
-  .toast,
-  .toast.above-cta { bottom: 24px; left: calc(50% + 116px); }
+  /* DesktopToastStates anchors the stack to the bottom-right corner; there is
+     no bottom bar to clear and no floating CTA at this width. */
+  .toast-stack,
+  .toast-stack.above-cta {
+    left: auto;
+    right: 32px;
+    bottom: 32px;
+    transform: none;
+    width: 360px;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .toast { animation: none; }
@@ -3190,6 +3329,17 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   padding: 14px 16px;
   margin-bottom: 14px;
 }
+/* The identity line the status card used to carry, folded into this card so a
+   rejected member sees one red card rather than two. */
+.rejected-ident {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.rejected-who { font-size: 12.5px; color: var(--text-muted); min-width: 0; }
+.rejected-who b { color: var(--danger); font-weight: 700; }
 .rejected-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .rejected-head .icon { color: var(--danger); flex-shrink: 0; }
 .rejected-title {
@@ -4608,4 +4758,213 @@ body.modal-open .lightbox-overlay { touch-action: auto; }
   line-height: 1.5;
   color: var(--text-muted);
   text-align: left;
+}
+
+/* ==========================================================================
+   PIN wizard — step progress, wrong-entry shake, and the confirmation card
+   Setting a PIN is current → new → confirm → done. It used to be one field
+   saved on first submit, so a single mistyped digit became the group's PIN.
+   ========================================================================== */
+.pin-steps {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin: 0 0 16px;
+}
+.pin-step {
+  width: 34px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border);
+}
+.pin-step.now { background: var(--accent); }
+.pin-step.done { background: var(--success); }
+
+/* A rejected entry has to look rejected — a cleared field on its own reads
+   as a dead button. Honours reduced motion below. */
+.pin-dots.shake { animation: pfShake 0.4s cubic-bezier(0.36, 0.07, 0.19, 0.97); }
+@keyframes pfShake {
+  10%, 90% { transform: translateX(-2px); }
+  20%, 80% { transform: translateX(4px); }
+  30%, 50%, 70% { transform: translateX(-7px); }
+  40%, 60% { transform: translateX(7px); }
+}
+
+.pin-done {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 22px 12px 8px;
+}
+.pin-master-offer {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  border: 1px solid rgba(245, 166, 35, 0.3);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  text-align: left;
+}
+.pin-done-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--success-soft);
+  color: var(--success);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.pin-done-icon .icon { display: block; }
+.pin-done-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  max-width: 30ch;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pin-dots.shake { animation: none; }
+}
+
+/* The account the payment QR belongs to, shown beside it so a member can
+   check the name before sending. Sits on the white QR card. */
+.qr-card-acct {
+  margin: 6px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+.qr-card-acct b { color: #14213D; font-size: 12.5px; font-weight: 700; }
+.qr-card-acct span { color: #6B7280; }
+.qr-account-note {
+  margin: 0 0 12px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  text-align: left;
+}
+
+/* Desktop roster: a vertical list with the status in words, as
+   DesktopHomeMember/Treasurer draw it. The mobile avatar strip conveyed
+   status by ring colour plus a 10px glyph, which on the widest surface is
+   both a design mismatch and a colour-only cue. */
+.roster-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: visible;
+  padding: 0;
+}
+.roster-list::after { content: none; }
+.roster-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 7px 8px;
+  background: none;
+  border: none;
+  border-radius: 9px;
+  cursor: pointer;
+  text-align: left;
+}
+.roster-row:hover { background: rgba(255, 255, 255, 0.04); }
+.roster-row-avatar { flex: 0 0 auto; display: inline-flex; }
+.roster-row-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.roster-row-status {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+.roster-row-status.paid { color: var(--success); }
+.roster-row-status.pending { color: var(--pending-review); }
+.roster-row-status.overdue,
+.roster-row-status.rejected { color: var(--danger); }
+
+/* Boot failure — the design's NoConnection artboard. Centred in the viewport
+   because there is no shell yet: nav, header and data have all failed to load. */
+.boot-error {
+  min-height: 78vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+}
+.boot-error-card {
+  width: 100%;
+  max-width: 280px;
+  text-align: center;
+  animation: pfFadeUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.boot-error-icon {
+  width: 80px;
+  height: 80px;
+  border-radius: 22px;
+  background: rgba(255,255,255,0.04);
+  border: 1px dashed rgba(255,255,255,0.16);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 22px;
+  color: rgba(255,255,255,0.28);
+}
+.boot-error-icon svg { width: 32px; height: 32px; }
+.boot-error-title {
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 18px;
+  margin: 0 0 8px;
+  color: var(--text-primary);
+}
+.boot-error-sub {
+  font-size: 13.5px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  margin: 0 0 26px;
+}
+.boot-error-detail {
+  margin: -14px 0 22px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  opacity: 0.75;
+  word-break: break-word;
+}
+.boot-error-cta {
+  width: 100%;
+  height: 52px;
+  border: none;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #F5A623, #FFC966);
+  color: #14213D;
+  font-weight: 700;
+  font-size: 14.5px;
+  cursor: pointer;
+}
+.boot-error-cta:active { transform: scale(0.97); }
+@media (prefers-reduced-motion: reduce) {
+  .boot-error-card { animation: none; }
+  .boot-error-cta:active { transform: none; }
 }

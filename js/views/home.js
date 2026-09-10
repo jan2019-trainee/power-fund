@@ -16,7 +16,7 @@ window.PFViews.home = function (ctx) {
     overdueCount, remainingToGo, payCycle, payCycleDue, cyclePaidCount,
     myMember, myStatus, ROUND_PILL, ROUND_PILL_WORD, state, unlocked, busy,
     attentionQueueExpanded, overdueListOpen, startRoundConfirming,
-    escapeHtml, inlineArg, icon, batteryCell, memberAvatar,
+    escapeHtml, inlineArg, icon, batteryCell, memberAvatar, getPayout,
     sparkline, C,
     formatDateTime, overdueRows, activityTimeLabel, isWide
   } = ctx;
@@ -70,7 +70,15 @@ window.PFViews.home = function (ctx) {
     const cyc = myRejection.cycles;
     const cycLabel =
       cyc.length > 1 ? `Cycles ${cyc[0]}–${cyc[cyc.length - 1]}` : `Cycle ${cyc[0]}`;
+    // MainMemberRejected draws ONE red card, not two: the identity line the
+    // status card would carry lives in this card's head, and the status card
+    // is suppressed below. Two stacked red cards saying the same thing made
+    // the screen read like two separate failures.
     html += `<div class="rejected-card" role="alert">
+      <div class="rejected-ident">
+        <span class="rejected-who">${escapeHtml(myMember.name)} · <b>Rejected</b></span>
+        <button type="button" class="my-status-change" onclick="PowerFund.openWhoAmIPicker()">Change</button>
+      </div>
       <div class="rejected-head">
         ${icon("alert", 16)}
         <span class="rejected-title">Your proof for ${cycLabel} wasn't accepted</span>
@@ -94,6 +102,8 @@ window.PFViews.home = function (ctx) {
   // ---- My status: personalized, only shown once a member has set "who
   // am I on this device" — never forced, never gates anything. ----------
   html += (function () {
+    // Already said, in red, directly above — see the rejected card.
+    if (myRejection && myMember) return "";
     if (myMember && myStatus) {
       // The mockup's shape: a tinted icon tile, the name and status word on
       // one line with the detail beneath, and "Change" to the right. Compact —
@@ -208,6 +218,30 @@ window.PFViews.home = function (ctx) {
       <p class="attention-caught-up-note">All ${C.TOTAL_ROUNDS} rounds collected and paid out — ${C.peso(
       C.TARGET_AMOUNT
     )} in total. Nothing is outstanding.</p>
+      ${
+        // DesktopHomeMemberFundComplete closes the fund with the viewer's own
+        // result — what they received, and how they paid in. Every figure here
+        // is read back from the record, not assumed from the fund's shape: a
+        // payout can be released for an amount other than the goal, and
+        // on-time only counts contributions that carry a paid_at.
+        myMember
+          ? (function () {
+              const mine = getPayout(myMember.member_order);
+              const amount =
+                mine && mine.amount != null ? mine.amount : C.GOAL_PER_ROUND;
+              const st = C.onTimeStats(state.contributions, state.cycles, myMember.id);
+              const paidLine =
+                st.counted === 0
+                  ? "Your contributions are all settled."
+                  : st.onTime === st.counted
+                  ? `You made all ${st.counted} of your dated contributions on time.`
+                  : `You paid ${st.onTime} of ${st.counted} dated contributions on time.`;
+              return `<p class="fund-complete-personal">You received <b>${C.peso(
+                amount
+              )}</b> in Round ${myMember.member_order}. ${escapeHtml(paidLine)}</p>`;
+            })()
+          : ""
+      }
     </div>`;
   }
   S.complete = section();
@@ -426,8 +460,14 @@ window.PFViews.home = function (ctx) {
     </div>
     <div class="battery-amount">${
       allDone
-        ? `${C.peso(C.TARGET_AMOUNT)} <span>/ ${C.peso(C.TARGET_AMOUNT)}</span>`
-        : `${C.peso(curCollected)} <span>/ ${C.peso(C.GOAL_PER_ROUND)} goal</span>`
+        ? `<span class="count-up" data-count-key="hero" data-count="${
+            C.TARGET_AMOUNT
+          }">${C.peso(C.TARGET_AMOUNT)}</span> <span>/ ${C.peso(
+            C.TARGET_AMOUNT
+          )}</span>`
+        : `<span class="count-up" data-count-key="hero" data-count="${curCollected}">${C.peso(
+            curCollected
+          )}</span> <span>/ ${C.peso(C.GOAL_PER_ROUND)} goal</span>`
     }</div>
     <div class="hero-gauge" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(
       pct
@@ -536,7 +576,7 @@ window.PFViews.home = function (ctx) {
         13
       )}</button>
     </div>
-    <div class="roster-strip">
+    <div class="roster-strip${isWide ? " roster-list" : ""}">
       ${members
         .map((m) => {
           // The ring answers ONE question: has this member paid the cycle
@@ -593,6 +633,39 @@ window.PFViews.home = function (ctx) {
           // The mockup labels the device's own member "You" rather than
           // repeating their name.
           const shown = myMember && m.id === myMember.id ? "You" : m.name;
+          // Desktop states the status in WORDS beside the name, as
+          // DesktopHomeMember/Treasurer draw it. On the widest, most-read
+          // surface the mobile treatment left status as colour plus a 10px
+          // glyph — a design mismatch and a colour-only cue in one.
+          // On a finished fund every member has received their round, so the
+          // word is "Paid out" — DesktopHomeMemberFundComplete labels the whole
+          // roster that way. Mid-fund "Paid" only ever means this cycle.
+          const wordFor = allDone
+            ? "Paid out"
+            : allPaid
+            ? "Paid"
+            : cycleStatus === 2
+            ? "Paid"
+            : cycleStatus === 1
+            ? "In review"
+            : cycleStatus === 3
+            ? "Rejected"
+            : overdue
+            ? "Overdue"
+            : "Not due yet";
+          if (isWide) {
+            return `<button type="button" class="roster-row" onclick="PowerFund.setView('members')" aria-label="${escapeHtml(
+              m.name
+            )} — ${said}">
+              <span class="roster-row-avatar">${memberAvatar(m.name, ring, 34)}</span>
+              <span class="roster-row-name">${escapeHtml(shown)}</span>
+              <span class="roster-row-status ${ring}">${
+              mark ? `<span class="roster-mark rm-${
+                cycleStatus === 3 && !allPaid ? "rejected" : mark
+              }">${icon(mark, 11)}</span>` : ""
+            }<span>${wordFor}</span></span>
+            </button>`;
+          }
           return `<button type="button" class="roster-chip" onclick="PowerFund.setView('members')" aria-label="${escapeHtml(
             m.name
           )} — ${said}">
@@ -612,6 +685,11 @@ window.PFViews.home = function (ctx) {
                   }">${icon(mark, 10)}</span>`
                 : ""
             }<span class="roster-name-text">${escapeHtml(shown)}</span></span>
+            ${
+              // A tick alone doesn't say what was paid. On the closing screen
+              // the phone roster spells it out too, as the design does.
+              allDone ? `<span class="roster-chip-word">Paid out</span>` : ""
+            }
           </button>`;
         })
         .join("")}

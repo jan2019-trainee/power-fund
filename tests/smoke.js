@@ -1223,9 +1223,32 @@ async function qaFixes(browser, errors) {
     (await chips.locator(".roster-strip .avatar-rejected").count()) >= 1,
     `rejected=${await chips.locator(".roster-strip .avatar-rejected").count()}`
   );
+  // The mockup keeps a glyph beside the name (✓ Ana · ◷ You · ⚠ Dan · Elena).
   check(
-    "qa/roster carries no status glyph beside the name",
-    (await chips.locator(".roster-name .roster-mark").count()) === 0
+    "qa/roster keeps a status glyph beside the name",
+    (await chips.locator(".roster-name .roster-mark").count()) >= 1
+  );
+  // The ellipsis must live on the NAME, not on the flex row — on the row it
+  // never applies to children, which is what knocked the icon off centre.
+  const nameBox = await chips.evaluate(() => {
+    const row = document.querySelector(".roster-name");
+    const text = row && row.querySelector(".roster-name-text");
+    const mark = row && row.querySelector(".roster-mark");
+    if (!row || !text) return null;
+    const cs = getComputedStyle(row);
+    const ts = getComputedStyle(text);
+    let dy = 0;
+    if (mark) {
+      const mr = mark.getBoundingClientRect();
+      const tr = text.getBoundingClientRect();
+      dy = Math.abs((mr.top + mr.height / 2) - (tr.top + tr.height / 2));
+    }
+    return { rowFlex: cs.display, rowClip: cs.textOverflow, textClip: ts.textOverflow, dy };
+  });
+  check(
+    "qa/glyph and name share an optical centre",
+    !!nameBox && nameBox.rowFlex === "flex" && nameBox.textClip === "ellipsis" && nameBox.dy <= 1.5,
+    JSON.stringify(nameBox)
   );
   check(
     "qa/the duplicate badge row is gone",

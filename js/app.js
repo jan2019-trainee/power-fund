@@ -3314,7 +3314,13 @@
                 label: `You're all caught up — next payment ${C.formatDate(
                   payCycleDue
                 )}`,
-                actionCycle: null,
+                // The shortcut stays. Nothing is DUE yet, but paying ahead is a
+                // real thing members do — the app supports up to three cycles
+                // in one transfer — so the card says "caught up" and still
+                // offers the way to pay. Withholding it would mean the card
+                // that mentions the next payment is the one screen you cannot
+                // make it from.
+                actionCycle: payCycle,
               };
         }
       }

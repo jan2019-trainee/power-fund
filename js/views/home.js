@@ -110,9 +110,9 @@ window.PFViews.home = function (ctx) {
           myStatus.actionCycle && !myRejection
             ? `<button type="button" class="my-status-cta" onclick="PowerFund.openContributeModal('${inlineArg(
                 myMember.id
-              )}', ${myStatus.actionCycle})">＋ Record my payment — ${C.peso(
-                C.CONTRIBUTION_AMOUNT
-              )}</button>`
+              )}', ${myStatus.actionCycle})">＋ ${
+                myStatus.kind === "paid" ? "Pay ahead" : "Record my payment"
+              } — ${C.peso(C.CONTRIBUTION_AMOUNT)}</button>`
             : ""
         }
       </div>`;
@@ -535,6 +535,20 @@ window.PFViews.home = function (ctx) {
               : payCycle == null
               ? "nothing due"
               : "not paid yet";
+          // The glyph beside the name, as the mockup draws it (✓ Ana · ◷ You ·
+          // ⚠ Dan · Elena). Nothing for a cycle that simply isn't due — that
+          // is not a state anyone needs to act on.
+          const mark =
+            cycleStatus === 2
+              ? "check"
+              : cycleStatus === 1
+              ? "clock"
+              : cycleStatus === 3 || overdue
+              ? "alert"
+              : null;
+          // The mockup labels the device's own member "You" rather than
+          // repeating their name.
+          const shown = myMember && m.id === myMember.id ? "You" : m.name;
           return `<button type="button" class="roster-chip" onclick="PowerFund.setView('members')" aria-label="${escapeHtml(
             m.name
           )} — ${said}">
@@ -542,7 +556,13 @@ window.PFViews.home = function (ctx) {
               ${memberAvatar(m.name, ring, 52)}
               <span class="roster-order">${m.member_order}</span>
             </span>
-            <span class="roster-name">${escapeHtml(m.name)}</span>
+            <span class="roster-name">${
+              mark
+                ? `<span class="roster-mark ${
+                    cycleStatus === 3 ? "rejected" : mark
+                  }">${icon(mark, 10)}</span>`
+                : ""
+            }<span class="roster-name-text">${escapeHtml(shown)}</span></span>
           </button>`;
         })
         .join("")}

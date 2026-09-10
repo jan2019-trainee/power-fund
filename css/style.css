@@ -2650,19 +2650,39 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   font-weight: 700;
   color: var(--text-muted);
 }
+/* The glyph and the name are two flex items, and the ellipsis lives on the
+   NAME. Previously text-overflow sat on this flex container, where it never
+   applies to children — so a long name clipped hard instead of ellipsising,
+   and the icon (a block-level SVG with no alignment of its own) drifted off
+   the text's optical centre. That is the misalignment on the live app. */
 .roster-name {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: center;
   gap: 3px;
   font-size: 10.5px;
   color: var(--text-muted);
   max-width: 100%;
+}
+.roster-name-text {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.roster-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  /* Nudge: the stroke-based glyphs read a touch high against 10.5px text. */
+  margin-top: -1px;
+}
+.roster-mark .icon { display: block; }
 .roster-mark.check { color: var(--success); }
 .roster-mark.clock { color: var(--pending-review); }
+.roster-mark.alert { color: var(--danger); }
+.roster-mark.rejected { color: var(--danger); }
 
 .rounds-link {
   width: 100%;

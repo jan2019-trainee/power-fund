@@ -174,6 +174,80 @@ works with no extra Vercel configuration. `vercel.json` sets the cache headers
 the service worker needs (`sw.js` and `index.html` are served `no-cache`); it is
 picked up automatically.
 
+## Turning on member sign-in (Google)
+
+Member accounts are gated by `AUTH_MODE` in `js/config.js` (`off` | `optional` |
+`required`). This is the setup the treasurer does once, in two dashboards.
+
+**1. Google Cloud — create the OAuth client**
+
+- [console.cloud.google.com](https://console.cloud.google.com) → new project.
+- **APIs & Services → OAuth consent screen** (Google has been reorganising this
+  into *Google Auth Platform* with separate Branding / Audience / Clients
+  pages — same three things, different labels). Choose **External**, fill in
+  the app name and your email.
+- Leave publishing status **Testing** and add each member's Google address
+  under **Test users**. In Testing mode only listed addresses can sign in,
+  which suits a five-person fund and avoids Google's verification review.
+- Add **no scopes**. The defaults (email, profile, openid) are all this needs,
+  and adding more is what triggers review.
+- **Credentials → Create Credentials → OAuth client ID → Web application.**
+- Under **Authorized redirect URIs** add your Supabase project's callback —
+  note this is *Supabase's* URL, not the app's:
+
+  ```
+  https://<your-project-ref>.supabase.co/auth/v1/callback
+  ```
+
+- Copy the **Client ID** and **Client Secret**.
+
+**2. Supabase — enable the provider**
+
+- **Authentication → Providers → Google**: toggle on, paste the ID and secret.
+- **Authentication → URL Configuration → Redirect URLs**: add every URL the
+  app is opened at. `js/database.js` sends back
+  `window.location.origin + window.location.pathname`, so `/` and
+  `/index.html` are **separate entries**, and each Vercel preview URL is its
+  own origin:
+
+  ```
+  https://<your-app>.vercel.app/
+  https://<your-app>.vercel.app/index.html
+  https://<project>-git-<branch>-<scope>.vercel.app/
+  https://<project>-git-<branch>-<scope>.vercel.app/index.html
+  http://localhost:8791/index.html
+  ```
+
+- Leave **Site URL** as production. That gives you a free diagnostic: if
+  signing in dumps you on the production site, the URL you actually opened was
+  not in the list above and Supabase fell back to Site URL.
+
+**3. The app**
+
+Set `AUTH_MODE` in `js/config.js` and redeploy:
+
+- `"optional"` first — the login appears as **Menu → Account → Sign in with
+  Google** and the app stays fully usable without it, so one person can test
+  the flow without gating anyone.
+- `"required"` only together with migration `011_rls_lockdown.sql`. See the
+  migration's own header: it revokes `anon`, so either half alone leaves the
+  app broken.
+
+**4. When it goes wrong**
+
+| Symptom | Cause |
+| --- | --- |
+| "Google sign-in isn't switched on for this fund yet" | The provider toggle in step 2 |
+| Google says `redirect_uri_mismatch` | Step 1's URI must match character for character |
+| Returns to the app still signed out | The opened URL is missing from Redirect URLs |
+| "You're not on this fund's roster" | That address is on no `members` row |
+| "This fund isn't ready for sign-ins yet" | No member has an email recorded at all |
+
+To check what a deploy is actually serving without trusting a dashboard, open
+`/js/config.js` on the deployed URL and read the `AUTH_MODE` line. It is
+network-first in the service worker and `max-age=0` in `vercel.json`, so
+neither layer can serve you a stale copy.
+
 ## Install as an app (PWA)
 
 The site is a Progressive Web App. Once it is served over HTTPS (Vercel does this

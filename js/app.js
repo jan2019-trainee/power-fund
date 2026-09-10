@@ -766,9 +766,16 @@
   function openReviewModal(memberId, cycleNumber) {
     // Review the whole advance batch (contiguous pending cycles, same proof)
     // in one go, not cycle by cycle.
+    const batch = C.pendingRun(state.contributions, memberId, cycleNumber);
+    // When it was sent, so the sheet can say so — the mockup shows
+    // "submitted 10:42 AM" beside the cycle.
+    const firstRow = batch.length
+      ? C.contributionFor(state.contributions, memberId, batch[0])
+      : null;
     reviewTarget = {
       memberId,
-      cycles: C.pendingRun(state.contributions, memberId, cycleNumber),
+      cycles: batch,
+      submittedAt: (firstRow && firstRow.created_at) || null,
     };
     rejectConfirming = false;
     rejectNoteValue = "";
@@ -1862,6 +1869,8 @@
     alert:
       '<path d="M10.3 4.6 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.6a2 2 0 0 0-3.4 0Z"/><path d="M12 9.5v4"/><circle cx="12" cy="17" r=".9" fill="currentColor" stroke="none"/>',
     check: '<polyline points="4 12 10 18 20 6"/>',
+    close: '<line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>',
+    expand: '<polyline points="9 3 3 3 3 9"/><polyline points="15 3 21 3 21 9"/><polyline points="21 15 21 21 15 21"/><polyline points="3 15 3 21 9 21"/>',
     chevron: '<polyline points="9 6 15 12 9 18"/>',
     chevronLeft: '<polyline points="15 6 9 12 15 18"/>',
     bell: '<path d="M6 8a6 6 0 0 1 12 0c0 4 1.5 5.5 2 6H4c.5-.5 2-2 2-6Z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
@@ -3556,80 +3565,145 @@
       );
       const total = C.CONTRIBUTION_AMOUNT * modalCount;
       const qrUrl = qrImageUrl();
+      // Laid out as the mockup draws it: title + due/round line with a close
+      // affordance, the QR matted on white with its own actions, then one
+      // panel holding AMOUNT and the pay-ahead stepper, then the proof row as
+      // a file chip rather than a bare upload box.
+      const advanceLast = C.dueDateOf(
+        state.cycles,
+        modalTarget.cycleNumber + modalCount - 1
+      );
+      const cycleRound = C.roundOfCycle(modalTarget.cycleNumber);
       html += `<div class="modal-overlay sheet" onclick="if(event.target===this) PowerFund.closeModal()">
-        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
-          <h3 id="dlg-title">Contribute — ${member ? escapeHtml(member.name) : ""}</h3>
-          <p class="modal-sub">${
-            modalCount === 1
-              ? `Cycle due ${due ? C.formatDate(due) : "—"}`
-              : `Cycles ${due ? C.formatDate(due) : "—"} – ${
-                  lastDue ? C.formatDate(lastDue) : "—"
-                }`
-          }</p>
-          <p class="qr-scan-label">Scan to Pay</p>
+        <div class="modal sheet-pay" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <div class="sheet-head">
+            <div class="sheet-head-titles">
+              <h3 id="dlg-title">Pay Cycle ${modalTarget.cycleNumber}</h3>
+              <p class="modal-sub">${
+                due ? `Due ${C.formatDate(due)} · ` : ""
+              }Round ${cycleRound}${
+        member ? ` · ${escapeHtml(member.name)}` : ""
+      }</p>
+            </div>
+            <button type="button" class="sheet-x" onclick="PowerFund.closeModal()" aria-label="Close">${icon(
+              "close",
+              14
+            )}</button>
+          </div>
+
           ${
             qrUrl
-              ? `<button type="button" class="qr-box-btn" onclick="PowerFund.openLightbox('${inlineArg(
-                  qrUrl
-                )}')" aria-label="Payment QR code — activate to enlarge">
-                   <span class="qr-box">
+              ? `<div class="qr-card">
+                   <button type="button" class="qr-card-img" onclick="PowerFund.openLightbox('${inlineArg(
+                     qrUrl
+                   )}')" aria-label="Payment QR code — activate to enlarge">
                      <img src="${escapeHtml(
                        qrUrl
                      )}" alt="Payment QR code" onerror="this.onerror=null;this.src='${inlineArg(
                   FALLBACK_QR_URL
                 )}'">
-                   </span>
-                 </button>
-                 <p class="qr-hint">🔍 Tap the QR to enlarge</p>`
+                     <span class="qr-card-expand">${icon("expand", 13)}</span>
+                   </button>
+                   <p class="qr-card-title">${
+                     // The mockup says "Scan with GCash", but the QR on file
+                     // may be Maya, InstaPay, a bank — naming the wrong wallet
+                     // over someone's real QR is worse than not naming one.
+                     // Reads app_settings.qr_bank (migration 006) when the
+                     // treasurer has set it.
+                     state.settings && state.settings.qr_bank
+                       ? `Scan with ${escapeHtml(state.settings.qr_bank)}`
+                       : "Scan to pay"
+                   }</p>
+                   <p class="qr-card-hint">Tap to enlarge</p>
+                   <a href="${escapeHtml(
+                     qrUrl
+                   )}" download="powerfund-qr" class="qr-card-save">${icon(
+                  "download",
+                  13
+                )}<span>Save QR code</span></a>
+                 </div>`
               : `<div class="qr-box">QR code goes here — the treasurer needs to add the InstaPay/GCash QR image</div>`
           }
-          ${
-            qrUrl
-              ? `<a href="${escapeHtml(
-                  qrUrl
-                )}" download="powerfund-qr" class="download-qr-btn">⬇ Download QR to upload in your app</a>`
-              : ""
-          }
-          <div class="modal-amount">${C.peso(total)}</div>
-          ${
-            maxCount > 1
-              ? `<div class="advance-row">
-                   <span class="advance-label">Paying in advance?</span>
-                   <div class="stepper">
-                     <button onclick="PowerFund.adjustModalCount(-1)" ${
-                       modalCount <= 1 ? "disabled" : ""
-                     }>−</button>
-                     <span class="stepper-count">${modalCount} cycle${
-                  modalCount > 1 ? "s" : ""
-                }</span>
-                     <button onclick="PowerFund.adjustModalCount(1)" ${
-                       modalCount >= maxCount ? "disabled" : ""
-                     }>+</button>
-                   </div>
-                 </div>`
-              : ""
-          }
-          <label class="proof-upload">
+
+          <div class="pay-panel">
+            <div class="pay-row">
+              <span class="pay-row-label">Amount</span>
+              <span class="pay-row-amount">${C.peso(total)}</span>
+            </div>
             ${
-              modalProofPreview
-                ? `<img src="${modalProofPreview}" class="proof-preview" alt="Payment screenshot">`
-                : `<span class="proof-upload-label">📎 Attach proof of payment (required)</span>`
+              maxCount > 1
+                ? `<div class="pay-row pay-row-split">
+                     <span class="pay-row-main">
+                       <span class="pay-row-title">Pay ahead</span>
+                       <span class="pay-row-note">${
+                         modalCount === 1
+                           ? `Cycle ${modalTarget.cycleNumber}${
+                               due ? ` · ${C.formatDate(due)}` : ""
+                             }`
+                           : `Cycles ${modalTarget.cycleNumber}–${
+                               modalTarget.cycleNumber + modalCount - 1
+                             }${
+                               due && advanceLast
+                                 ? ` · ${C.formatDate(due)} & ${C.formatDate(advanceLast)}`
+                                 : ""
+                             }`
+                       }</span>
+                     </span>
+                     <span class="stepper">
+                       <button type="button" onclick="PowerFund.adjustModalCount(-1)" ${
+                         modalCount <= 1 ? "disabled" : ""
+                       } aria-label="One fewer cycle">−</button>
+                       <span class="stepper-count" aria-live="polite">${modalCount}</span>
+                       <button type="button" onclick="PowerFund.adjustModalCount(1)" ${
+                         modalCount >= maxCount ? "disabled" : ""
+                       } aria-label="One more cycle">+</button>
+                     </span>
+                   </div>`
+                : ""
             }
-            <input type="file" accept="image/*" onchange="PowerFund.onProofSelected(this)" hidden>
-          </label>
+          </div>
+
+          <p class="sheet-section-label">Proof of payment ${
+            modalProofPreview ? "" : `<span class="field-required">required</span>`
+          }</p>
           ${
             modalProofPreview
-              ? `<button type="button" class="zoom-link" onclick="PowerFund.openLightbox('${inlineArg(
-                  modalProofPreview
-                )}')">🔍 View proof larger</button>`
-              : `<p class="proof-required-hint">Proof of payment is required to submit.</p>`
+              ? `<div class="file-chip">
+                   <button type="button" class="file-chip-thumb" onclick="PowerFund.openLightbox('${inlineArg(
+                     modalProofPreview
+                   )}')" aria-label="View the attached screenshot larger">
+                     <img src="${modalProofPreview}" alt="Attached payment screenshot">
+                     <span class="file-chip-badge">${icon("check", 10)}</span>
+                   </button>
+                   <span class="file-chip-body">
+                     <span class="file-chip-name">${escapeHtml(
+                       (modalProofFile && modalProofFile.name) || "screenshot"
+                     )}</span>
+                     <span class="file-chip-meta">${
+                       modalProofFile
+                         ? `${(modalProofFile.size / (1024 * 1024)).toFixed(1)} MB · attached`
+                         : "attached"
+                     }</span>
+                   </span>
+                   <label class="file-chip-change">Change
+                     <input type="file" accept="image/*" onchange="PowerFund.onProofSelected(this)" hidden>
+                   </label>
+                 </div>`
+              : `<label class="proof-upload">
+                   <span class="proof-upload-label">${icon(
+                     "upload",
+                     14
+                   )}<span>Attach your payment screenshot</span></span>
+                   <input type="file" accept="image/*" onchange="PowerFund.onProofSelected(this)" hidden>
+                 </label>
+                 <p class="proof-required-hint">The treasurer checks this before confirming, so it has to show the amount and the date.</p>`
           }
           ${submitStateHtml()}
           <div class="modal-actions">
             <button class="modal-btn-primary" onclick="PowerFund.markPending()" ${
               busy || !modalProofPreview ? "disabled" : ""
-            }>${busy ? "Saving…" : "I've sent this"}</button>
-            <button class="modal-btn-secondary" onclick="PowerFund.closeModal()">Cancel</button>
+            }>${busy ? "Saving…" : `I've sent this · ${C.peso(total)}`}</button>
+            <button class="modal-btn-quiet" onclick="PowerFund.closeModal()">Cancel</button>
           </div>
         </div>
       </div>`;
@@ -3644,30 +3718,53 @@
       const proof = C.proofOf(state.contributions, reviewTarget.memberId, rc[0]);
       const multi = rc.length > 1;
       html += `<div class="modal-overlay sheet" onclick="if(event.target===this) PowerFund.closeReviewModal()">
-        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
-          <h3 id="dlg-title">Review payment — ${member ? escapeHtml(member.name) : ""}</h3>
-          <p class="modal-sub">${
-            multi
-              ? `Cycles ${firstDue ? C.formatDate(firstDue) : "—"} – ${
-                  lastDue ? C.formatDate(lastDue) : "—"
-                }`
-              : `Cycle due ${firstDue ? C.formatDate(firstDue) : "—"}`
-          } · <b>${C.peso(total)}</b>${
-        multi ? ` · ${rc.length} payments in one transfer` : ""
-      }</p>
+        <div class="modal sheet-pay" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <div class="sheet-head">
+            <div class="sheet-head-titles">
+              <h3 id="dlg-title">Review Payment</h3>
+            </div>
+            <button type="button" class="sheet-x" onclick="PowerFund.closeReviewModal()" aria-label="Close">${icon(
+              "close",
+              14
+            )}</button>
+          </div>
+
+          <!-- Claimant, what for, and how much — one row, as the mockup has it. -->
+          <div class="claim-row">
+            ${memberAvatar(member ? member.name : "?", "pending", 40)}
+            <span class="claim-body">
+              <span class="claim-name">${member ? escapeHtml(member.name) : "—"}</span>
+              <span class="claim-meta">${
+                multi
+                  ? `Cycles ${rc[0]}–${rc[rc.length - 1]}`
+                  : `Cycle ${rc[0]}`
+              }${firstDue ? ` · Due ${C.formatDate(firstDue)}` : ""}${
+        reviewTarget.submittedAt
+          ? ` · submitted ${activityClockLabel(reviewTarget.submittedAt)}`
+          : ""
+      }</span>
+            </span>
+            <span class="claim-amount">${C.peso(total)}</span>
+          </div>
+
+          <p class="sheet-section-label">Proof of payment</p>
           ${
             proof
-              ? `<button type="button" class="qr-box-btn" onclick="PowerFund.openLightbox('${inlineArg(
+              ? `<button type="button" class="proof-card" onclick="PowerFund.openLightbox('${inlineArg(
                   proof
                 )}')" aria-label="Submitted payment screenshot — activate to enlarge">
-                   <span class="qr-box"><img src="${escapeHtml(
+                   <img src="${escapeHtml(
                      proof
-                   )}" alt="Submitted payment screenshot"></span>
+                   )}" alt="Submitted payment screenshot">
+                   <span class="proof-card-expand">${icon("expand", 13)}</span>
                  </button>
-                 <p class="qr-hint">🔍 Tap the screenshot to enlarge</p>`
-              : `<div class="qr-box">No screenshot attached — member confirmed by text only</div>`
+                 <p class="proof-card-hint">Tap the screenshot to enlarge</p>`
+              : `<div class="proof-card proof-card-empty">${icon(
+                  "alert",
+                  16
+                )}<span>No screenshot attached — there is nothing here to check against.</span></div>`
           }
-          <div class="modal-meta">Check the screenshot matches <b>${C.peso(
+          <div class="modal-meta">Check it matches <b>${C.peso(
             total
           )}</b> sent to the right account before confirming${
         multi ? ` — this approves all ${rc.length} cycles at once` : ""
@@ -3697,17 +3794,19 @@
                      busy || !rejectNoteValue.trim() ? "disabled" : ""
                    }>Yes, reject</button>
                    <button class="modal-btn-secondary" onclick="PowerFund.cancelRejectConfirm()">Never mind</button>`
-                : `<button class="modal-btn-primary modal-btn-confirm" onclick="PowerFund.confirmReview()" ${
+                : // The mockup: a green Confirm carrying a tick, then "Reject
+                  // claim" as a red outline. Close lives in the header × now,
+                  // so a third stacked button is no longer needed.
+                  `<button class="modal-btn-primary modal-btn-confirm" onclick="PowerFund.confirmReview()" ${
                     busy ? "disabled" : ""
                   }>${
                     busy
                       ? "Working…"
-                      : multi
-                      ? `Confirm all ${rc.length} as paid`
-                      : "Confirm as paid"
+                      : `${icon("check", 15)}<span>${
+                          multi ? `Confirm all ${rc.length} as paid` : "Confirm Payment"
+                        }</span>`
                   }</button>
-                   <button class="modal-btn-secondary reject" onclick="PowerFund.rejectReview()">Reject</button>
-                   <button class="modal-btn-secondary" onclick="PowerFund.closeReviewModal()">Cancel</button>`
+                   <button class="modal-btn-secondary reject" onclick="PowerFund.rejectReview()">Reject claim</button>`
             }
           </div>
         </div>
@@ -3805,11 +3904,40 @@
       const typedAmount = parsePayoutAmount(payoutAmountValue);
       const releaseAmount = typedAmount == null ? C.GOAL_PER_ROUND : typedAmount;
       html += `<div class="modal-overlay sheet" onclick="if(event.target===this) PowerFund.closePayoutModal()">
-        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
-          <h3 id="dlg-title">Release payout</h3>
-          <p class="modal-sub">Round ${payoutModalRound} — ${
-        recipient ? escapeHtml(recipient.name) : "—"
-      } · recorded now so it stays correct if the order changes later</p>
+        <div class="modal sheet-pay" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <div class="sheet-head">
+            <div class="sheet-head-titles">
+              <h3 id="dlg-title">Release Payout</h3>
+              <p class="modal-sub">Round ${payoutModalRound}</p>
+            </div>
+            <button type="button" class="sheet-x" onclick="PowerFund.closePayoutModal()" aria-label="Close">${icon(
+              "close",
+              14
+            )}</button>
+          </div>
+
+          <!-- Why this is releasable, stated before anything is asked for. -->
+          <div class="ready-banner">
+            <span class="ready-banner-icon">${icon("check", 14)}</span>
+            <span>Round ${payoutModalRound} reached its ${C.peso(
+        C.GOAL_PER_ROUND
+      )} goal — ready to release</span>
+          </div>
+
+          ${
+            recipient
+              ? `<p class="sheet-section-label">Recipient</p>
+                 <div class="recipient-card">
+                   ${memberAvatar(recipient.name, "paid-out", 40)}
+                   <span class="recipient-body">
+                     <span class="recipient-name">${escapeHtml(recipient.name)}</span>
+                     <span class="recipient-meta">Payout order #${
+                       recipient.member_order
+                     } · recorded now, so it stays correct if the order changes later</span>
+                   </span>
+                 </div>`
+              : ""
+          }
 
           ${
             recipient
@@ -3836,68 +3964,81 @@
                       copyFeedback ? escapeHtml(copyFeedback) : "Copy reminder message"
                     }</span></button></div>`;
                   }
-                  return `<div class="payout-dest payout-dest-inline">
-                    <div class="payout-dest-main">
+                  // The mockup's "Send payment to" card: the QR matted on
+                  // white beside the account it belongs to, so the treasurer
+                  // can check the name against the person before sending —
+                  // a QR image on its own is opaque.
+                  const acct = [
+                    recipient.payout_bank,
+                    recipient.payout_account_number,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ");
+                  return `<p class="sheet-section-label">Send payment to</p>
+                  <div class="send-to-card">
+                    ${
+                      recipient.payout_qr_url
+                        ? `<button type="button" class="send-to-qr" onclick="PowerFund.openLightbox('${inlineArg(
+                            recipient.payout_qr_url
+                          )}')" aria-label="Payout QR for ${escapeHtml(
+                            recipient.name
+                          )} — activate to enlarge"><img src="${escapeHtml(
+                            recipient.payout_qr_url
+                          )}" alt=""></button>`
+                        : ""
+                    }
+                    <div class="send-to-lines">
+                      <div class="send-to-title">${escapeHtml(
+                        recipient.name
+                      )}'s payout QR</div>
                       ${
-                        recipient.payout_qr_url
-                          ? `<button type="button" class="payout-dest-qr" onclick="PowerFund.openLightbox('${inlineArg(
-                              recipient.payout_qr_url
-                            )}')"><img src="${escapeHtml(
-                              recipient.payout_qr_url
-                            )}" alt="Payout QR for ${escapeHtml(
-                              recipient.name
-                            )}"></button>`
+                        acct
+                          ? `<div class="send-to-acct">${escapeHtml(acct)}</div>`
                           : ""
                       }
-                      <div class="payout-dest-lines">
-                        <div class="payout-dest-label">Sending to</div>
-                        ${
-                          recipient.payout_bank
-                            ? `<div class="payout-dest-bank">${escapeHtml(
-                                recipient.payout_bank
-                              )}</div>`
-                            : ""
-                        }
-                        ${
-                          recipient.payout_account_name
-                            ? `<div class="payout-dest-name">${escapeHtml(
-                                recipient.payout_account_name
-                              )}</div>`
-                            : ""
-                        }
-                        ${
-                          recipient.payout_account_number
-                            ? `<div class="payout-dest-num">${escapeHtml(
-                                recipient.payout_account_number
-                              )}</div>`
-                            : ""
-                        }
-                      </div>
+                      ${
+                        recipient.payout_account_name
+                          ? `<div class="send-to-acct">${escapeHtml(
+                              recipient.payout_account_name
+                            )}</div>`
+                          : ""
+                      }
+                      ${
+                        recipient.payout_qr_url
+                          ? `<div class="send-to-zoom">Tap to enlarge</div>`
+                          : ""
+                      }
                     </div>
-                  </div>`;
+                  </div>
+                  <p class="sheet-note">Scan this to send ${escapeHtml(
+                    recipient.name
+                  )}'s payout, then attach a receipt below as proof it was sent.</p>`;
                 })()
               : ""
           }
 
-          <label class="payout-field-label" for="payout-amount">Amount paid out</label>
+          <label class="sheet-section-label" for="payout-amount">Amount</label>
           <div class="payout-amount-wrap">
             <span class="payout-amount-prefix" aria-hidden="true">₱</span>
             <input id="payout-amount" class="pin-input payout-amount-input" type="text"
                    inputmode="decimal" value="${escapeHtml(payoutAmountValue)}"
                    oninput="PowerFund.setPayoutAmount(this.value)"
-                   placeholder="${C.GOAL_PER_ROUND.toLocaleString("en-PH")}">
+                   placeholder="${String(C.GOAL_PER_ROUND).replace(
+                     /\B(?=(\d{3})+(?!\d))/g,
+                     ","
+                   )}">
           </div>
           <p class="payout-field-hint">Defaults to ${C.peso(
             C.GOAL_PER_ROUND
           )} (the round target). This is a record only — it never changes funding.</p>
 
-          <label class="payout-field-label" for="payout-note">Note (optional)</label>
+          <label class="sheet-section-label" for="payout-note">Note (optional)</label>
           <textarea id="payout-note" class="payout-note-input" placeholder="What did they buy? (e.g. BLUETTI AC70P, ₱32,000)"
                     oninput="PowerFund.setPayoutNote(this.value)">${escapeHtml(
                       payoutNoteValue
                     )}</textarea>
 
-          <label class="payout-field-label">Receipt photo <span class="field-required">required</span></label>
+          <label class="sheet-section-label">Receipt photo <span class="field-required">required</span></label>
           <label class="proof-upload ${payoutReceiptPreview ? "" : "needed"}">
             ${
               payoutReceiptPreview
@@ -4303,11 +4444,20 @@
 
     // Zoom lightbox — sits above every modal
     if (lightboxSrc) {
+      // The mockup: the image sits in a white rounded card, centred, with a
+      // pill-shaped "✕ Close" BELOW it. The button used to sit above, which
+      // put the control between the header and the thing you opened to look
+      // at.
       html += `<div class="lightbox-overlay" role="dialog" aria-modal="true" aria-label="Enlarged image" tabindex="-1" onclick="PowerFund.closeLightbox()">
-        <button class="lightbox-close" onclick="PowerFund.closeLightbox()">✕ Close</button>
-        <img src="${escapeHtml(
-          lightboxSrc
-        )}" alt="Enlarged image" class="lightbox-img" onclick="event.stopPropagation()">
+        <div class="lightbox-frame" onclick="event.stopPropagation()">
+          <img src="${escapeHtml(
+            lightboxSrc
+          )}" alt="Enlarged image" class="lightbox-img">
+        </div>
+        <button class="lightbox-close" onclick="PowerFund.closeLightbox()">${icon(
+          "close",
+          13
+        )}<span>Close</span></button>
       </div>`;
     }
 

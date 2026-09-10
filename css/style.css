@@ -1303,11 +1303,15 @@ body {
 }
 .zoom-link:hover { background: rgba(245,166,35,0.24); }
 
+/* Guidance, not a warning. The section label already carries the "required"
+   flag, so accent-colouring this too made a plain instruction read as an
+   error before anything had gone wrong. */
 .proof-required-hint {
   font-size: 11.5px;
-  color: var(--accent);
-  text-align: center;
-  margin: -8px 0 16px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  text-align: left;
+  margin: 8px 0 16px;
 }
 
 /* ---- Zoom lightbox ---- */
@@ -1323,25 +1327,49 @@ body {
   z-index: 100;
   padding: 20px;
 }
+/* The image is matted on white with generous rounding — a payment QR or a
+   receipt screenshot reads far better against paper than against the app's
+   near-black, and the mockup shows exactly that. */
+.lightbox-frame {
+  background: #fff;
+  border-radius: 20px;
+  padding: 16px;
+  max-width: 100%;
+  max-height: 74vh;
+  /* A small or still-loading image must not collapse the mat to a dot, which
+     also let the Close pill ride up over it. */
+  min-width: 180px;
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.8);
+}
 .lightbox-img {
   max-width: 100%;
-  max-height: 78vh;
+  max-height: calc(74vh - 32px);
   object-fit: contain;
-  border-radius: 8px;
-  background: #fff;
+  border-radius: 6px;
+  display: block;
 }
+/* A pill below the image, as the mockup draws it. */
 .lightbox-close {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   color: var(--text-primary);
   font-family: 'Inter', sans-serif;
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 600;
-  padding: 10px 22px;
-  border-radius: 8px;
+  padding: 10px 20px;
+  border-radius: 999px;
   cursor: pointer;
+  min-height: 44px;
 }
-.lightbox-close:hover { border-color: var(--accent); color: var(--accent); }
+.lightbox-close .icon { display: block; flex: 0 0 auto; }
+.lightbox-close:hover { background: rgba(255, 255, 255, 0.14); }
 
 /* ---- Round lifecycle: status pills, previous-round card, start-next-round ---- */
 .round-state {
@@ -4194,3 +4222,375 @@ body.modal-open .lightbox-overlay { touch-action: auto; }
   pointer-events: none;
 }
 .payout-amount-wrap .payout-amount-input { padding-left: 26px; }
+
+/* ==========================================================================
+   Payment sheets — Contribute / Review / Release
+   Shared pieces, laid out as the mockups draw them: a titled head with a close
+   affordance, a QR matted on white, grouped rows in one panel, and files shown
+   as chips rather than bare upload boxes.
+   ========================================================================== */
+.sheet-pay { text-align: left; }
+
+.sheet-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.sheet-head-titles { flex: 1 1 auto; min-width: 0; }
+.sheet-head h3 { margin: 0; text-align: left; }
+.sheet-head .modal-sub { margin: 3px 0 0; text-align: left; }
+.sheet-x {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.sheet-x:hover { background: rgba(255, 255, 255, 0.13); color: var(--text-primary); }
+.sheet-x .icon { display: block; }
+
+/* A QR reads against paper, not against the app's near-black. */
+.qr-card {
+  background: #fff;
+  border-radius: 16px;
+  padding: 18px 16px 14px;
+  text-align: center;
+  margin-bottom: 14px;
+}
+.qr-card-img {
+  position: relative;
+  display: block;
+  width: 100%;
+  max-width: 220px;
+  margin: 0 auto;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: zoom-in;
+}
+.qr-card-img img { display: block; width: 100%; height: auto; border-radius: 6px; }
+.qr-card-expand {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #1B2437;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.qr-card-expand .icon { display: block; }
+.qr-card-title {
+  margin: 12px 0 0;
+  font-family: 'Inter', sans-serif;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #14213D;
+}
+.qr-card-hint { margin: 2px 0 0; font-size: 11.5px; color: #6B7280; }
+.qr-card-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #B4740E;
+  text-decoration: none;
+  min-height: 32px;
+}
+.qr-card-save:hover { text-decoration: underline; }
+.qr-card-save .icon { display: block; flex: 0 0 auto; }
+
+/* One panel holding the amount and the pay-ahead control. */
+.pay-panel {
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 16px;
+}
+.pay-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 15px;
+}
+.pay-row + .pay-row { border-top: 1px solid var(--border); }
+.pay-row-label {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.pay-row-amount {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.pay-row-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pay-row-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.pay-row-note { font-size: 11.5px; color: var(--text-muted); }
+
+/* An attached file, named and sized, with its own way to replace it. */
+.sheet-section-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 8px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.file-chip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 13px;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 14px;
+}
+.file-chip-thumb {
+  position: relative;
+  flex: 0 0 auto;
+  width: 42px;
+  height: 42px;
+  border-radius: 9px;
+  /* A screenshot that fails to decode must not spill its alt text across the
+     row — clip it and let the badge sit inside the corner instead. */
+  overflow: hidden;
+  font-size: 0;
+  border: none;
+  padding: 0;
+  background: rgba(255, 255, 255, 0.06);
+  cursor: zoom-in;
+}
+.file-chip-thumb img {
+  width: 42px;
+  height: 42px;
+  object-fit: cover;
+  border-radius: 9px;
+  display: block;
+}
+.file-chip-badge {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  width: 17px;
+  height: 17px;
+  border-radius: 50%;
+  background: var(--success);
+  color: #08130E;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--bg-card);
+}
+.file-chip-badge .icon { display: block; }
+.file-chip-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.file-chip-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-chip-meta { font-size: 11.5px; color: var(--text-muted); }
+.file-chip-change {
+  flex: 0 0 auto;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Cancel is a way out, not a second choice competing with the action above. */
+.modal-btn-quiet {
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 11px;
+  min-height: 44px;
+  border-radius: 9px;
+  cursor: pointer;
+}
+.modal-btn-quiet:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.04); }
+
+/* Review sheet — claimant row and the proof card. */
+.claim-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.claim-row .avatar { flex: 0 0 auto; }
+.claim-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.claim-name { font-size: 14.5px; font-weight: 700; color: var(--text-primary); }
+.claim-meta { font-size: 11.5px; color: var(--text-muted); line-height: 1.4; }
+.claim-amount {
+  flex: 0 0 auto;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 19px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* The screenshot is the thing being judged, so it gets room and a real edge. */
+.proof-card {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  background: #fff;
+  cursor: zoom-in;
+}
+.proof-card img { display: block; width: 100%; max-height: 260px; object-fit: contain; }
+.proof-card-expand {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(20, 33, 61, 0.82);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.proof-card-expand .icon { display: block; }
+.proof-card-hint {
+  margin: 8px 0 14px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  text-align: center;
+}
+/* Nothing to check against is a warning, not a neutral placeholder. */
+.proof-card-empty {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 13px 14px;
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--danger);
+  font-size: 12.5px;
+  line-height: 1.5;
+  text-align: left;
+  cursor: default;
+  margin-bottom: 14px;
+}
+.proof-card-empty .icon { flex: 0 0 auto; margin-top: 1px; }
+.modal-btn-confirm { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.modal-btn-confirm .icon { display: block; flex: 0 0 auto; }
+
+/* Release sheet — ready banner, recipient, and the destination card. */
+.ready-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  margin-bottom: 18px;
+  border-radius: 12px;
+  background: var(--success-soft);
+  border: 1px solid color-mix(in srgb, var(--success) 35%, transparent);
+  color: var(--success);
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.45;
+  text-align: left;
+}
+.ready-banner-icon {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--success) 26%, transparent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.ready-banner-icon .icon { display: block; }
+
+.recipient-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 18px;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.recipient-card .avatar { flex: 0 0 auto; }
+.recipient-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.recipient-name { font-size: 14.5px; font-weight: 700; color: var(--text-primary); }
+.recipient-meta { font-size: 11.5px; color: var(--text-muted); line-height: 1.45; }
+
+/* White, because it holds a QR someone has to scan off the screen. */
+.send-to-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  background: #fff;
+  border-radius: 14px;
+  margin-bottom: 10px;
+  text-align: left;
+}
+.send-to-qr {
+  flex: 0 0 auto;
+  width: 76px;
+  height: 76px;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: zoom-in;
+}
+.send-to-qr img { width: 76px; height: 76px; object-fit: contain; display: block; border-radius: 6px; }
+.send-to-lines { flex: 1 1 auto; min-width: 0; }
+.send-to-title {
+  font-family: 'Inter', sans-serif;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #14213D;
+}
+.send-to-acct { font-size: 11.5px; color: #6B7280; margin-top: 2px; }
+.send-to-zoom { font-size: 11.5px; font-weight: 600; color: #B4740E; margin-top: 5px; }
+.sheet-note {
+  margin: 0 0 18px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  text-align: left;
+}

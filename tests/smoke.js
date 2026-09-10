@@ -1416,6 +1416,174 @@ async function qaFixes(browser, errors) {
   await undo.close();
 }
 
+
+/** The three payment sheets and the zoom lightbox, against their mockups. */
+async function paymentSheets(browser, errors) {
+  const SET = { ...M.SETTINGS, treasurer_pin: "1234", qr_bank: "Maya" };
+
+  // --- Contribute: "Pay Cycle N", QR card, amount row, file chip ----------
+  const c = await browser.newPage({ viewport: { width: 390, height: 900 } });
+  c.on("pageerror", (e) => errors.push(`sheet/contribute: ${e}`));
+  await serve(c, { ...M.TABLE_DATA, app_settings: SET });
+  await c.goto(BASE, { waitUntil: "domcontentloaded" });
+  await c.waitForTimeout(1500);
+  await c.evaluate((id) => window.PowerFund.openContributeModal(id, 7), M.MEMBERS[2].id);
+  await c.waitForTimeout(500);
+  const cTitle = await c.locator(".sheet-pay h3").innerText();
+  check("sheet/contribute is titled by its cycle", /Pay Cycle 7/i.test(cTitle), cTitle);
+  check(
+    "sheet/contribute has a close affordance in the head",
+    (await c.locator(".sheet-head .sheet-x").count()) === 1
+  );
+  check(
+    "sheet/QR is matted with its own actions",
+    (await c.locator(".qr-card .qr-card-img").count()) === 1 &&
+      (await c.locator(".qr-card .qr-card-save").count()) === 1 &&
+      (await c.locator(".qr-card-expand").count()) === 1
+  );
+  // The wallet is named from settings, never hardcoded over someone's real QR.
+  check(
+    "sheet/QR names the wallet on file",
+    /Maya/.test(await c.locator(".qr-card-title").innerText()),
+    await c.locator(".qr-card-title").innerText()
+  );
+  check(
+    "sheet/amount and pay-ahead share one panel",
+    (await c.locator(".pay-panel .pay-row").count()) >= 1 &&
+      (await c.locator(".pay-panel .stepper").count()) === 1
+  );
+  // Attaching shows the file as a named chip, not a bare box.
+  await c.locator(".modal input[type=file]").first().setInputFiles({
+    name: "payment-screenshot.jpg",
+    mimeType: "image/jpeg",
+    buffer: Buffer.alloc(1258291),
+  });
+  await c.waitForTimeout(400);
+  const chipText = (await c.locator(".file-chip").innerText()).replace(/\s+/g, " ");
+  check(
+    "sheet/attached proof is a named, sized chip",
+    /payment-screenshot\.jpg/.test(chipText) && /1\.2 MB · attached/.test(chipText),
+    JSON.stringify(chipText)
+  );
+  check(
+    "sheet/the chip offers a way to replace it",
+    (await c.locator(".file-chip-change").count()) === 1
+  );
+  check(
+    "sheet/primary action carries the amount",
+    /I've sent this ·/.test(await c.locator(".modal-btn-primary").first().innerText())
+  );
+  // A broken or slow thumbnail must not spill alt text across the row.
+  check(
+    "sheet/thumbnail clips its contents",
+    (await c.locator(".file-chip-thumb").evaluate((el) => getComputedStyle(el).overflow)) ===
+      "hidden"
+  );
+  await c.close();
+
+  // --- Review: claimant row, proof card, green confirm -------------------
+  const r = await browser.newPage({ viewport: { width: 390, height: 900 } });
+  r.on("pageerror", (e) => errors.push(`sheet/review: ${e}`));
+  await serve(r, { ...M.TABLE_DATA, app_settings: SET });
+  await r.goto(BASE, { waitUntil: "domcontentloaded" });
+  await r.waitForTimeout(1500);
+  await unlockTreasurer(r);
+  await r.locator(".attention-more").click();
+  await r.waitForTimeout(300);
+  await r.locator(".queue-btn-review").first().click();
+  await r.waitForTimeout(500);
+  const claim = (await r.locator(".claim-row").innerText()).replace(/\s+/g, " ");
+  check(
+    "sheet/review leads with the claimant, cycle and amount",
+    /Sarah/.test(claim) && /Cycle 7/.test(claim) && /₱1,000/.test(claim),
+    JSON.stringify(claim)
+  );
+  check(
+    "sheet/review says when it was submitted",
+    /submitted/i.test(claim),
+    JSON.stringify(claim)
+  );
+  check(
+    "sheet/proof is a card that enlarges",
+    (await r.locator(".proof-card").count()) === 1 &&
+      (await r.locator(".proof-card-expand").count()) === 1
+  );
+  check(
+    "sheet/confirm reads as the mockup and stays green",
+    /Confirm Payment/.test(await r.locator(".modal-btn-confirm").innerText())
+  );
+  check(
+    "sheet/reject is the only secondary, close moved to the head",
+    (await r.locator(".modal-actions .modal-btn-secondary").count()) === 1 &&
+      /Reject claim/.test(await r.locator(".modal-actions .modal-btn-secondary").innerText())
+  );
+  await r.close();
+
+  // --- Release: ready banner, recipient, send-to card, lightbox ----------
+  const paidRows = [];
+  let id = 9600;
+  M.CYCLES.filter((x) => x.cycle_number <= 6).forEach((cy) =>
+    M.MEMBERS.forEach((m) =>
+      paidRows.push({
+        id: uuid(id++), cycle_id: cy.id, member_id: m.id, status: 2,
+        amount: 1000, proof_url: null, paid_at: new Date(cy.due_date).toISOString(),
+      })
+    )
+  );
+  const withQr = M.MEMBERS.map((m, i) =>
+    i === 0
+      ? {
+          ...m,
+          payout_qr_url: "https://example.invalid/qr.png",
+          payout_bank: "GCash",
+          payout_account_number: "09XX XXX XXX2",
+          payout_account_name: "Regine S.",
+        }
+      : m
+  );
+  const rel = await browser.newPage({ viewport: { width: 390, height: 950 } });
+  rel.on("pageerror", (e) => errors.push(`sheet/release: ${e}`));
+  await serve(rel, {
+    ...M.TABLE_DATA, app_settings: SET, members: withQr, contributions: paidRows,
+    payouts: M.PAYOUTS.map((p) => (p.round_number === 1 ? { ...p, released: false } : p)),
+  });
+  await rel.goto(BASE, { waitUntil: "domcontentloaded" });
+  await rel.waitForTimeout(1500);
+  await unlockTreasurer(rel);
+  await rel.locator(".release-card .payout-btn").click();
+  await rel.waitForTimeout(600);
+  check(
+    "sheet/release states why it is releasable first",
+    (await rel.locator(".ready-banner").count()) === 1 &&
+      /ready to release/i.test(await rel.locator(".ready-banner").innerText())
+  );
+  check(
+    "sheet/release names the recipient in its own card",
+    /Regine/.test(await rel.locator(".recipient-card").innerText())
+  );
+  const sendTo = (await rel.locator(".send-to-card").innerText()).replace(/\s+/g, " ");
+  check(
+    "sheet/send-to card carries the QR and the account it belongs to",
+    (await rel.locator(".send-to-qr").count()) === 1 &&
+      /payout QR/i.test(sendTo) &&
+      /GCash/.test(sendTo) &&
+      /09XX XXX XXX2/.test(sendTo),
+    JSON.stringify(sendTo)
+  );
+  // Zoom: white mat, and Close BELOW the image as the mockup draws it.
+  await rel.locator(".send-to-qr").click();
+  await rel.waitForTimeout(400);
+  check("sheet/zoom mats the image on white", (await rel.locator(".lightbox-frame").count()) === 1);
+  const order = await rel.evaluate(() => {
+    const f = document.querySelector(".lightbox-frame");
+    const b = document.querySelector(".lightbox-close");
+    if (!f || !b) return null;
+    return b.getBoundingClientRect().top >= f.getBoundingClientRect().bottom - 1;
+  });
+  check("sheet/zoom puts Close below the image", order === true, String(order));
+  await rel.close();
+}
+
 (async () => {
   const browser = await chromium.launch({
     executablePath: process.env.PF_CHROMIUM || undefined,
@@ -1447,6 +1615,8 @@ async function qaFixes(browser, errors) {
   await designGates(browser, errors);
   console.log("\nQA round 2");
   await qaFixes(browser, errors);
+  console.log("\nPayment sheets");
+  await paymentSheets(browser, errors);
 
   await browser.close();
 

@@ -1704,8 +1704,16 @@
       return render();
     }
     if (d.requirePin) {
-      const pin = state.settings && state.settings.treasurer_pin;
-      if (!pin || d.pinValue !== pin) {
+      // Verified by the database (migration 010); the digits never come here.
+      let pinOk = false;
+      try {
+        pinOk = await window.DB.verifyPin("treasurer", d.pinValue, state.pins);
+      } catch (e) {
+        d.error = e.message;
+        d.pinValue = "";
+        return render();
+      }
+      if (!pinOk) {
         d.error = "Incorrect PIN.";
         d.pinValue = "";
         return render();
@@ -1736,7 +1744,7 @@
     pinError = null;
     pinNewValue = "";
     pinStep = "new";
-    pinModalMode = state.settings && state.settings.treasurer_pin ? "enter" : "setup";
+    pinModalMode = hasTreasurerPin() ? "enter" : "setup";
     render();
   }
 
@@ -1749,8 +1757,17 @@
     render();
   }
 
+  /** Does a treasurer PIN exist? From migration 010's status booleans, never
+   *  from the digits. Absent `state.pins` means the load failed, and the safe
+   *  reading of "we don't know" is "a PIN exists" — the alternative offers to
+   *  create a new one, which is how a network blip becomes a takeover. */
+  function hasTreasurerPin() {
+    if (!state || !state.pins) return true;
+    return !!state.pins.hasTreasurer;
+  }
+
   function hasMasterPin() {
-    return !!(state.settings && state.settings.master_pin);
+    return !!(state.pins && state.pins.hasMaster);
   }
 
   /** Set or rotate the group's recovery PIN. Until now this existed only as a
@@ -1779,7 +1796,7 @@
     // Changing an existing PIN starts by proving you know it — otherwise
     // anyone who finds an unlocked phone can lock the group out of its own
     // treasurer mode.
-    pinStep = state.settings && state.settings.treasurer_pin ? "current" : "new";
+    pinStep = hasTreasurerPin() ? "current" : "new";
     pinModalMode = "change";
     render();
   }
@@ -1813,8 +1830,13 @@
       }
 
       if (pinStep === "current") {
-        const current = (state.settings || {}).treasurer_pin;
-        if (!pinInputValue || pinInputValue !== current) {
+        let ok = false;
+        try {
+          ok = await window.DB.verifyPin("treasurer", pinInputValue, state.pins);
+        } catch (e) {
+          return pinReject(e.message);
+        }
+        if (!ok) {
           return pinReject("That isn't the current PIN.");
         }
         pinStep = "new";
@@ -1828,11 +1850,22 @@
           pinError = "PIN must be at least 4 digits.";
           return render();
         }
-        if (
-          pinModalMode === "master" &&
-          state.settings &&
-          pinInputValue === state.settings.treasurer_pin
-        ) {
+        // "Is this the treasurer PIN?" asked without ever holding it — the
+        // same verify primitive, which works either side of migration 010.
+        let sameAsTreasurer = false;
+        if (pinModalMode === "master") {
+          try {
+            sameAsTreasurer = await window.DB.verifyPin(
+              "treasurer",
+              pinInputValue,
+              state.pins
+            );
+          } catch (e) {
+            pinError = e.message;
+            return render();
+          }
+        }
+        if (sameAsTreasurer) {
           // Same digits for both defeats the point: the master PIN exists to
           // be usable when the treasurer PIN is the thing that has been lost.
           pinError = "Use different digits from the treasurer PIN.";
@@ -1857,8 +1890,10 @@
         const wasChange = pinModalMode === "change";
         const rotating = isMaster && hasMasterPin();
         try {
-          if (isMaster) await window.DB.updateMasterPin(pinNewValue);
-          else await window.DB.updateTreasurerPin(pinNewValue);
+          // setPin goes through migration 010's pf_set_pin, which enforces the
+          // length minimum, the treasurer-only rule and the two-PINs-differ
+          // rule server-side; it falls back to the plaintext column pre-010.
+          await window.DB.setPin(isMaster ? "master" : "treasurer", pinNewValue, state.pins);
           // The digits are never logged — only that it changed.
           await logActivity(
             isMaster
@@ -1890,9 +1925,19 @@
 
     {
       // enter
-      const settings = state.settings || {};
       const entered = pinInputValue;
-      if (entered && entered === settings.treasurer_pin) {
+      let isTreasurerPin = false;
+      let isMasterPin = false;
+      try {
+        isTreasurerPin = await window.DB.verifyPin("treasurer", entered, state.pins);
+        if (!isTreasurerPin) {
+          isMasterPin = await window.DB.verifyPin("master", entered, state.pins);
+        }
+      } catch (e) {
+        // A failure to CHECK is not a wrong PIN, and must not read as one.
+        return pinReject(e.message);
+      }
+      if (isTreasurerPin) {
         unlocked = true;
         unlockedViaMaster = false;
         closePinModal();
@@ -1902,7 +1947,7 @@
       // PIN has been forgotten. It is set by hand in the database and never
       // shown, changed or removed from inside the app. Absent = not configured,
       // and the lockout behaves exactly as it did before.
-      if (entered && settings.master_pin && entered === settings.master_pin) {
+      if (isMasterPin) {
         unlocked = true;
         unlockedViaMaster = true;
         closePinModal();
@@ -4721,7 +4766,7 @@
         setup:
           "This protects treasurer actions. Anyone with the PIN can edit — share it only with whoever holds that role.",
         enter:
-          state.settings && state.settings.master_pin
+          state.pins && state.pins.hasMaster
             ? "Enter the PIN to unlock treasurer actions. Forgotten it? The group's master PIN also works, then set a new one from Menu → Change PIN."
             : "Enter the PIN to unlock treasurer actions. A forgotten PIN can't be recovered — ask whoever else in the group has it.",
         change: settingPin
@@ -4780,7 +4825,7 @@
       // Which steps this flow has, so the progress bar counts only real ones:
       // setting a first PIN has no current-PIN step to prove.
       const flowSteps =
-        pinModalMode === "change" && (state.settings || {}).treasurer_pin
+        pinModalMode === "change" && hasTreasurerPin()
           ? ["current", "new", "confirm"]
           : ["new", "confirm"];
       const stepIndex = flowSteps.indexOf(pinStep);

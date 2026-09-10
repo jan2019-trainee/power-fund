@@ -405,9 +405,7 @@ Phase 9, from the independent coverage audit — all closed:
   skippable, and still available from Menu → Security. Before this, a fund
   that never set one had no way back in.
 
-Still open, not a UI gap: the client reads `app_settings` with `select("*")`
-over open RLS, so `treasurer_pin` and `master_pin` reach the browser in
-plaintext. Reported, not fixed — it needs an RLS/schema decision.
+**The plaintext-PIN P0 is closed** by migration 010 — see below.
 
 ## Architecture notes that bite
 
@@ -436,7 +434,14 @@ master PIN, fund name, treasurer QR fields, typed activity, reserved avatar ·
 `008_member_auth.sql` — `members.auth_user_id` / `.email` / `.is_treasurer`,
 plus a documented one-off for the five addresses and the treasurer flag ·
 `009_member_avatars.sql` — the `member-avatars` storage bucket, which is what
-finally gave `members.avatar_url` (reserved back in 006) somewhere to point.
+finally gave `members.avatar_url` (reserved back in 006) somewhere to point ·
+`010_auth_helpers_and_secrets.sql` — the PIN vault, the identity helpers, the
+claim RPC and the members guard trigger. **Changes no table policy, so it
+cannot lock anyone out.** Ships with `010_rollback.sql`.
+
+**`011` — the RLS rewrite — is NOT WRITTEN YET and must not be applied until
+all five members have an email AND have signed in once.** Its policies key off
+`members.auth_user_id`, so an unlinked member is denied everything.
 
 ## Member accounts (in progress)
 
@@ -483,11 +488,60 @@ control is hidden for a linked member (`identityLocked` on ctx) AND
 `openWhoAmIPicker()` refuses, because it is an exported handler that anyone can
 still reach.
 
+## The PIN vault (migration 010)
+
+`app_settings.treasurer_pin` / `.master_pin` are **gone**. The digits live in
+`app_secrets`, which has RLS on and **no policy at all**, so PostgREST cannot
+reach it. Three security-definer functions replace every read:
+`pf_pin_status()` (booleans only), `pf_check_pin(kind, pin)`, `pf_set_pin(kind,
+pin)`. `js/app.js` contains zero references to either column now.
+
+`js/database.js` implements **both worlds** — `pinStatus()` / `verifyPin()` /
+`setPin()` try the RPC and fall back to the plaintext columns when the function
+is absent — so the app works either side of the migration. Which world it is in
+is cached per session (`pinPath`), because otherwise a pre-010 database logs a
+browser 404 on every load and every 30-second poll. The cache clears itself the
+moment the legacy read stops working, which is exactly what applying 010
+mid-session looks like.
+
+**The one rule not to break here: an error is NEVER reported as "no PIN is
+set".** The app offers to *create* a treasurer PIN when none exists, so
+misreading a network blip as "no PIN" hands treasurer mode to whoever hit it.
+Hence `hasTreasurerPin()` defaults to `true` when status is unknown, a
+successful-but-empty RPC answer is distrusted rather than believed, and the
+smoke harness now 404s unrouted RPCs the way real PostgREST does — answering
+them with `200 []` hid this exact bug once.
+
+**After 011 the PIN stops being a security boundary.** Permission will come from
+`members.is_treasurer` inside the policies, so a guessed PIN would grant
+treasurer *mode in the UI* and still be refused every write by Postgres. That is
+why `pf_check_pin`'s brute-force surface is acceptable — slowed by a 0.3s sleep
+on failure, not solved.
+
+## What migration 010 was validated against
+
+A real PostgreSQL 16 cluster with `auth.uid()` stubbed to Supabase's own
+definition. Verified: the vault is unreachable as `authenticated`; wrong/empty/
+right PIN checks; a non-treasurer cannot set either PIN; the master PIN may not
+duplicate the treasurer PIN; claiming is atomic and idempotent and a claimed row
+cannot be taken twice; a member may rename and re-photograph **themselves only**
+and is refused `member_order`, `is_treasurer`, `email` and re-linking; the
+treasurer may do all of those and unlink; `anon` is entirely unaffected; and the
+rollback restores the columns, is idempotent, and 010 re-applies on top of it.
+
+**That validation caught a bug that would have broken every first login**:
+`pf_claim_member()` updates `auth_user_id`, which fires the guard trigger — and
+at claim time the caller owns no row yet, so `pf_member_id()` is null and the
+ownership test rejected the very update that establishes ownership. The guard
+now recognises a claim explicitly, with every other column pinned so the
+exemption cannot smuggle anything else through. No smoke test could have found
+this; the harness mocks the network.
+
 Two things to keep in view:
 
-- **A login proves identity but restricts nothing yet.** RLS is still
-  `using (true)`, and the PINs are still served in plaintext. The security
-  payoff arrives with the RLS migration, not with the sign-in screen.
+- **A login proves identity but does not yet restrict writes.** RLS is still
+  `using (true)` on every table. The PINs are no longer exposed, but the
+  write-side payoff arrives with 011.
 - **The sign-in screen has no approved mockup.** It borrows
   `OnboardingWelcome.dc.html`'s composition. Flagged for UI/UX QA as new
   design, not as a port. The account dead-ends (`unknown` / `taken` /

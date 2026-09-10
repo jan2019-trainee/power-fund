@@ -672,35 +672,9 @@ window.DB = (function () {
   // ===================================================================
   // Settings (treasurer PIN)
   // ===================================================================
-  async function getSettings() {
-    const data = unwrap(
-      await client.from("app_settings").select("*").eq("id", 1).maybeSingle(),
-      "Couldn't load settings"
-    );
-    return data || { id: 1, treasurer_pin: null };
-  }
-
-  /** The group's recovery PIN (migration 006). Set once and rarely rotated;
-   *  it is the way back in when the treasurer PIN is forgotten, so it can be
-   *  changed but never blanked from the app. */
-  async function updateMasterPin(pin) {
-    const res = await client
-      .from("app_settings")
-      .upsert({ id: 1, master_pin: pin }, { onConflict: "id" })
-      .select()
-      .single();
-    if (res.error && /master_pin/i.test(res.error.message || "")) {
-      throw new Error(
-        "This database doesn't have the master PIN column yet — run " +
-          "supabase/migrations/006_redesign_foundation.sql first."
-      );
-    }
-    return unwrap(res, "Couldn't save the master PIN");
-  }
-
-  /** The account the payment QR belongs to (migration 006). Members need a
-   *  name and number to check the QR against before sending money — a QR
-   *  image on its own is opaque. */
+  /** The bank / account-name / account-number trio shown beside the payment
+   *  QR, so a member can check they are paying the right account before they
+   *  send (migration 006's qr_bank / qr_account_* columns). */
   async function saveQrAccount(fields) {
     const res = await client
       .from("app_settings")
@@ -716,16 +690,151 @@ window.DB = (function () {
     return unwrap(res, "Couldn't save the account details");
   }
 
-  async function updateTreasurerPin(pin) {
-    return unwrap(
-      await client
-        .from("app_settings")
-        .upsert({ id: 1, treasurer_pin: pin }, { onConflict: "id" })
-        .select()
-        .single(),
-      "Couldn't save the treasurer PIN"
+  async function getSettings() {
+    const data = unwrap(
+      await client.from("app_settings").select("*").eq("id", 1).maybeSingle(),
+      "Couldn't load settings"
     );
+    return data || { id: 1 };
   }
+
+  // ===================================================================
+  // PINs (migration 010)
+  //
+  // Before 010 the digits lived in app_settings and every browser was handed
+  // them by select("*"). After 010 they live in `app_secrets`, which has RLS
+  // on and no policy, and the only way in is three security-definer functions.
+  //
+  // Both paths are implemented because the app has to keep working either
+  // side of the migration. The rule throughout: an ERROR is never reported as
+  // "no PIN is set" — that would offer to create a fresh treasurer PIN to
+  // whoever happened to hit a network blip.
+  // ===================================================================
+
+  /** Whether each PIN exists — never the digits, once 010 is applied.
+   *  `source` tells the caller which world it is in; `treasurerPin`/
+   *  `masterPin` are present ONLY on the pre-010 path, where they are already
+   *  public anyway, and are what the legacy comparison falls back to. */
+  // Which world this database is in, remembered for the session. Without this
+  // the app probes a missing pf_pin_status() on every load AND every 30-second
+  // poll, so a pre-010 database logs a browser 404 forever. Only the negative
+  // is cached, and it is cleared the moment the legacy read stops working —
+  // which is exactly what happens when 010 is applied mid-session, so the app
+  // re-probes and finds the vault instead of quietly staying on a dead path.
+  let pinPath = null; // null (unknown) | "vault" | "legacy"
+
+  async function pinStatus() {
+    const rpc = pinPath === "legacy" ? { error: { code: "42883" } } : await client.rpc("pf_pin_status");
+    const row = rpc.error
+      ? null
+      : Array.isArray(rpc.data)
+      ? rpc.data[0]
+      : rpc.data;
+    if (!rpc.error && row) {
+      pinPath = "vault";
+      return {
+        source: "vault",
+        hasTreasurer: !!row.has_treasurer,
+        hasMaster: !!row.has_master,
+      };
+    }
+    // pf_pin_status() always returns exactly one row — app_secrets is a
+    // single-row table the migration seeds. So a SUCCESSFUL but empty answer
+    // is not "no PINs are set"; it means we are not really talking to the
+    // vault. Reading it as false would offer to create a fresh treasurer PIN,
+    // which is how a proxy quirk becomes a takeover. Fall through instead.
+    //
+    // 42883 = undefined_function: migration 010 has not been run here.
+    const missing =
+      !rpc.error ||
+      rpc.error.code === "42883" ||
+      /pf_pin_status|does not exist/i.test(rpc.error.message || "");
+    if (!missing) {
+      console.error("Couldn't read PIN status:", rpc.error);
+      throw new Error("Couldn't check this fund's PIN settings. Please try again.");
+    }
+    const legacy = await client
+      .from("app_settings")
+      .select("treasurer_pin, master_pin")
+      .eq("id", 1)
+      .maybeSingle();
+    if (legacy.error) {
+      // Post-010 the columns are gone, so this is also what a stale "legacy"
+      // decision looks like: forget it so the next load probes the vault
+      // again. Either way this throws rather than reporting "no PIN is set".
+      pinPath = null;
+      console.error("Couldn't read PIN status (legacy):", legacy.error);
+      throw new Error("Couldn't check this fund's PIN settings. Please try again.");
+    }
+    pinPath = "legacy";
+    const d = legacy.data || {};
+    return {
+      source: "legacy",
+      hasTreasurer: !!d.treasurer_pin,
+      hasMaster: !!d.master_pin,
+      treasurerPin: d.treasurer_pin || null,
+      masterPin: d.master_pin || null,
+    };
+  }
+
+  /** kind: "treasurer" | "master". Throws rather than returning false when it
+   *  cannot tell — a wrong answer here unlocks or locks out the treasurer. */
+  async function verifyPin(kind, pin, status) {
+    if (!pin) return false;
+    const rpc =
+      pinPath === "legacy"
+        ? { error: { code: "42883" } }
+        : await client.rpc("pf_check_pin", { kind, pin });
+    if (!rpc.error && typeof rpc.data === "boolean") return rpc.data;
+    // Anything other than a real boolean means we did not reach the vault —
+    // not that the PIN was wrong. Same reasoning as pinStatus().
+    const missing =
+      !rpc.error ||
+      rpc.error.code === "42883" ||
+      /pf_check_pin|does not exist/i.test(rpc.error.message || "");
+    if (missing && status && status.source === "legacy") {
+      const stored = kind === "master" ? status.masterPin : status.treasurerPin;
+      return !!stored && stored === pin;
+    }
+    console.error("Couldn't verify the PIN:", rpc.error);
+    throw new Error("Couldn't check that PIN. Check your connection and try again.");
+  }
+
+  /** kind: "treasurer" | "master". The server enforces the length minimum, the
+   *  treasurer-only rule and the two-PINs-must-differ rule, so its message is
+   *  passed through rather than second-guessed. */
+  async function setPin(kind, pin, status) {
+    const rpc =
+      pinPath === "legacy"
+        ? { error: { code: "42883" } }
+        : await client.rpc("pf_set_pin", { kind, pin });
+    if (!rpc.error) return;
+    const missing =
+      rpc.error.code === "42883" || /pf_set_pin|does not exist/i.test(rpc.error.message || "");
+    if (!missing) {
+      console.error("Couldn't save the PIN:", rpc.error);
+      throw new Error(rpc.error.message || "Couldn't save the PIN. Please try again.");
+    }
+    if (!status || status.source !== "legacy") {
+      throw new Error("Couldn't save the PIN. Please try again.");
+    }
+    // Pre-010 fallback: write the plaintext column, as the app always did.
+    const field = kind === "master" ? "master_pin" : "treasurer_pin";
+    const row = { id: 1 };
+    row[field] = pin;
+    const res = await client.from("app_settings").upsert(row, { onConflict: "id" });
+    if (res.error) {
+      console.error("Couldn't save the PIN (legacy):", res.error);
+      if (/master_pin/i.test(res.error.message || "")) {
+        throw new Error(
+          "This fund's database is missing the master-PIN column. Run migration 006."
+        );
+      }
+      throw new Error("Couldn't save the PIN. Please try again.");
+    }
+  }
+
+
 
   // ===================================================================
   // Bulk: load everything, reset, backup/restore
@@ -740,7 +849,11 @@ window.DB = (function () {
         getActivityLog(activityLimit || 30),
         getSettings(),
       ]);
-    return { members, cycles, contributions, payouts, activityLog, settings };
+    // Which PINs exist, without the digits (migration 010). Loaded here so the
+    // PIN screens can choose between "Create a PIN" and "Enter your PIN"
+    // without a second round trip on every render.
+    const pins = await pinStatus();
+    return { members, cycles, contributions, payouts, activityLog, settings, pins };
   }
 
   /**
@@ -958,6 +1071,31 @@ window.DB = (function () {
    *
    *  Returns the linked member row, or null when the row was already claimed. */
   async function linkMemberAccount(memberId, authUserId) {
+    // Post-010 this goes through pf_claim_member(), which does the email match
+    // in SQL instead of trusting the browser to have done it, and returns the
+    // linked row's id. The migration's guard trigger also refuses a direct
+    // update from an unlinked caller, so the RPC is the only route once 010 is
+    // applied — the fallback below is strictly for a pre-010 database.
+    // pf_claim_member and pf_pin_status both arrive with migration 010, so a
+    // database already known to predate it cannot have this either.
+    const rpc =
+      pinPath === "legacy"
+        ? { error: { code: "42883" } }
+        : await client.rpc("pf_claim_member");
+    if (!rpc.error) {
+      const id = Array.isArray(rpc.data) ? rpc.data[0] : rpc.data;
+      if (!id) return null; // no matching address, or already claimed
+      const row = await client.from("members").select("*").eq("id", id).maybeSingle();
+      return row.error ? { id } : row.data || { id };
+    }
+    const missing =
+      rpc.error.code === "42883" ||
+      /pf_claim_member|does not exist/i.test(rpc.error.message || "");
+    if (!missing) {
+      console.error("Couldn't link this account:", rpc.error);
+      throw new Error("Couldn't link your account to your member profile.");
+    }
+
     const res = await client
       .from("members")
       .update({ auth_user_id: authUserId })
@@ -1062,9 +1200,10 @@ window.DB = (function () {
     getActivityLog,
     addActivityLog,
     getSettings,
-    updateTreasurerPin,
+    pinStatus,
+    verifyPin,
+    setPin,
     saveQrAccount,
-    updateMasterPin,
     loadEverything,
     resetAll,
     restoreFromBackup,

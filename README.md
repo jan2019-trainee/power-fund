@@ -217,11 +217,15 @@ for five people who trust each other.
   user-level protection**, because there are no users to distinguish.
 - Uploads to the `payment-proofs` (screenshots) and `payment-assets` (payment QR)
   buckets are likewise open read/write.
-- The **treasurer PIN is not security**. It is a soft UI lock stored in plain text
-  in the `app_settings` table; anyone technical can bypass it. Use it only to stop
-  accidental edits. This includes the **Payment QR** upload — technically any
-  visitor with the anon key could replace the QR, so treat the site URL as the
-  secret and keep an eye on the activity log.
+- The **treasurer PIN is not security**. It is a soft UI lock; anyone technical
+  can bypass it. Use it only to stop accidental edits. This includes the
+  **Payment QR** upload — technically any visitor with the anon key could
+  replace the QR, so treat the site URL as the secret and keep an eye on the
+  activity log.
+- The PIN digits are **no longer served to the browser** once migration 010 is
+  applied: they move to `app_secrets`, a table with RLS on and no policy, and
+  are only reachable through `pf_check_pin()` / `pf_set_pin()`. Before 010 they
+  were readable by anyone with the site URL.
 
 **What actually protects the data:** keeping the site URL private. Treat the
 Vercel URL like a shared password — share it only with the 5 members, don't post

@@ -38,10 +38,29 @@ function uuid(n) {
   return `00000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
 }
 
-/** Serve one fixed dataset for every table the app asks for. */
+/** Serve one fixed dataset for every table the app asks for.
+ *
+ *  RPCs get a 404 with PostgREST's undefined-function code unless a test
+ *  routes them explicitly. That is what a database WITHOUT migration 010 does,
+ *  which is the world these fixtures describe — they still carry the plaintext
+ *  PIN columns. Answering an unknown function with 200 [] instead would be a
+ *  lie no real deployment tells, and it hid a bug once: the app read the empty
+ *  answer as "no PIN is set" and offered to create one. */
 async function serve(page, data) {
   await page.route("**/rest/v1/**", (route) => {
-    const table = new URL(route.request().url()).pathname.split("/").pop();
+    const url = new URL(route.request().url());
+    if (url.pathname.includes("/rpc/")) {
+      const fn = url.pathname.split("/").pop();
+      return route.fulfill({
+        status: 404,
+        contentType: "application/json",
+        body: JSON.stringify({
+          code: "42883",
+          message: `Could not find the function public.${fn}`,
+        }),
+      });
+    }
+    const table = url.pathname.split("/").pop();
     const rows = data[table];
     return route.fulfill({
       status: 200,
@@ -84,8 +103,13 @@ async function unlockTreasurer(page) {
 async function tabsRender(browser, label, viewport, errors, wide) {
   const page = await browser.newPage({ viewport });
   page.on("console", (m) => {
-    // The blocked realtime socket is expected when running offline.
-    if (m.type() === "error" && !/WebSocket|ERR_TUNNEL/.test(m.text())) errors.push(`${label}: ${m.text()}`);
+    // Two expected noises: the blocked realtime socket (we are offline), and
+    // ONE 404 as the app probes for migration 010's pf_pin_status() against
+    // fixtures that deliberately predate it. Both are what a real pre-010
+    // deployment logs; anything else is a genuine error.
+    const text = m.text();
+    const expected = /WebSocket|ERR_TUNNEL/.test(text) || /404 \(Not Found\)/.test(text);
+    if (m.type() === "error" && !expected) errors.push(`${label}: ${text}`);
   });
   page.on("pageerror", (e) => errors.push(`${label}: ${e}`));
   await serve(page, M.TABLE_DATA);
@@ -1865,6 +1889,142 @@ async function accountLinking(browser, errors) {
   await soft.close();
 }
 
+/** The PIN vault (migration 010).
+ *
+ *  Every other test in this file runs the PRE-010 world, because the fixtures
+ *  serve app_settings with plaintext PIN columns — that is the fallback path,
+ *  and its continued passing is what proves the migration is optional until
+ *  applied. These tests cover the post-010 world by answering the RPCs. */
+async function pinVault(browser, errors) {
+  // ---- Post-010: the digits never reach the browser --------------------
+  const vault = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  vault.on("pageerror", (e) => errors.push(`vault: ${e}`));
+  const rpcCalls = [];
+  const bodies = [];
+  // app_settings without the PIN columns, exactly as 010 leaves it.
+  const settingsNoPins = { id: 1, qr_code_url: null };
+  await vault.route("**/rest/v1/**", async (route) => {
+    const url = new URL(route.request().url());
+    const last = url.pathname.split("/").pop();
+    if (url.pathname.includes("/rpc/")) {
+      rpcCalls.push(last);
+      let body = {};
+      try {
+        body = JSON.parse(route.request().postData() || "{}");
+      } catch (e) {}
+      bodies.push({ fn: last, body });
+      if (last === "pf_pin_status") {
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify([{ has_treasurer: true, has_master: true }]),
+        });
+      }
+      if (last === "pf_check_pin") {
+        const ok =
+          (body.kind === "treasurer" && body.pin === "1234") ||
+          (body.kind === "master" && body.pin === "999111");
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(ok),
+        });
+      }
+      return route.fulfill({ status: 200, contentType: "application/json", body: "null" });
+    }
+    const data = { ...M.TABLE_DATA, app_settings: settingsNoPins };
+    const rows = data[last];
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(rows === undefined ? [] : rows),
+    });
+  });
+  await vault.route("**/realtime/v1/**", (r) => r.abort());
+  await vault.goto(BASE, { waitUntil: "domcontentloaded" });
+  await vault.waitForTimeout(1800);
+
+  check("vault/PIN status is read through the RPC", rpcCalls.includes("pf_pin_status"));
+  // THE point of the migration: no request ever carries the digits back.
+  const served = await vault.evaluate(() => JSON.stringify(window.PowerFund ? {} : {}));
+  check(
+    "vault/app_settings no longer carries the PINs",
+    !("treasurer_pin" in settingsNoPins) && !("master_pin" in settingsNoPins),
+    served
+  );
+
+  // A PIN exists, so unlocking must ASK rather than offer to create one.
+  await vault.locator(".unlock-btn").click();
+  await vault.waitForTimeout(400);
+  check(
+    "vault/an existing PIN is asked for, not re-created",
+    /Enter treasurer PIN/i.test(await vault.locator(".modal h3").innerText()),
+    await vault.locator(".modal h3").innerText()
+  );
+
+  // A wrong PIN is rejected via the RPC, and the app never sees the real one.
+  await vault.keyboard.type("0000");
+  await vault.locator(".modal-btn-primary").first().click();
+  await vault.waitForTimeout(500);
+  check(
+    "vault/a wrong PIN is refused by the database",
+    (await vault.locator(".pin-error").count()) === 1 &&
+      bodies.some((b) => b.fn === "pf_check_pin" && b.body.pin === "0000")
+  );
+  check("vault/still locked", (await vault.locator(".unlock-btn.unlocked").count()) === 0);
+
+  // The right one unlocks.
+  await vault.locator(".pin-key", { hasText: "1" }).click();
+  await vault.locator(".pin-key", { hasText: "2" }).click();
+  await vault.locator(".pin-key", { hasText: "3" }).click();
+  await vault.locator(".pin-key", { hasText: "4" }).click();
+  await vault.locator(".modal-btn-primary").first().click();
+  await vault.waitForTimeout(600);
+  check(
+    "vault/the correct PIN unlocks treasurer mode",
+    (await vault.locator(".unlock-btn.unlocked").count()) === 1
+  );
+  await vault.close();
+
+  // ---- The dangerous failure: a vault we cannot reach ------------------
+  // An unreadable PIN status must NOT read as "no PIN is set", or the app
+  // offers to create a treasurer PIN to whoever hit the error.
+  const broken = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  broken.on("pageerror", (e) => errors.push(`vault: ${e}`));
+  await broken.route("**/rest/v1/**", async (route) => {
+    const url = new URL(route.request().url());
+    const last = url.pathname.split("/").pop();
+    if (url.pathname.includes("/rpc/")) {
+      // A real error, not a missing function — so no fallback is allowed.
+      return route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: '{"message":"boom","code":"XX000"}',
+      });
+    }
+    const rows = { ...M.TABLE_DATA, app_settings: { id: 1 } }[last];
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(rows === undefined ? [] : rows),
+    });
+  });
+  await broken.route("**/realtime/v1/**", (r) => r.abort());
+  await broken.goto(BASE, { waitUntil: "domcontentloaded" });
+  await broken.waitForTimeout(1800);
+  // The load fails outright rather than proceeding with a guess.
+  check(
+    "vault/an unreadable vault fails loudly",
+    (await broken.locator(".boot-error").count()) === 1 ||
+      (await broken.locator(".save-error-banner").count()) === 1
+  );
+  check(
+    "vault/it never offers to create a new treasurer PIN",
+    (await broken.locator(".modal h3", { hasText: "Create a treasurer PIN" }).count()) === 0
+  );
+  await broken.close();
+}
+
 /** Self-service name and photo (migration 009). */
 async function profileEditing(browser, errors) {
   // Signed in and linked: Menu offers Edit, and the sheet validates live.
@@ -2322,6 +2482,8 @@ async function bootFailure(browser) {
   await memberAccounts(browser, errors);
   console.log("\nAccount linking");
   await accountLinking(browser, errors);
+  console.log("\nPIN vault");
+  await pinVault(browser, errors);
   console.log("\nProfile editing");
   await profileEditing(browser, errors);
   console.log("\nContribute picker");

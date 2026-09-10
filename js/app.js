@@ -1535,11 +1535,33 @@
   function downloadBackup() {
     const backup = {
       app: "power-fund",
-      version: 1,
+      version: 2,
       exported_at: new Date().toISOString(),
+      // KEEP THIS FILE PRIVATE. It contains members' email addresses, links to
+      // their payment screenshots, and the account numbers their payouts are
+      // sent to.
+      _note:
+        "Power Fund backup. Contains member emails, payout account details and " +
+        "links to payment proofs — treat it like the fund's ledger.",
       members: state.members.map((m) => ({
         member_order: m.member_order,
         name: m.name,
+        // Where this member RECEIVES their round (migration 005). Left out of
+        // v1 backups, which meant a restore silently lost every account number
+        // the fund pays out to — the most consequential data here after the
+        // contributions themselves.
+        payout_bank: m.payout_bank,
+        payout_account_name: m.payout_account_name,
+        payout_account_number: m.payout_account_number,
+        payout_qr_url: m.payout_qr_url,
+        payout_updated_at: m.payout_updated_at,
+        avatar_url: m.avatar_url,
+        // Fund configuration (migration 008). auth_user_id is DELIBERATELY
+        // absent: it is a foreign key into this specific Supabase project's
+        // auth.users, so restoring it would either dangle or re-point who owns
+        // a row. Members re-link by signing in, which is the only safe way.
+        email: m.email,
+        is_treasurer: m.is_treasurer,
       })),
       cycles: state.cycles.map((c) => ({
         cycle_number: c.cycle_number,
@@ -1553,6 +1575,10 @@
         proof_url: c.proof_url,
         notes: c.notes,
         paid_at: c.paid_at,
+        // The treasurer's verdict on a refused claim (migration 006). Without
+        // these a restored status-3 row says it was rejected but not why.
+        rejection_note: c.rejection_note,
+        rejected_at: c.rejected_at,
       })),
       payouts: (state.payouts || []).map((p) => ({
         round_number: p.round_number,
@@ -1569,7 +1595,29 @@
       activityLog: (state.activityLog || []).map((a) => ({
         message: a.message,
         created_at: a.created_at,
+        // The typed columns (006) and the attribution (007). Captured now, so
+        // a restored log can still be filtered by type, member and round
+        // instead of collapsing to plain text.
+        event_type: a.event_type,
+        amount: a.amount,
+        ref_status: a.ref_status,
+        member_order: a.member_id != null ? memberOrderOf(a.member_id) : null,
+        round_number: a.round_number,
       })),
+      // Never captured before at all: the fund's name, the payment QR and the
+      // account details shown beside it. The PINs are NOT here and must not be
+      // — they live in app_secrets, which the browser cannot read.
+      settings: (function () {
+        const st = state.settings || {};
+        return {
+          fund_name: st.fund_name,
+          qr_code_url: st.qr_code_url,
+          qr_updated_at: st.qr_updated_at,
+          qr_bank: st.qr_bank,
+          qr_account_number: st.qr_account_number,
+          qr_account_name: st.qr_account_name,
+        };
+      })(),
     };
     downloadFile(
       JSON.stringify(backup, null, 2),
@@ -1628,8 +1676,10 @@
       title: "Replace all data with this backup?",
       bodyHtml:
         `<b>${escapeHtml(summary)}</b><br><br>` +
-        `This <b>replaces every current contribution and all payout status</b> ` +
-        `with the file's contents. Anything not in the file is lost. This cannot be undone.`,
+        `This <b>replaces every current contribution, all payout status and the ` +
+        `whole activity log</b> with the file's contents, and overwrites member ` +
+        `names, payout account details and the fund's settings wherever the file ` +
+        `carries them. Anything not in the file is lost. This cannot be undone.`,
       confirmLabel: "Replace everything",
       requireType: "REPLACE",
       ctx: { data },

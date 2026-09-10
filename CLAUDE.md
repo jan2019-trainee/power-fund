@@ -600,6 +600,44 @@ Two things to keep in view:
   established `.modal-overlay.sheet` treatment, whose `::before` already draws
   the grabber, so do not add another.
 
+## Backup completeness (found while waiting on member emails)
+
+`downloadBackup()` had silently fallen five migrations behind. A file called
+"Backup data (JSON)" was omitting:
+
+- **every member's payout destination** — `payout_bank`,
+  `payout_account_name`, `payout_account_number`, `payout_qr_url` (005). This
+  is *where each ₱30,000 is sent*, and it is the most consequential data in
+  the app after the contributions themselves.
+- `avatar_url` (009), `email` and `is_treasurer` (008)
+- `contributions.rejection_note` / `rejected_at` (006) — a restored refusal
+  said it was rejected but not why
+- every typed column on `activity_log` (006/007), so a restored log collapsed
+  to plain text with no type, member or round
+- `app_settings` **entirely** — fund name, payment QR, QR account details
+
+And `restoreFromBackup()` never wrote `activity_log` at all, though every
+version of the backup captured it. So *Reset all data* → *Restore backup*
+returned the money and dropped the history of how it got there.
+
+Now `version: 2`, with all of the above captured and restored. Three rules
+worth keeping:
+
+- **`auth_user_id` is deliberately NOT in the backup.** It is a foreign key
+  into one Supabase project's `auth.users`; restoring it would dangle or
+  re-point who owns a row. Members re-link by signing in.
+- **A v1 file must write only the keys it actually carries.** Spreading a v1
+  member row would null out the payout account numbers currently on the
+  roster — turning "restore my contributions" into "wipe the fund's config".
+  Tested: a v1 restore writes exactly `["name"]`.
+- **The PINs are not in the backup and cannot be.** They live in
+  `app_secrets`, which the browser cannot read. A test asserts the file never
+  contains either word.
+
+The backup file now contains member emails, payout account numbers and links
+to payment screenshots. It carries a `_note` saying so, and the restore
+confirmation names everything it replaces.
+
 ## Tests
 
 ```bash

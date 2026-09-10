@@ -204,6 +204,12 @@ change and want installed devices to get it, bump the `CACHE` string at the top 
 [`scripts/make-icons.py`](scripts/make-icons.py) (`pip install pillow`, then
 `python scripts/make-icons.py`) — edit that script to change the mark.
 
+**The backup file is sensitive.** "Backup data (JSON)" now contains members'
+email addresses, the account numbers their payouts are sent to, and links to
+their payment screenshots. Keep it somewhere private — it is the fund's
+ledger. It does NOT contain the PINs; those are unreachable from the browser
+once migration 010 is applied.
+
 ## Security limitations — read this
 
 This app has **no authentication**. That is a deliberate choice to keep it simple

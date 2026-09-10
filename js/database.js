@@ -985,17 +985,75 @@ window.DB = (function () {
     if (!backup || !Array.isArray(backup.contributions)) {
       throw new Error("That file doesn't look like a Power Fund backup.");
     }
-    // Names (match by member_order so it works across projects).
+    // Members, matched by member_order so a backup works across projects.
+    //
+    // Every field is written only when the FILE ACTUALLY CARRIES THE KEY. A v1
+    // backup has nothing but name, and blindly spreading it would null out the
+    // payout account numbers, photos and emails currently on the roster —
+    // turning "restore my contributions" into "wipe the fund's config".
     if (Array.isArray(backup.members)) {
       for (const m of backup.members) {
-        if (m.member_order && m.name) {
-          unwrap(
-            await client
-              .from("members")
-              .update({ name: m.name })
-              .eq("member_order", m.member_order),
-            "Couldn't restore member names"
+        if (!m.member_order) continue;
+        const fields = {};
+        if (m.name) fields.name = m.name;
+        [
+          "payout_bank",
+          "payout_account_name",
+          "payout_account_number",
+          "payout_qr_url",
+          "payout_updated_at",
+          "avatar_url",
+          "email",
+          "is_treasurer",
+        ].forEach((k) => {
+          if (m[k] !== undefined) fields[k] = m[k] === "" ? null : m[k];
+        });
+        if (!Object.keys(fields).length) continue;
+
+        let res = await client
+          .from("members")
+          .update(fields)
+          .eq("member_order", m.member_order);
+        // Older database: retry with just the name rather than failing the
+        // whole restore over a column that migration 005/008/009 would add.
+        if (res.error && /column|schema cache/i.test(res.error.message || "")) {
+          console.warn(
+            "Restoring member details without the newer columns:",
+            res.error.message
           );
+          if (fields.name) {
+            res = await client
+              .from("members")
+              .update({ name: fields.name })
+              .eq("member_order", m.member_order);
+          } else {
+            continue;
+          }
+        }
+        unwrap(res, "Couldn't restore member details");
+      }
+    }
+
+    // The fund's name, payment QR and QR account details (never restored
+    // before, because they were never captured).
+    if (backup.settings && typeof backup.settings === "object") {
+      const st = {};
+      [
+        "fund_name",
+        "qr_code_url",
+        "qr_updated_at",
+        "qr_bank",
+        "qr_account_number",
+        "qr_account_name",
+      ].forEach((k) => {
+        if (backup.settings[k] !== undefined) st[k] = backup.settings[k] || null;
+      });
+      if (Object.keys(st).length) {
+        const res = await client
+          .from("app_settings")
+          .upsert({ id: 1, ...st }, { onConflict: "id" });
+        if (res.error) {
+          console.warn("Skipped restoring fund settings:", res.error.message);
         }
       }
     }
@@ -1021,14 +1079,29 @@ window.DB = (function () {
         proof_url: c.proof_url || null,
         notes: c.notes || null,
         paid_at: c.paid_at || (c.status === 2 ? new Date().toISOString() : null),
+        rejection_note: c.rejection_note !== undefined ? c.rejection_note || null : null,
+        rejected_at: c.rejected_at !== undefined ? c.rejected_at || null : null,
       }))
       .filter((r) => r.cycle_id && r.member_id && r.status !== 0);
 
     if (rows.length) {
-      unwrap(
-        await client.from("contributions").insert(rows),
-        "Couldn't restore contributions"
-      );
+      let res = await client.from("contributions").insert(rows);
+      // Migration 006 absent: drop the rejection columns and any status-3 rows
+      // (the old check constraint only allows 0/1/2) rather than losing the
+      // whole restore.
+      if (res.error && /rejection_note|rejected_at|status_check|column/i.test(res.error.message || "")) {
+        console.warn(
+          "Migration 006 not applied — restoring without rejection details:",
+          res.error.message
+        );
+        const plain = rows
+          .filter((r) => r.status !== 3)
+          .map(({ rejection_note, rejected_at, ...rest }) => rest);
+        res = plain.length
+          ? await client.from("contributions").insert(plain)
+          : { error: null };
+      }
+      unwrap(res, "Couldn't restore contributions");
     }
 
     if (Array.isArray(backup.payouts)) {
@@ -1073,6 +1146,51 @@ window.DB = (function () {
           );
           break;
         }
+      }
+    }
+
+    // The activity log. Captured by every version of the backup and, until
+    // now, never written back — so "Reset all data" followed by "Restore
+    // backup" returned the money and silently dropped the history of how it
+    // got there. Replaced wholesale, like contributions, so the log matches
+    // the data beside it rather than mixing two funds' timelines.
+    if (Array.isArray(backup.activityLog)) {
+      unwrap(
+        await client
+          .from("activity_log")
+          .delete()
+          .neq("id", "00000000-0000-0000-0000-000000000000"),
+        "Couldn't clear the activity log"
+      );
+      const logRows = backup.activityLog
+        .filter((a) => a && a.message)
+        .map((a) => {
+          const row = { message: String(a.message) };
+          if (a.created_at) row.created_at = a.created_at;
+          if (a.event_type != null) row.event_type = a.event_type;
+          if (a.amount != null) row.amount = a.amount;
+          if (a.ref_status != null) row.ref_status = a.ref_status;
+          if (a.round_number != null) row.round_number = a.round_number;
+          // Stored by member_order in the file so it survives a move between
+          // projects, exactly like the contributions above.
+          if (a.member_order != null && memberByOrder[a.member_order]) {
+            row.member_id = memberByOrder[a.member_order];
+          }
+          return row;
+        });
+      if (logRows.length) {
+        let res = await client.from("activity_log").insert(logRows);
+        // 006/007 absent: fall back to message + created_at only.
+        if (res.error) {
+          console.warn(
+            "Restoring the activity log without its typed columns:",
+            res.error.message
+          );
+          res = await client.from("activity_log").insert(
+            logRows.map((r) => ({ message: r.message, created_at: r.created_at }))
+          );
+        }
+        unwrap(res, "Couldn't restore the activity log");
       }
     }
   }

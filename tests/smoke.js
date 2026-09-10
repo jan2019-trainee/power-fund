@@ -1889,6 +1889,194 @@ async function accountLinking(browser, errors) {
   await soft.close();
 }
 
+/** Backup and restore must round-trip everything they claim to.
+ *
+ *  The backup silently omitted five migrations' worth of columns — most
+ *  seriously every member's payout account number, i.e. where the 30,000 is
+ *  actually sent — and the activity log was captured but never written back.
+ *  So "Reset all data" then "Restore backup" returned the money and dropped
+ *  both the history of how it got there and the details of where it goes. */
+async function backupRoundTrip(browser, errors) {
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`backup: ${e}`));
+
+  const members = M.MEMBERS.map((m, i) => ({
+    ...m,
+    email: `${m.name.toLowerCase()}@example.com`,
+    is_treasurer: i === 0,
+    avatar_url: i === 0 ? "https://example.invalid/a.jpg" : null,
+    payout_bank: "GCash",
+    payout_account_name: m.name + " Dela Cruz",
+    payout_account_number: `0917${1000000 + i}`,
+  }));
+  const contributions = M.CONTRIBUTIONS.map((c, i) =>
+    i === 0
+      ? { ...c, status: 3, rejection_note: "Screenshot was blurry", rejected_at: "2026-09-20T02:00:00Z" }
+      : c
+  );
+  const activityLog = (M.ACTIVITY_LOG || []).map((a, i) => ({
+    ...a,
+    event_type: "payment",
+    amount: 1000,
+    round_number: 2,
+    member_id: M.MEMBERS[0].id,
+  }));
+  const settings = {
+    id: 1,
+    fund_name: "ViTAMiN Fund 2027",
+    qr_bank: "Maya",
+    qr_account_name: "Fund Treasurer",
+    qr_account_number: "09171234567",
+  };
+  await serve(page, { ...M.TABLE_DATA, members, contributions, activity_log: activityLog, app_settings: settings });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1600);
+
+  // Capture the file the app would have downloaded.
+  await page.evaluate(() => {
+    window.__capBlob = null;
+    URL.createObjectURL = (blob) => {
+      window.__capBlob = blob;
+      return "blob:stub";
+    };
+  });
+  await page.evaluate(() => window.PowerFund.downloadBackup());
+  await page.waitForTimeout(300);
+  const raw = await page.evaluate(() => (window.__capBlob ? window.__capBlob.text() : null));
+  const b = JSON.parse(raw);
+
+  check("backup/version is bumped past the incomplete v1", b.version === 2, String(b.version));
+  const me = b.members.find((m) => m.member_order === 1);
+  check(
+    "backup/captures where each member RECEIVES money",
+    !!me && me.payout_account_number === "09171000000" && me.payout_bank === "GCash",
+    JSON.stringify(me && { bank: me.payout_bank, acct: me.payout_account_number })
+  );
+  check("backup/captures emails and the treasurer flag", me.email === "regine@example.com" && me.is_treasurer === true);
+  check("backup/captures profile photos", me.avatar_url === "https://example.invalid/a.jpg");
+  check(
+    // A project-specific FK. Restoring it would dangle or re-point ownership.
+    "backup/does NOT capture auth_user_id",
+    !("auth_user_id" in me)
+  );
+  const rejected = b.contributions.find((c) => c.status === 3);
+  check(
+    "backup/captures why a claim was refused",
+    !!rejected && rejected.rejection_note === "Screenshot was blurry" && !!rejected.rejected_at
+  );
+  check(
+    "backup/captures the activity log's typed columns",
+    b.activityLog.length > 0 &&
+      b.activityLog[0].event_type === "payment" &&
+      b.activityLog[0].round_number === 2 &&
+      b.activityLog[0].member_order === 1,
+    JSON.stringify(b.activityLog[0] || {})
+  );
+  check(
+    "backup/captures the fund name and QR account details",
+    b.settings && b.settings.fund_name === "ViTAMiN Fund 2027" && b.settings.qr_bank === "Maya"
+  );
+  check(
+    // These live in app_secrets, which the browser cannot read at all.
+    "backup/never contains a PIN",
+    !/treasurer_pin|master_pin/.test(raw)
+  );
+  await page.close();
+
+  // ---- Restore: the captured fields must actually go back --------------
+  const back = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  back.on("pageerror", (e) => errors.push(`backup: ${e}`));
+  const writes = [];
+  await serve(back, { ...M.TABLE_DATA, members, app_settings: settings });
+  await back.route("**/rest/v1/**", async (route) => {
+    const url = new URL(route.request().url());
+    const table = url.pathname.split("/").pop();
+    if (route.request().method() !== "GET" && !url.pathname.includes("/rpc/")) {
+      let body = null;
+      try {
+        body = JSON.parse(route.request().postData() || "null");
+      } catch (e) {}
+      writes.push({ table, method: route.request().method(), body });
+      // Echo the written rows back, the way PostgREST does with a
+      // `select` preference. Returning [] would look like an RLS refusal to
+      // requireRows() — which is exactly what it is meant to look like.
+      const echo = Array.isArray(body) ? body : [body || {}];
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(echo),
+      });
+    }
+    if (url.pathname.includes("/rpc/")) {
+      return route.fulfill({
+        status: 404,
+        contentType: "application/json",
+        body: '{"code":"42883","message":"no fn"}',
+      });
+    }
+    const rows = { ...M.TABLE_DATA, members, app_settings: settings }[table];
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(rows === undefined ? [] : rows),
+    });
+  });
+  await back.goto(BASE, { waitUntil: "domcontentloaded" });
+  await back.waitForTimeout(1600);
+  await back.evaluate(async (json) => {
+    await window.DB.restoreFromBackup(JSON.parse(json));
+  }, raw);
+  await back.waitForTimeout(600);
+
+  const memberWrites = writes.filter((w) => w.table === "members");
+  check(
+    "restore/writes the payout account details back",
+    memberWrites.some(
+      (w) => w.body && w.body.payout_account_number === "09171000000"
+    ),
+    JSON.stringify(memberWrites.map((w) => Object.keys(w.body || {})).slice(0, 2))
+  );
+  check(
+    "restore/writes the fund settings back",
+    writes.some((w) => w.table === "app_settings" && w.body && w.body.fund_name === "ViTAMiN Fund 2027")
+  );
+  check(
+    "restore/writes the activity log back",
+    writes.some(
+      (w) => w.table === "activity_log" && Array.isArray(w.body) && w.body.length > 0
+    )
+  );
+  check(
+    "restore/writes the rejection reason back",
+    writes.some(
+      (w) =>
+        w.table === "contributions" &&
+        Array.isArray(w.body) &&
+        w.body.some((r) => r.rejection_note === "Screenshot was blurry")
+    )
+  );
+
+  // A v1 file (name only) must NOT null out details currently on the roster.
+  writes.length = 0;
+  await back.evaluate(async () => {
+    await window.DB.restoreFromBackup({
+      app: "power-fund",
+      version: 1,
+      members: [{ member_order: 1, name: "Regine" }],
+      contributions: [],
+    });
+  });
+  await back.waitForTimeout(400);
+  const v1 = writes.filter((w) => w.table === "members");
+  check(
+    "restore/a v1 backup touches only the name, nulling nothing",
+    v1.length > 0 &&
+      v1.every((w) => w.body && Object.keys(w.body).join(",") === "name"),
+    JSON.stringify(v1.map((w) => Object.keys(w.body || {})))
+  );
+  await back.close();
+}
+
 /** A write that RLS refuses silently must not be reported as success.
  *
  *  Migration 011 refuses an update by making the row invisible, so the reply
@@ -2533,6 +2721,8 @@ async function bootFailure(browser) {
   await memberAccounts(browser, errors);
   console.log("\nAccount linking");
   await accountLinking(browser, errors);
+  console.log("\nBackup round-trip");
+  await backupRoundTrip(browser, errors);
   console.log("\nSilent refusal");
   await silentRefusal(browser, errors);
   console.log("\nPIN vault");

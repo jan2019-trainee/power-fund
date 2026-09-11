@@ -96,9 +96,40 @@ window.PFViews.home = function (ctx) {
              </div>`
           : ""
       }
-      <p class="rejected-hint">${
-        cyc.length > 1 ? "These cycles are" : "This cycle is"
-      } still due. Send the payment again and attach a clearer screenshot.</p>
+      ${
+        // "These cycles are still due" was FALSE for a refused advance. Pay six
+        // cycles early, be rejected, and five of them had no due date yet —
+        // the app told the member they were behind on money nobody had asked
+        // for. Split the sentence by what is actually owed today.
+        (function () {
+          const owedNow = cyc.filter((n) =>
+            C.isOverdue(state.contributions, state.cycles, myMember.id, n)
+          );
+          const notYet = cyc.filter((n) => owedNow.indexOf(n) === -1);
+          const list = (ns) =>
+            ns.length > 1 ? `Cycles ${ns[0]}–${ns[ns.length - 1]}` : `Cycle ${ns[0]}`;
+          if (!notYet.length) {
+            return `<p class="rejected-hint">${
+              cyc.length > 1 ? "These cycles are" : "This cycle is"
+            } still due. Send the payment again and attach a clearer screenshot.</p>`;
+          }
+          if (!owedNow.length) {
+            return `<p class="rejected-hint">${
+              cyc.length > 1 ? "Those cycles aren't" : "That cycle isn't"
+            } due yet — you were paying ahead. Nothing is late. Send it again
+            whenever you like, with a clearer screenshot.</p>`;
+          }
+          return `<p class="rejected-hint"><b>${list(
+            owedNow
+          )}</b> ${owedNow.length > 1 ? "are" : "is"} still due — send
+            ${owedNow.length > 1 ? "those" : "that"} again with a clearer
+            screenshot. ${list(notYet)} ${
+            notYet.length > 1 ? "were" : "was"
+          } paid ahead and ${
+            notYet.length > 1 ? "aren't" : "isn't"
+          } late.</p>`;
+        })()
+      }
       ${
         // A PARTIAL RESUBMISSION has to be visible here. Resubmit part of a
         // rejected batch and the rest stays rejected — correctly, it is still

@@ -403,8 +403,16 @@ async function reducedMotion(browser) {
 /** Rejection (migration 006) and the master-PIN recovery, both new in phase 2. */
 async function rejectionAndMasterPin(browser, errors) {
   const MEMBER = M.MEMBERS[2]; // Jan
+  // Cycle 7's due date is pushed into the PAST for this fixture. Every date in
+  // mock-data is in the future, so without this the rejection here is a refused
+  // ADVANCE — nothing was owed — and it correctly no longer paints red. This
+  // test is about a refused DEBT, which is the case that must still read red.
+  const pastDue = M.CYCLES.map((c) =>
+    c.cycle_number === 7 ? { ...c, due_date: "2026-01-15" } : c
+  );
   const rejected = {
     ...M.TABLE_DATA,
+    cycles: pastDue,
     app_settings: { ...M.SETTINGS, treasurer_pin: "1234", master_pin: "999111" },
     contributions: [
       ...M.CONTRIBUTIONS,
@@ -467,8 +475,9 @@ async function rejectionAndMasterPin(browser, errors) {
   await page.locator(".tab-item", { hasText: "Rounds" }).click();
   await page.waitForTimeout(400);
   check(
-    "rejection: chip marked in Rounds",
-    (await page.locator(".member-chip.rejected").count()) >= 1
+    "rejection: a refused DEBT is still marked red in Rounds",
+    (await page.locator(".member-chip.rejected").count()) >= 1,
+    `${await page.locator(".member-chip.rejected").count()} red chips`
   );
   // Members is a Home drill-down on this shell, not a tab.
   await page.locator(".tab-item", { hasText: "Home" }).click();
@@ -2460,6 +2469,24 @@ async function resubmitBatch(browser, errors) {
     /Cycles 2.6/.test(card),
     card.slice(0, 100)
   );
+  // A REFUSED ADVANCE IS NOT A DEBT. Jan's cycles 2-6 had no due date yet, so
+  // the card must not call them "still due" and the grid must not paint them
+  // red. Display only — the rows keep status 3 and their note.
+  check(
+    "resubmit/a refused advance is not called 'still due'",
+    !/These cycles are still due/.test(card) && /paid ahead|aren't due yet/i.test(card),
+    card.slice(0, 160)
+  );
+  await part.locator(".tab-item", { hasText: "Rounds" }).click();
+  await part.waitForTimeout(600);
+  check(
+    "resubmit/...and its chips are not painted red in the grid",
+    (await part.locator(".member-chip.rejected").count()) === 0,
+    `${await part.locator(".member-chip.rejected").count()} red chips`
+  );
+  await part.locator(".tab-item", { hasText: "Home" }).click();
+  await part.waitForTimeout(500);
+
   check(
     "resubmit/...and says the resubmitted cycle is with the treasurer",
     (await part.locator(".rejected-inreview").count()) === 1 &&

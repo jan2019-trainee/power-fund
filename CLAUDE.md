@@ -643,6 +643,38 @@ now shows a purple `.rejected-inreview` line inside the red card ("Cycle 1 is
 with the treasurer for review"), so a resubmission never looks like it
 vanished while the genuinely-still-owed cycles keep saying so.
 
+### A refused ADVANCE is not a debt
+
+The owner came back with a sharper version of the same question, and it was
+right: a member who pays six cycles when only one is due is **paying ahead**.
+Refuse the batch and five of those cycles were never owed — the member
+volunteered early and was turned down. Painting them red said "you are behind"
+about money nobody had asked for, and the card's `rejected-hint` said *"These
+cycles are still due"*, which for a not-yet-due cycle is simply **false**.
+
+**Display only — the data is untouched.** The rows keep status 3, the note and
+the proof, so the refusal stays on record. That is safe precisely because the
+accounting does not distinguish them: `isOwed()` is true for unpaid AND
+rejected alike, and `isOverdue()` needs the due date to have passed either way.
+So this changes what a chip SAYS, never what is counted. (The owner's earlier
+request — clear the remaining rejected cycles on resubmit — was a different
+thing and stays declined: those cycles WERE due.)
+
+- `rounds.js` renders `status === 3 && !overdue` as a plain not-due chip.
+- The rejected card splits its sentence: what is genuinely due gets "send that
+  again", what was paid ahead gets "isn't due yet — nothing is late".
+- **The roster ring stays red**, deliberately. `memberStanding()` already
+  argues it: "a refused claim outranks the rest… it should read that way even
+  before the cycle falls due." The ring is about the member having an ACTION;
+  the chip is about whether that cycle is late. They can differ and both be
+  true.
+
+**Every due date in `tests/mock-data.js` is in the future**, so every rejection
+in the fixtures is a refused advance. The pre-existing "chip marked in Rounds"
+check was therefore asserting red for a case that should never have been red;
+it now pushes one cycle's due date into the past so it tests a refused DEBT,
+which is the case that must still read red.
+
 ### Pending is purple everywhere now
 
 `.member-chip.pending` was the lone amber one, while `.my-status-pending`,

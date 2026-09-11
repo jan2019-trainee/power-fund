@@ -87,11 +87,27 @@ window.PFViews.rounds = function (ctx) {
                   // Rejected (status 3, migration 006) reads as its own state
                   // rather than folding into "unpaid": the member did submit,
                   // and the treasurer needs to see that they refused it.
+                  //
+                  // EXCEPT WHEN IT WAS NEVER DUE. A member who pays six cycles
+                  // in advance and is refused owes nothing on the five that
+                  // had not come due — they volunteered early and were turned
+                  // down. Painting those red says "you are behind" about money
+                  // nobody was asking for yet.
+                  //
+                  // DISPLAY ONLY. The row keeps status 3 and its note, so the
+                  // refusal stays on record and nothing is deleted; isOwed()
+                  // and isOverdue() are untouched, and they already agree —
+                  // isOwed is true for unpaid AND rejected alike, and
+                  // isOverdue needs the due date to have passed either way.
+                  // So this changes what the chip SAYS, never what is counted.
+                  const refusedAdvance = status === 3 && !overdue;
                   const cls =
                     status === 2
                       ? "paid"
                       : status === 1
                       ? "pending"
+                      : refusedAdvance
+                      ? ""
                       : status === 3
                       ? "rejected"
                       : overdue
@@ -102,6 +118,8 @@ window.PFViews.rounds = function (ctx) {
                       ? "✓"
                       : status === 1
                       ? "⋯"
+                      : refusedAdvance
+                      ? ""
                       : status === 3
                       ? "✕"
                       : overdue

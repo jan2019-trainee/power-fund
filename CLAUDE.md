@@ -583,6 +583,111 @@ MEASURES BOXES for this (`ctaGeometry`).
   already on file from before the cap arrives over-length and Save would
   otherwise refuse with nothing to point at.
 
+## Two bugs from the first day on 011
+
+**A view destructured its own function off `ctx`.** `inlineArgSafe` is a
+module-level function in `members.js`; `payoutDest()` also pulled the name off
+`ctx`, which shadowed the real one with `undefined` and crashed the whole
+Members screen — but only for a member who had a payout QR on file, so it
+surfaced the day somebody uploaded one.
+
+`tests/views.test.js` exists precisely to catch this and could not see it:
+`ctxUsedByView()` used `match`, not `matchAll`, so it only ever checked the
+FIRST `= ctx` destructure in a file and every helper function's was invisible.
+Now it reads all of them, with the body bounded to `[^{}]` — a non-greedy
+any-char body happily spans from one `const {` to a LATER `} = ctx;` and
+reported `startCycle` (from `C.roundCycleRange`) as missing, a false positive
+that would have trained the next person to ignore the check. A second
+assertion catches the sharper form directly: **a name the file declares AND
+destructures off ctx** is always this bug.
+
+**The Insights donut called a paying member "Not due yet".** `roundMemberStates`
+bucketed by the earliest unsettled cycle, and `paid` meant all SIX cycles of
+the round — unreachable until a round is nearly over, so the slice was dead
+for most of a round's life and somebody who had genuinely paid and been
+confirmed was charted as having done nothing. Reported from use, and fair.
+
+`paid` now means **nothing outstanding**: square on every cycle that has come
+due. It degrades correctly — at the end of a round, square and all-six are the
+same thing. The distinction that keeps it honest is that having paid *nothing*
+while nothing is due stays `notDue`; without that, everybody would read as
+"paid" on day one of a round. The donut has no approved mockup (the design
+specifies only "on-time rate, per-member standing, and a per-round collection
+timeline"), so its semantics were ours to correct.
+
+## Resubmitting a rejected batch
+
+Reported from use: a member paid six cycles in one transfer, the treasurer
+rejected all six, and **"Resubmit payment" opened a sheet set to ONE cycle**
+(`modalCount = 1`, unconditionally). They submitted, one cycle went to review,
+five stayed rejected — and the card kept reporting a refusal they thought they
+had answered.
+
+`openContributeModal()` now defaults the count to the size of the rejected
+batch the cycle belongs to, capped by `maxAdvanceCount()` so it can never
+select a cycle that is already confirmed or in review. The button offers to
+redo the rejection shown beside it, so it should offer to redo all of it;
+reducing the count is still one tap.
+
+**The owner asked for the remaining rejected cycles to be RESET when a member
+resubmits any of them. That was declined and put back to them as a product
+decision**, per rule 9 and the QA gate's money carve-out. A member who
+resubmits 1 of 6 still owes the other five: clearing the flag would stop the
+member being told, drop them out of the treasurer's attention queue, and take
+them out of `isOwed()` so the round's funding gap silently shrinks on screen.
+`CLAUDE.md` already states the invariant — *"a rejected cycle stays OVERDUE:
+refusing a claim must never quietly excuse the member from paying it."*
+
+What was done instead is honest about both halves: a **partial** resubmission
+now shows a purple `.rejected-inreview` line inside the red card ("Cycle 1 is
+with the treasurer for review"), so a resubmission never looks like it
+vanished while the genuinely-still-owed cycles keep saying so.
+
+### A refused ADVANCE is not a debt
+
+The owner came back with a sharper version of the same question, and it was
+right: a member who pays six cycles when only one is due is **paying ahead**.
+Refuse the batch and five of those cycles were never owed — the member
+volunteered early and was turned down. Painting them red said "you are behind"
+about money nobody had asked for, and the card's `rejected-hint` said *"These
+cycles are still due"*, which for a not-yet-due cycle is simply **false**.
+
+**Display only — the data is untouched.** The rows keep status 3, the note and
+the proof, so the refusal stays on record. That is safe precisely because the
+accounting does not distinguish them: `isOwed()` is true for unpaid AND
+rejected alike, and `isOverdue()` needs the due date to have passed either way.
+So this changes what a chip SAYS, never what is counted. (The owner's earlier
+request — clear the remaining rejected cycles on resubmit — was a different
+thing and stays declined: those cycles WERE due.)
+
+- `rounds.js` renders `status === 3 && !overdue` as a plain not-due chip.
+- The rejected card splits its sentence: what is genuinely due gets "send that
+  again", what was paid ahead gets "isn't due yet — nothing is late".
+- **The roster ring stays red**, deliberately. `memberStanding()` already
+  argues it: "a refused claim outranks the rest… it should read that way even
+  before the cycle falls due." The ring is about the member having an ACTION;
+  the chip is about whether that cycle is late. They can differ and both be
+  true.
+
+**Every due date in `tests/mock-data.js` is in the future**, so every rejection
+in the fixtures is a refused advance. The pre-existing "chip marked in Rounds"
+check was therefore asserting red for a case that should never have been red;
+it now pushes one cycle's due date into the past so it tests a refused DEBT,
+which is the case that must still read red.
+
+### Pending is purple everywhere now
+
+`.member-chip.pending` was the lone amber one, while `.my-status-pending`,
+`.acct-pill.wait`, `.stat-value.pending` and the Insights donut's "In review"
+slice all used `--pending-review`. The same payment read as one colour in the
+cycle grid and another in Insights. **`.round-state.pending` is deliberately
+left amber** — it is "Payout Pending", a round lifecycle state, not a payment
+awaiting review, and making it purple would claim the two mean the same thing.
+
+The full chip vocabulary: green paid · purple in review · **red solid
+overdue** · **red dashed rejected** (sent and refused, versus never sent) ·
+plain not-due-yet.
+
 ## Migrations
 
 Run in the Supabase SQL editor, in order. `006` also needs a one-off
@@ -599,14 +704,22 @@ finally gave `members.avatar_url` (reserved back in 006) somewhere to point ·
 claim RPC and the members guard trigger. **Changes no table policy, so it
 cannot lock anyone out.** Ships with `010_rollback.sql`.
 
-**`011` is written and validated but NOT APPLIED.** Three files:
+**`011` IS APPLIED** (all four preflight rows `ok`, with `AUTH_MODE =
+"required"` already deployed). Three files:
 `011_preflight.sql` (read-only readiness report, run it first),
 `011_rls_lockdown.sql` (the policies), `011_rollback.sql`. The lockdown calls
 the readiness check and **refuses to run** while any member lacks an email, a
 treasurer is not flagged, or anybody has not signed in once — its policies key
 off `members.auth_user_id`, so an unlinked member is denied everything.
 Overridable with `select set_config('pf.allow_unready','yes',false);` but
-don't.
+don't — it caught a real problem on this fund's own rollout. The preflight
+reported **two treasurers**, because "exactly one" is what it demands; the
+owner cleared the second flag rather than overriding, and that is the right
+move. See "Two treasurers" below.
+
+**RLS is now enforcing.** The notes further down that say "until 011 is
+applied" describe the world before this, and are kept because they explain why
+each guard exists — not because the guard is still the only thing holding.
 
 **011 needs `AUTH_MODE = "required"`, but NOT the other way round.** The
 coupling runs one direction only, and an earlier version of this note had it
@@ -627,6 +740,41 @@ Every migration from 010 on is wrapped in `begin; … commit;`. Not decoration:
 without it a `raise` in 011's preflight aborted one statement and psql
 cheerfully ran the rest, dropping `open_all` and locking the fund out — the
 exact outcome the check exists to prevent.
+
+## Two treasurers, and the word "admin"
+
+Both came out of the same rollout, and both were real gaps rather than
+confusion on the owner's part.
+
+**There is ONE role flag: `members.is_treasurer`.** No `is_admin`, no
+hierarchy, no deputy. The code used to put `isAdmin` on ctx for it, which
+invented a distinction the app does not have — the owner reasonably asked
+where "admin" fell relative to "treasurer", and the honest answer was "they
+are the same seat". Renamed to `isTreasurerAccount` throughout. The word
+"admin" survives only as an **activity-log category** (admin actions vs
+payments vs payouts), which is a different and legitimate meaning.
+
+**The app could CREATE a two-treasurer state and not fix one.** Transfer
+treasurer role grants first and resigns second — deliberately, so a failure
+between the two network calls leaves two treasurers rather than none. But
+nothing could then clear the extra flag: Transfer moves the role *away from
+you*, and no surface touched anyone else's. So the recoverable half-state was
+recoverable only in SQL, which is what that screen exists to avoid.
+
+`removeTreasurer()` closes it, surfaced in the Transfer screen itself because
+that is the screen about the role:
+
+- **It refuses to remove the last one.** Zero treasurers is the unrecoverable
+  direction — nobody can confirm a payment, and nobody can set the flag back,
+  because setting it requires already being the treasurer. Checked again at
+  write time, not just when the button was drawn: the roster reloads every 30
+  seconds and the other treasurer may have resigned meanwhile.
+- **Your own flag is not removable here.** Stepping down is Transfer treasurer
+  role, which hands the role on in the same action rather than leaving the fund
+  one mistake from having none.
+- **It writes `is_treasurer: false` and nothing else** — a test asserts the
+  payload carries exactly that one key — and reports what is actually true
+  afterwards ("N treasurers remain") rather than "done".
 
 ## Member accounts (in progress)
 

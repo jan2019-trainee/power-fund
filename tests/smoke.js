@@ -403,8 +403,16 @@ async function reducedMotion(browser) {
 /** Rejection (migration 006) and the master-PIN recovery, both new in phase 2. */
 async function rejectionAndMasterPin(browser, errors) {
   const MEMBER = M.MEMBERS[2]; // Jan
+  // Cycle 7's due date is pushed into the PAST for this fixture. Every date in
+  // mock-data is in the future, so without this the rejection here is a refused
+  // ADVANCE — nothing was owed — and it correctly no longer paints red. This
+  // test is about a refused DEBT, which is the case that must still read red.
+  const pastDue = M.CYCLES.map((c) =>
+    c.cycle_number === 7 ? { ...c, due_date: "2026-01-15" } : c
+  );
   const rejected = {
     ...M.TABLE_DATA,
+    cycles: pastDue,
     app_settings: { ...M.SETTINGS, treasurer_pin: "1234", master_pin: "999111" },
     contributions: [
       ...M.CONTRIBUTIONS,
@@ -467,8 +475,9 @@ async function rejectionAndMasterPin(browser, errors) {
   await page.locator(".tab-item", { hasText: "Rounds" }).click();
   await page.waitForTimeout(400);
   check(
-    "rejection: chip marked in Rounds",
-    (await page.locator(".member-chip.rejected").count()) >= 1
+    "rejection: a refused DEBT is still marked red in Rounds",
+    (await page.locator(".member-chip.rejected").count()) >= 1,
+    `${await page.locator(".member-chip.rejected").count()} red chips`
   );
   // Members is a Home drill-down on this shell, not a tab.
   await page.locator(".tab-item", { hasText: "Home" }).click();
@@ -2395,6 +2404,97 @@ async function ctaGeometry(browser, errors) {
   await wide.close();
 }
 
+/** Resubmitting a rejected batch. Reported from use: a member paid six cycles
+ *  in one transfer, the treasurer rejected all six, and "Resubmit payment"
+ *  opened a sheet set to ONE cycle — so five stayed rejected and the card kept
+ *  reporting a refusal the member thought they had answered. */
+async function resubmitBatch(browser, errors) {
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`resubmit: ${e}`));
+  const members = rosterWithEmails();
+  const me = members[2];
+  const contributions = [];
+  for (let n = 1; n <= 6; n++) {
+    // cycle_id, not cycle_number: app.js:468 DERIVES cycle_number from
+    // cycle_id, so a fixture that sets only the number has it overwritten with
+    // undefined and every cycle label renders as "undefined".
+    contributions.push({
+      id: "j" + n, member_id: me.id, cycle_id: M.CYCLES[n - 1].id, status: 3,
+      amount: C_AMOUNT, proof_url: "batch.jpg",
+      rejected_at: "2026-09-10T00:00:00Z", rejection_note: "Blurry",
+    });
+  }
+  await serve(page, { ...M.TABLE_DATA, members, contributions, payouts: [] });
+  await page.addInitScript((id) => {
+    try { localStorage.setItem("pf_my_member_id", id); } catch (e) {}
+  }, me.id);
+  await withAuthMode(page, "off");
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2400);
+
+  check(
+    "resubmit/the rejection card names the whole batch",
+    /Cycles 1.6/.test(await page.locator(".rejected-card").innerText())
+  );
+  await page.locator(".rejected-cta").click();
+  await page.waitForTimeout(600);
+  // THE FIX: the sheet offers to redo all six, not one.
+  const sheetText = (await page.locator(".sheet-pay").innerText()).replace(/\s+/g, " ");
+  check(
+    "resubmit/the sheet defaults to the whole rejected batch",
+    /6\s*cycles/i.test(sheetText) || /6,000/.test(sheetText),
+    sheetText.slice(0, 120)
+  );
+  await page.close();
+
+  // A PARTIAL resubmission must still say so: the remaining cycles are genuinely
+  // still owed, and the card used to mention only the refusal.
+  const part = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  part.on("pageerror", (e) => errors.push(`resubmit/partial: ${e}`));
+  // Keyed on cycle_id, for the same reason the fixture above is: cycle_number
+  // is not on these rows — the app derives it.
+  const partial = contributions.map((r) =>
+    r.cycle_id === M.CYCLES[0].id ? { ...r, status: 1 } : r
+  );
+  await serve(part, { ...M.TABLE_DATA, members, contributions: partial, payouts: [] });
+  await part.addInitScript((id) => {
+    try { localStorage.setItem("pf_my_member_id", id); } catch (e) {}
+  }, me.id);
+  await withAuthMode(part, "off");
+  await part.goto(BASE, { waitUntil: "domcontentloaded" });
+  await part.waitForTimeout(2400);
+  const card = (await part.locator(".rejected-card").innerText()).replace(/\s+/g, " ");
+  check(
+    "resubmit/a partial resubmission still reports what is STILL rejected",
+    /Cycles 2.6/.test(card),
+    card.slice(0, 100)
+  );
+  // A REFUSED ADVANCE IS NOT A DEBT. Jan's cycles 2-6 had no due date yet, so
+  // the card must not call them "still due" and the grid must not paint them
+  // red. Display only — the rows keep status 3 and their note.
+  check(
+    "resubmit/a refused advance is not called 'still due'",
+    !/These cycles are still due/.test(card) && /paid ahead|aren't due yet/i.test(card),
+    card.slice(0, 160)
+  );
+  await part.locator(".tab-item", { hasText: "Rounds" }).click();
+  await part.waitForTimeout(600);
+  check(
+    "resubmit/...and its chips are not painted red in the grid",
+    (await part.locator(".member-chip.rejected").count()) === 0,
+    `${await part.locator(".member-chip.rejected").count()} red chips`
+  );
+  await part.locator(".tab-item", { hasText: "Home" }).click();
+  await part.waitForTimeout(500);
+
+  check(
+    "resubmit/...and says the resubmitted cycle is with the treasurer",
+    (await part.locator(".rejected-inreview").count()) === 1 &&
+      /Cycle 1 is/.test(await part.locator(".rejected-inreview").innerText())
+  );
+  await part.close();
+}
+
 /** Whose cycle is this? Tapping another member's chip in Rounds used to open
  *  the pay sheet for THEM, with their name only in a small subtitle — so a
  *  mis-tap filed your screenshot as their contribution. Migration 011 refuses
@@ -2896,6 +2996,111 @@ async function unlockVisibility(browser, errors) {
     (await boot.locator(".unlock-btn").count()) === 1
   );
   await boot.close();
+}
+
+/** More than one treasurer — the state a half-completed transfer leaves, which
+ *  the app could create and not fix. 011's preflight refuses to lock a fund
+ *  down while it holds, so the only route back was SQL. */
+async function extraTreasurer(browser, errors) {
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`extra-treasurer: ${e}`));
+  const members = rosterWithEmails();
+  members[0].auth_user_id = FAKE_USER_ID; // Regine, flagged and signed in
+  members[4].is_treasurer = true;         // Verdz, also flagged
+  members[4].auth_user_id = "44444444-4444-4444-4444-444444444444";
+  const data = {
+    ...M.TABLE_DATA,
+    members,
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234" },
+  };
+  await serve(page, data);
+  const writes = [];
+  await page.route("**/rest/v1/members**", async (route) => {
+    const req = route.request();
+    if (req.method() === "GET") {
+      return route.fulfill({
+        status: 200, contentType: "application/json",
+        body: JSON.stringify(data.members),
+      });
+    }
+    let body = {};
+    try { body = JSON.parse(req.postData() || "{}"); } catch (e) {}
+    const target = data.members.find((m) => req.url().includes(m.id));
+    writes.push({ name: target && target.name, body });
+    Object.assign(target || {}, body);
+    return route.fulfill({
+      status: 200, contentType: "application/json",
+      body: JSON.stringify([target || {}]),
+    });
+  });
+  await withAuthMode(page, "optional", { signedIn: true, email: "regine@example.com" });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
+  await page.locator(".unlock-btn").click();
+  await page.waitForTimeout(500);
+  await page.locator(".tab-item", { hasText: "Menu" }).click();
+  await page.waitForTimeout(400);
+  await page.locator(".menu-row", { hasText: "Transfer treasurer role" }).first().click();
+  await page.waitForTimeout(450);
+
+  check(
+    "extra-treasurer/the second flagged treasurer is surfaced",
+    (await page.locator(".transfer-extra").count()) === 1 &&
+      /Verdz/.test(await page.locator(".transfer-extra").innerText())
+  );
+  check(
+    "extra-treasurer/and it says 011 will refuse while it holds",
+    /011/.test(await page.locator(".transfer-extra-note").innerText())
+  );
+  // You are not listed as your own extra — stepping down is Transfer, which
+  // hands the role on rather than risking zero.
+  check(
+    "extra-treasurer/you are not offered as removable",
+    !/Regine/.test(await page.locator(".transfer-extra").innerText())
+  );
+
+  await page.locator(".transfer-extra-remove").first().click();
+  await page.waitForTimeout(450);
+  check(
+    "extra-treasurer/removal confirms, and says what they lose",
+    /release payouts/i.test(await page.locator(".modal[role=dialog]").last().innerText())
+  );
+  await page.locator('.modal input[placeholder="Treasurer PIN"]').fill("1234");
+  await page.waitForTimeout(200);
+  await page.locator(".confirm-yes").click();
+  await page.waitForTimeout(1400);
+  const w = writes.find((x) => x.body && "is_treasurer" in x.body);
+  check(
+    "extra-treasurer/it clears ONLY that member's flag",
+    !!w && w.name === "Verdz" && w.body.is_treasurer === false &&
+      Object.keys(w.body).length === 1,
+    JSON.stringify(w || null)
+  );
+  await page.close();
+
+  // THE GUARD THAT MATTERS: the last treasurer is not removable. Zero is the
+  // unrecoverable direction — nobody could set the flag back, because setting
+  // it requires already being the treasurer.
+  const solo = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  solo.on("pageerror", (e) => errors.push(`extra-treasurer/solo: ${e}`));
+  const one = rosterWithEmails();
+  one[0].auth_user_id = FAKE_USER_ID;
+  await serve(solo, { ...M.TABLE_DATA, members: one });
+  await withAuthMode(solo, "optional", { signedIn: true, email: "regine@example.com" });
+  await solo.goto(BASE, { waitUntil: "domcontentloaded" });
+  await solo.waitForTimeout(2500);
+  check(
+    "extra-treasurer/a sole treasurer sees no warning at all",
+    (await solo.locator(".transfer-extra").count()) === 0
+  );
+  // Exported handler, so the absent button is not the gate.
+  await solo.evaluate((id) => window.PowerFund.removeTreasurer(id), one[0].id);
+  await solo.waitForTimeout(500);
+  check(
+    "extra-treasurer/and the handler refuses to remove the last one",
+    /only treasurer/i.test(await solo.locator(".save-error-banner").innerText())
+  );
+  await solo.close();
 }
 
 /** Transfer treasurer role — moving `members.is_treasurer`, the flag Postgres
@@ -4172,9 +4377,11 @@ async function bootFailure(browser) {
   await accountLinking(browser, errors);
   console.log("\nOnboarding");
   await ctaGeometry(browser, errors);
+  await resubmitBatch(browser, errors);
   await payAttribution(browser, errors);
   await myPayoutQr(browser, errors);
   await unlockVisibility(browser, errors);
+  await extraTreasurer(browser, errors);
   await transferRole(browser, errors);
   await signInPrompt(browser, errors);
   await onboarding(browser, errors);

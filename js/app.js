@@ -510,7 +510,35 @@
     }
     contributePicker = null;
     modalTarget = { memberId, cycleNumber };
-    modalCount = 1;
+
+    // RESUBMITTING A REJECTED BATCH DEFAULTS TO THE WHOLE BATCH, not to one
+    // cycle. Reported from use: a member paid six cycles in one transfer, the
+    // treasurer rejected all six, and "Resubmit payment" opened a sheet set to
+    // ONE cycle. They submitted, one cycle went to review, and five stayed
+    // rejected — which the app then correctly but confusingly reported as
+    // still refused.
+    //
+    // The button offers to redo the rejection it was just shown beside, so it
+    // should offer to redo ALL of it. Reducing the count is still one tap, and
+    // then the five that are left really are still owed.
+    //
+    // Capped by maxAdvanceCount so this can never select a cycle that is
+    // already confirmed or awaiting review.
+    const rejected = C.latestRejection
+      ? C.latestRejection(state.contributions, memberId)
+      : null;
+    const inThisBatch =
+      rejected && rejected.cycles.indexOf(cycleNumber) !== -1
+        ? rejected.cycles.length
+        : 1;
+    const payable = C.maxAdvanceCount(
+      state.contributions,
+      memberId,
+      cycleNumber,
+      C.roundEndCycle(cycleNumber)
+    );
+    modalCount = Math.max(1, Math.min(inThisBatch, payable || 1));
+
     clearProofSelection();
     render();
   }
@@ -836,7 +864,7 @@
     return state.members.find((m) => m.id === accountMemberId) || null;
   }
 
-  /** THE ADMIN TEST — a Google-verified login that owns a member row carrying
+  /** THE ROLE TEST — a Google-verified login that owns a member row carrying
    *  `is_treasurer`. Not the same thing as `unlocked`.
    *
    *  `unlocked` means somebody typed the treasurer PIN, and that PIN is shared
@@ -2150,6 +2178,7 @@
     if (kind === "restore") return doRestoreBackup(ctx.data);
     if (kind === "unlink") return doUnlinkMember(ctx.memberId);
     if (kind === "transferRole") return doTransferRole(ctx.toId);
+    if (kind === "removeTreasurer") return doRemoveTreasurer(ctx.memberId);
   }
 
   // ===================================================================
@@ -3090,6 +3119,90 @@
    *  meaningless on a row no login owns — pf_is_treasurer() matches on
    *  auth_user_id, so flagging an unlinked row would create a fund with a
    *  treasurer nobody can be) and not already the treasurer. */
+  /** Everybody currently carrying the flag. Normally one; more than one is the
+   *  state a half-completed transfer leaves behind, and until now the app could
+   *  PRODUCE it without being able to fix it — the only route back was SQL,
+   *  which is exactly what this screen exists to avoid. */
+  function flaggedTreasurers() {
+    return sortedMembers().filter((m) => m.is_treasurer);
+  }
+
+  /** Take the flag off somebody who should not have it.
+   *
+   *  REFUSES TO REMOVE THE LAST ONE. Zero treasurers is the unrecoverable
+   *  direction: nobody can confirm a payment or release a payout, and nobody
+   *  can set the flag back either, because setting it requires already being
+   *  the treasurer. 011's preflight guards the same thing from the other side.
+   *
+   *  Your OWN flag is not removable here — stepping down is Transfer treasurer
+   *  role, which hands it to somebody in the same act rather than leaving the
+   *  fund one mistake from having none. */
+  function removeTreasurer(memberId) {
+    if (!isTreasurerAccount()) return; // exported handler; not the button
+    const flagged = flaggedTreasurers();
+    if (flagged.length < 2) {
+      return showError(
+        "This is the fund's only treasurer — removing them would leave nobody " +
+          "able to confirm a payment, and nobody able to undo it. Use Transfer " +
+          "treasurer role instead."
+      );
+    }
+    const me = editableMember();
+    if (me && String(me.id) === String(memberId)) {
+      return showError(
+        "To step down, use Transfer treasurer role — it hands the role to " +
+          "somebody in the same action."
+      );
+    }
+    const m = state.members.find((x) => String(x.id) === String(memberId));
+    if (!m) return;
+    openConfirm({
+      kind: "removeTreasurer",
+      ctx: { memberId: m.id },
+      title: `Remove ${m.name} as treasurer?`,
+      bodyHtml:
+        `<b>${escapeHtml(m.name)}</b> will no longer be able to confirm payments, ` +
+        `reject them, release payouts or change fund settings.<br><br>` +
+        `They stay a member of the fund — every payment, proof and payout record ` +
+        `is untouched. You remain the treasurer.`,
+      confirmLabel: `Remove ${m.name}`,
+      requirePin: true,
+    });
+  }
+
+  async function doRemoveTreasurer(memberId) {
+    if (busy || !isTreasurerAccount()) return;
+    // Re-checked at write time, not just when the button was drawn: the roster
+    // reloads every 30 seconds and the other treasurer may have resigned in
+    // the meantime, which would make this the last one.
+    if (flaggedTreasurers().length < 2) return;
+    const m = state.members.find((x) => String(x.id) === String(memberId));
+    if (!m) return;
+    busy = true;
+    render();
+    try {
+      await window.DB.updateMember(m.id, { is_treasurer: false });
+      await logActivity(`${m.name} is no longer a treasurer`, {
+        type: "admin",
+        memberId: m.id,
+      });
+      await reload();
+      const left = flaggedTreasurers();
+      if (left.length === 1) {
+        showSuccess(`${left[0].name} is now the fund's only treasurer.`);
+      } else {
+        // Says what is actually true rather than "done" — the same rule the
+        // transfer path follows.
+        showSuccess(`${m.name} removed. ${left.length} treasurers remain.`);
+      }
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+
   function transferCandidates() {
     return sortedMembers().filter((m) => m.auth_user_id && !m.is_treasurer);
   }
@@ -5317,12 +5430,18 @@
       // you?" control has to go. Leaving them would offer a choice the app
       // then ignores.
       identityLocked: accountState === "linked",
-      // Counts for the admin's "Member sign-in" row, so the menu can say how
+      // Counts for the treasurer's "Member sign-in" row, so the menu can say how
       // far the rollout has got without opening the panel.
       signInStatus: signInReadiness(),
-      // The ADMIN gate — a login that owns a row carrying is_treasurer. Not
-      // `unlocked`: that is the shared PIN, which every member has.
-      isAdmin: isTreasurerAccount(),
+      // A login that owns a member row carrying `is_treasurer`. NOT `unlocked`,
+      // which only means somebody typed the PIN the whole group shares.
+      //
+      // This used to be called `isAdmin`, which invented a role the app does
+      // not have: there is one flag, `members.is_treasurer`, and no separate
+      // admin above or below it. The owner reasonably asked where "admin"
+      // fell relative to "treasurer" — the answer was "they are the same
+      // seat", which a name should not have needed explaining.
+      isTreasurerAccount: isTreasurerAccount(),
       // Whose payout details the viewer may edit — their own, and only with a
       // linked account. Null means "offer to sign in", not "hide it".
       payoutOwner: editableMember(),
@@ -6339,7 +6458,7 @@
       </div>`;
     }
 
-    // ADMIN: the addresses a Google login is matched against, and who has
+    // FLAGGED TREASURER: the addresses a login is matched against, and who has
     // actually signed in. Gated on isTreasurerAccount(), NOT on `unlocked` —
     // the treasurer PIN is shared with all five members, so gating this on the
     // PIN would let any of them put their own address on somebody else's row.
@@ -6441,6 +6560,41 @@
             the PIN. Move it here and the new treasurer can really confirm
             payments and release payouts — telling someone the PIN does not do
             that.</p>
+          ${
+            // MORE THAN ONE TREASURER. A half-completed transfer leaves this
+            // state deliberately — it is the recoverable half — but nothing
+            // could recover it until now, so it meant SQL. Surfaced here
+            // because this is the screen about the role, and 011's preflight
+            // refuses to lock a fund down while it holds.
+            (function () {
+              const extras = flaggedTreasurers().filter(
+                (m) => !me || String(m.id) !== String(me.id)
+              );
+              if (!extras.length) return "";
+              return `<div class="transfer-extra">
+                <p class="transfer-extra-title">${icon("alert", 14)}<span>${
+                extras.length === 1 ? "Someone else is" : extras.length + " others are"
+              } also flagged as treasurer</span></p>
+                <p class="transfer-extra-note">They have the same access you do —
+                  confirming payments, releasing payouts, changing fund settings.
+                  Migration 011 also refuses to lock the fund down while more
+                  than one is flagged.</p>
+                ${extras
+                  .map(
+                    (m) => `<div class="transfer-extra-row">
+                      ${memberAvatar(m.name, "idle", 26, m.avatar_url)}
+                      <span class="transfer-extra-name">${escapeHtml(m.name)}</span>
+                      <button type="button" class="transfer-extra-remove"
+                        onclick="PowerFund.removeTreasurer('${String(m.id).replace(
+                          /'/g,
+                          "\\'"
+                        )}')" ${busy ? "disabled" : ""}>Remove</button>
+                    </div>`
+                  )
+                  .join("")}
+              </div>`;
+            })()
+          }
           ${
             me
               ? `<p class="transfer-current">${icon("unlocked", 13)} Currently
@@ -7183,6 +7337,7 @@
     closeTransferRole,
     pickTransferRole,
     confirmTransferRole,
+    removeTreasurer,
     openEditNamesModal,
     openMemberAccountsModal,
     closeMemberAccountsModal,

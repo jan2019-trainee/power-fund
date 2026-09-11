@@ -661,7 +661,20 @@ body {
 .member-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .member-chip.editable { cursor: pointer; }
 .member-chip.paid { background: var(--success-soft); border-color: var(--success); color: var(--success); }
-.member-chip.pending { background: rgba(245,166,35,0.16); border-color: var(--accent); color: var(--accent); }
+/* Purple, like every other "awaiting the treasurer" surface: .my-status-pending,
+   .acct-pill.wait, .stat-value.pending and the Insights donut's "In review"
+   slice all use --pending-review. This chip was the lone amber one, so the
+   same payment read as one colour in the cycle grid and another in Insights.
+   Reported from use, and fair — the app teaches these colours by repetition.
+
+   NOT changed: .round-state.pending is "Payout Pending", a ROUND lifecycle
+   state rather than a payment awaiting review. Amber is right there, and
+   making it purple would claim the two mean the same thing. */
+.member-chip.pending {
+  background: var(--pending-review-soft);
+  border-color: var(--pending-review);
+  color: var(--pending-review);
+}
 .member-chip.overdue { border-color: #E15353; color: #E15353; background: rgba(225,83,83,0.1); }
 /* Rejected: same danger hue as overdue, but struck through so the two read
    apart at a glance — one was never sent, the other was sent and refused. */
@@ -1248,6 +1261,64 @@ body {
 .transfer-role-modal h3,
 .transfer-role-modal .modal-sub { text-align: center; }
 .transfer-role-modal .modal-sub { margin-bottom: 12px; }
+
+/* More than one treasurer flagged — a state the app can reach (a transfer
+   whose second write did not land) and, until this, could not leave. Red
+   rather than amber: it is not a step to take later, it is two people holding
+   the same money permission. */
+.transfer-extra {
+  background: var(--danger-soft);
+  border: 1px solid rgba(225, 83, 83, 0.35);
+  border-radius: 12px;
+  padding: 11px 12px;
+  margin: 0 0 12px;
+}
+.transfer-extra-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 5px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.transfer-extra-title svg { color: var(--danger); flex-shrink: 0; }
+.transfer-extra-note {
+  margin: 0 0 9px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.transfer-extra-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 0;
+}
+.transfer-extra-row + .transfer-extra-row { border-top: 1px solid var(--border); }
+.transfer-extra-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.transfer-extra-remove {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid rgba(225, 83, 83, 0.45);
+  border-radius: 8px;
+  color: var(--danger);
+  font-family: 'Inter', sans-serif;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 5px 11px;
+  cursor: pointer;
+}
+.transfer-extra-remove:hover:not(:disabled) { background: rgba(225, 83, 83, 0.14); }
+.transfer-extra-remove:disabled { opacity: 0.5; cursor: default; }
 
 .transfer-current {
   display: flex;
@@ -3733,6 +3804,24 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   /* A treasurer's note is free text: let it wrap rather than overflow. */
   overflow-wrap: anywhere;
 }
+/* "Cycle 1 is with the treasurer for review." — purple, the same as every
+   other awaiting-review surface, sitting inside the red card so a partial
+   resubmission is visible rather than buried. */
+.rejected-inreview {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 9px 0 0;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: var(--pending-review-soft);
+  color: var(--pending-review);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+.rejected-inreview svg { flex-shrink: 0; }
+
 .rejected-hint { margin: 0 0 11px; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
 .rejected-cta {
   display: flex;

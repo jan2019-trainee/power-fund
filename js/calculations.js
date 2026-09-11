@@ -563,14 +563,39 @@ window.Calc = (function () {
         }
       }
       if (open === null) {
-        out.paid.push(m.id);
+        out.paid.push(m.id); // every cycle of the round confirmed
         continue;
       }
       const st = statusOf(contributions, m.id, open);
       if (st === STATUS_PENDING) out.pending.push(m.id);
       else if (st === STATUS_REJECTED) out.rejected.push(m.id);
       else if (isOverdue(contributions, cycles, m.id, open)) out.overdue.push(m.id);
-      else out.notDue.push(m.id);
+      else {
+        // Their earliest unsettled cycle is not due yet, so they owe nothing
+        // RIGHT NOW — but that covers two different people, and lumping them
+        // together is what made this wrong:
+        //
+        //   somebody who has paid what has come due so far, and
+        //   somebody who has paid nothing at all.
+        //
+        // "paid" used to mean all SIX cycles of the round, which no member can
+        // reach until a round is nearly over — so the slice was dead for most
+        // of a round's life and a member who had genuinely paid and been
+        // confirmed was reported as "Not due yet". Reported from use, and
+        // fair: they had paid, and the chart said they had done nothing.
+        //
+        // `paid` now means NOTHING OUTSTANDING. It degrades correctly: at the
+        // end of a round, square and all-six are the same thing.
+        let anyPaid = false;
+        for (let c = startCycle; c < open; c++) {
+          if (statusOf(contributions, m.id, c) === STATUS_PAID) {
+            anyPaid = true;
+            break;
+          }
+        }
+        if (anyPaid) out.paid.push(m.id);
+        else out.notDue.push(m.id);
+      }
     }
     return out;
   }

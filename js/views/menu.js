@@ -18,7 +18,7 @@ window.PFViews = window.PFViews || {};
 window.PFViews.menu = function (ctx) {
   const {
     members, unlocked, myMember, escapeHtml, icon, memberAvatar, C, hasMasterPin,
-    authMode, sessionEmail, identityLocked, signInStatus, isAdmin,
+    authMode, sessionEmail, identityLocked, signInStatus, isTreasurerAccount,
     payoutOwner, maskAccount
   } = ctx;
 
@@ -50,10 +50,10 @@ window.PFViews.menu = function (ctx) {
         <div>
           <div class="mode-card-title">Treasurer mode</div>
           <div class="mode-card-note">${
-            // Says WHY it is open. An admin did not type anything, and
+            // Says WHY it is open. A flagged treasurer did not type anything, and
             // "Unlocked on this device" would misdescribe a permission that
             // actually follows their account across devices.
-            isAdmin && identityLocked
+            isTreasurerAccount && identityLocked
               ? "Open because you're signed in as the fund's treasurer"
               : "Unlocked on this device"
           }</div>
@@ -96,10 +96,10 @@ window.PFViews.menu = function (ctx) {
           ? "The group's way back in if the treasurer PIN is forgotten"
           : "Not set — there is currently no way back from a forgotten PIN"
       ),
-      // ADMIN ONLY. The role is `members.is_treasurer`, which Postgres checks
+      // FLAGGED TREASURER ONLY. The role is `members.is_treasurer`, which Postgres checks
       // and the PIN cannot express — so handing over the PIN hands over the
       // buttons and none of the power once migration 011 is applied.
-      ...(isAdmin
+      ...(isTreasurerAccount
         ? [
             row(
               "users",
@@ -113,7 +113,7 @@ window.PFViews.menu = function (ctx) {
         "lock",
         "Lock treasurer mode",
         "PowerFund.toggleUnlock()",
-        isAdmin && identityLocked
+        isTreasurerAccount && identityLocked
           ? "See the app as a member does. Tap Treasurer to come back — no PIN"
           : undefined
       ),
@@ -246,12 +246,12 @@ window.PFViews.menu = function (ctx) {
         );
       }
     }
-    // ADMIN ONLY — gated on isAdmin (a login owning a row with is_treasurer),
+    // FLAGGED TREASURER ONLY — gated on isTreasurerAccount (a login owning that row),
     // not on `unlocked`. The treasurer PIN is shared with all five members by
     // design, so gating this on the PIN would let any of them put their own
     // address on somebody else's row. Deciding WHO CAN SIGN IN is not a
     // day-to-day treasurer tool; it is administration.
-    if (isAdmin) {
+    if (isTreasurerAccount) {
       const st = signInStatus || { total: 0, withEmail: 0, linked: 0 };
       account.push(
         row(

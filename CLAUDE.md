@@ -688,6 +688,320 @@ The full chip vocabulary: green paid · purple in review · **red solid
 overdue** · **red dashed rejected** (sent and refused, versus never sent) ·
 plain not-due-yet.
 
+## The first independent UI/UX QA pass, and what it found
+
+Run per the QA Gate, by a separate reviewer working from `UX_QA_AGENT.md`,
+against `design/`, the source, and 115 real captures. Verdict: **NEEDS
+REVISION** — 1 P0, 5 P1, 16 P2, 16 P3. Every finding below was verified
+against the code before acting on it. **Closed so far:**
+
+**P0 — a confirmed payment could be reverted inside a round already paid out.**
+`markPayoutReleased()` gates release on `isRoundFunded()`, so the app asserted
+funded-implies-released in ONE direction and let the other be broken silently.
+Two taps produced a round badged *Completed* at ₱28,000 / ₱30,000 with a
+₱30,000 payout on record against it — no warning at the moment of the change,
+no marker afterwards, and the contribution only recoverable from `activity_log`.
+`tests/mock-data.js` is already in that state (Verdz is short on cycles 5–6 of
+round 1, which is released), which is what made the marker testable.
+
+- `revertBreaksReleasedRound()` **refuses** rather than double-confirming: the
+  correct order already exists and every step of it is built — Undo Release,
+  revert, release again.
+- Checked where the panel opens AND in `doRevertContribution()`. `cellClicked`
+  is exported on `PowerFund`, so an untappable chip is not the gate.
+- **A fund that already got there now SAYS so** — `.payout-shortfall` names the
+  gap on any round that is `released && !isRoundFunded()`. Being wrong quietly
+  was the worse half of this.
+
+**P1 — the destructive confirm button was never disabled.** `menu-pin-notes`
+names this property explicitly: *"type RESET AND enter the PIN before 'Reset
+everything' enables — genuinely disabled/enabled live based on both fields."*
+It was disabled only while `busy`, so "Reset everything" rendered as a
+saturated red primary on an empty dialog. `submitConfirm()` did validate, so
+nothing was destroyed — but an invisible gate teaches the treasurer to press
+first and read second, on the screen that wipes every contribution.
+`confirmGateUnmet()` now drives the attribute, patched by hand on input rather
+than via `render()` (which would eat the caret). The PIN is checked for
+PRESENCE there and for CORRECTNESS in `submitConfirm()`: the button must not
+become the gate.
+
+**P1 — the round-lifecycle palette disagreed three ways.** Collecting was green
+on Rounds and amber on the desktop Home strip; Completed was green in both, so
+Collecting and Completed — the two most opposed states — shared a colour and
+were told apart only by their word; and the strip painted Payout Pending in
+`--pending-review`, which is exactly the claim the `.member-chip` note refuses
+to make. **One palette now**: amber for the two in-flight states (a real
+progression), an inset outline separating pending from collecting, green only
+for done. The payment vocabulary is untouched — that work was correct.
+
+Also closed: **"Undo" → "Undo Release"** on the round accordion (P2-14), which
+sat on the same screen as "Undo confirmation" with no way to tell the scope of
+the tap apart.
+
+**Every one of these passed the suite before the fix, because nothing asserted
+the behaviour at all.** The 12 new checks were run against the unfixed code
+first: 7 failed. Two initially passed in BOTH directions and were rewritten —
+one was a false pass (`/short/` matched the sentinel string "(no
+.payout-shortfall rendered)"), the other called `cellClicked(null, …)`, a
+no-op. A check that cannot fail is not a check.
+
+**P1 — money actions were gated on `unlocked`, the SHARED PIN.** 011 keys every
+money write off `members.is_treasurer`; only the five ADMIN surfaces had been
+moved. Confirm, reject, revert, record-as-paid and release still checked the
+PIN, so four of five members were invited into a mode where Postgres refuses
+every write — and found out by pressing Confirm on a real claim.
+
+**The obvious fix would have broken the app, and this is the part to keep.**
+The predicate is NOT `!isTreasurerAccount()`: that is false whenever the app
+cannot identify the viewer AT ALL — auth off, signed out, a link that broke —
+and a fund on `AUTH_MODE` `"off"` still has flagged members, so keying off it
+would disable every money action for a legitimate treasurer with no session.
+`moneyWritesRefused()` acts only on a viewer it can POSITIVELY identify as
+somebody other than the treasurer, the same direction `canUnlockTreasurer()`
+takes, with the same nobody-flagged escape hatch. A test asserts the
+auth-off direction, which is the one that would have taken the fund down.
+
+The note is shown in Review Payment before the press, both buttons are
+disabled, and all five handlers refuse — they are exported on `PowerFund`, so
+a disabled button is not the gate.
+
+### The two product decisions, taken by the owner
+
+- **The Release Payout amount stays FIXED** at `GOAL_PER_ROUND`, against
+  `payout-release-notes` ("stays editable … historical record only"). Recorded
+  here rather than left as an unexplained deviation. `payouts.amount` is a
+  restatement of the goal, not a record of what was transferred — so a bank fee
+  or a partial send is not expressible, and release is funded-gated so the
+  round always held at least that much when it went out. The dead doc-comment
+  describing the removed parser is deleted.
+- **Home's whole-fund block is DEMOTED to one line**, per the design's
+  "split out of Home so the dashboard stays glanceable" (`rounds-notes`); no
+  Home artboard carries a whole-fund meter. **The QA report's stated reason was
+  wrong and it is worth knowing why**: it said the block "carries the largest
+  type on the screen". Measured, `.battery-amount` is **30px** against
+  `.fund-total-amount`'s **16px** — the hero already won on size, and the code
+  comment claiming it was demoted was accurate. What actually outranked the
+  hero was SHAPE and POSITION: a three-line block with its own progress bar,
+  sitting first. So the fix is the shape, not the type — one line, and the
+  second progress bar is gone, because two meters in one scroll read as a
+  fault rather than as two questions.
+
+### The P2 pass — all 16 closed
+
+Mostly consistency, but four were real defects wearing a P2 label:
+
+- **P2-1, the chip affordance was INVERTED.** The mark was
+  `unlocked && status !== 0` — on the chips already settled, withheld from the
+  unpaid ones, on both sides of the gate. A member's own payable chip carried
+  only `cursor: pointer`, which does nothing on a phone: the one action they
+  came for was invisible while the four chips they may not tap looked identical
+  to it. It now goes on `clickable`. And it is **no longer `border-style`** —
+  dashed already means "sent and refused", so the old hover flipped dashed to
+  SOLID and turned a rejected chip momentarily into an overdue one (P3-11).
+  An inset ring in the chip's own colour instead.
+- **P2-2, the payment QR had no height bound.** A full phone screenshot of a
+  GCash QR renders 476px tall at 220px wide, pushing the amount, stepper, proof
+  upload and "I've sent this" off a 92vh sheet. `max-height: 220px` +
+  `object-fit: contain`; the lightbox is how you read a dense code.
+- **P2-10, Start Round N outweighed Release Payout.** `css/style.css` carries a
+  comment at `.payout-btn` setting exactly that hierarchy — and a later pass
+  gave `.contribute-btn` a gradient primary with a drop shadow, which outranks
+  `.payout-btn`'s flat accent. So the non-urgent action came to look more urgent
+  than sending somebody their ₱30,000. Its own `.start-round-btn` now.
+- **P2-9, the terminal screen read differently by role.** `S.complete` was
+  pulled ahead of the personal card for a treasurer by the rule about the
+  attention QUEUE outranking it — but when the fund is complete there is no
+  queue and no release (both gated on `!allDone`), so all that rule did was
+  give the treasurer a different reading order on the last screen the group
+  ever sees. The duplicated-and-clipped sentence is gone too: the status card
+  carries the receipt, the green card carries the fund total and your on-time
+  record. Fixing it once moved the duplication down a card rather than removing
+  it, which the screenshot caught.
+
+The rest: the schedule modal's warning and live error moved ABOVE its list with
+sticky actions (they were below a 50vh list, and the error carries
+`role="alert"` so it was announced while invisible) and two columns at ≥900px;
+desktop Menu is the 2-column settings page `desktop-notes` asks for, with the
+danger zone as a full-width band — the groups are one element each now, which
+is what made the grid possible; desktop Members opens populated; exports are
+treasurer-only on all three surfaces that disagreed; roster tag colours
+un-inverted; "In review" is the single label for that state; a negative amount
+in the activity log is always a signed debit (a revert is logged with
+`refStatus: STATUS_UNPAID`, which routed it into the unsigned branch); Day One
+no longer renders beside All-caught-up; and the reset dialog no longer promises
+to keep a PIN the fund does not have.
+
+**P2-15: the 640px breakpoints moved to 899px.** Three breakpoints disagreed
+about what device this is — the shell switches at 900px, but the sheet
+treatment and the 44px touch targets both stopped at 640px. So 641–899px (iPad
+portrait, a phone in landscape) got the thumb-reach tab bar with mouse-sized
+hit areas and desktop-positioned centre modals. No check had ever run in that
+band; `tabletBand` does now, and 768px is captured.
+
+### The P3 pass — closed, with two findings corrected
+
+Polish, mostly. Three were not:
+
+- **P3-14 was reported as "the trend delta is missing" and the fixtures blamed.
+  The fixtures were fine.** `trendHtml` required the CURRENT round to have
+  dated payments, and a round that has just started never does — so the delta
+  was invisible for most of every round's life, which is why neither capture
+  showed one. It now compares **the two most recent rounds that actually have a
+  rate**. It also NAMES both ("R3 ↑4pts vs R2"): the tile's value is the
+  LIFETIME rate, so a bare "↑4pts" beside it read as a delta on that figure,
+  which is not what was being measured.
+- **P3-6's colour half is NOT a defect and was left alone.** The report called
+  the gold 100% battery a vocabulary clash. `HomeFundComplete.dc.html` uses
+  `#F5A623` nineteen times and `#4CAF83` once — the artboard's fund-complete
+  screen is amber by design. What WAS real is the icon: the status card used
+  `party`, the same glyph as Menu's "Replay the intro", so a terminal state
+  shared an icon with a how-to-use-the-app link. It is `check` now, matching
+  the green card beside it.
+- **P3-8's "not vertically centred" is wrong** — `.signin` is
+  `min-height: 100vh` with `align-items: center`, and the block measures
+  centred. The real gap was the composition: a 320px mobile column on a 1440px
+  canvas, where `DesktopOnboardingWelcome.dc.html` — which this screen says it
+  borrows — is a **520px** centred column, and the app's own onboarding already
+  does 520px here. **Adding the artboard's two corner glows was a mistake and
+  was reverted**: they already exist app-wide as `body::before` / `body::after`
+  (`position: fixed`), and a second pair inside `.signin` (which is
+  `overflow: hidden`) clipped each blurred circle into a hard rectangular seam
+  across the page. Caught in the screenshot, not the tests.
+
+The rest: the Activity sub-line drops "loaded" (a developer's word for a fetch)
+and the count entirely when nothing is filtered; an empty log offers no filter
+chips and no export of nothing; the hidden-rows note arrives **quiet** and only
+becomes an alert once the viewer narrows the filters themselves — it fired on
+arrival because the round filter defaults to the current round; Rounds carries
+ONE badge per header with the current round marked on the card instead
+(`.round-active-tag` is deleted, not orphaned); the desktop Rounds strip marks
+which round is collecting; `.acct-pill.wait` is amber, not the payment-review
+purple; the Day One card is neutral rather than an attention treatment; the
+`.pin-input` 4px tracking no longer applies to PLACEHOLDERS ("T r e a s u r e r
+P I N" read as a rendering fault); the member Menu's explainer is a `<details>`
+on the phone and stays open in the desktop column; and the schedule modal has
+**Reset changes** plus `past` dimming that refreshes — it was computed once at
+render, so a cycle shifted out of the past stayed greyed on the screen whose
+job is moving dates.
+
+**One substitution worth knowing.** `DesktopHomeMember.dc.html`'s second quick
+action is "View payment QR code". That is NOT built: `openQrModal()` is the
+treasurer's MANAGE screen, the QR a member needs is already in the contribute
+sheet at the moment they need it, and a read-only twin of a treasurer screen is
+more surface than the gap deserves. **My payout details** is there instead —
+member-facing, already built, and gated on a linked account. Recorded as a
+substitution, not as the artboard's row.
+
+The status card also gained the artboard's **"Submitted N ago"**, which is the
+one thing on it a member cannot work out for themselves: without it there is no
+telling a claim sent an hour ago from one sitting unreviewed for a week.
+
+### The evidence gap the pass exposed
+
+The reviewer could not judge **My payout details** or **Onboarding** — both
+declared ports — because neither appears in the 115 captures, along with Edit
+Profile, Change Photo, Share, Toasts, the restore states, the lightbox and the
+account dead-ends. `tests/qa-capture.js` pins `AUTH_MODE` to `off`, and those
+surfaces need a linked account. Anything marked **J** in the report is
+unreviewed, not approved.
+
+## Two PIN dead ends, both made by the PIN-free unlock
+
+Both existed because the PIN rules were written when treasurer mode could only
+be entered BY TYPING A PIN — so a PIN always existed, and you always knew it.
+A Google-verified treasurer now unlocks without one, and neither rule was
+revisited.
+
+**1. A fund with no treasurer PIN at all.** The verified treasurer unlocks,
+nothing anywhere mentions that no PIN exists, and then Reset all data / Transfer
+role / Remove treasurer present a PIN field. Every entry answered **"Incorrect
+PIN"** — perfectly true and completely useless, since the correct PIN was no
+digits at all.
+
+- The confirm dialog now detects it and **offers the way out instead of an
+  input that cannot be satisfied**: an amber `.confirm-no-pin` note and a
+  "Set a treasurer PIN" button (`startPinForConfirm()`) in place of the
+  destructive one.
+- **The missing-PIN check runs BEFORE the type-to-confirm check** in
+  `submitConfirm()`. The render hides the RESET field in this state, so the
+  other order would refuse with "Type RESET exactly to confirm" about a field
+  that is not on screen.
+- The type-to-confirm field is hidden too — typing RESET into a dialog that
+  cannot be submitted is busywork.
+- **It does NOT resume the action afterwards.** Re-confirming a reset on
+  purpose costs one tap; auto-resuming a destructive action after a detour is
+  not a thing to build.
+- Menu → Security now reads **"Set a treasurer PIN"** with a note naming the
+  three actions that need it, mirroring what the master-PIN row already did.
+  Nothing else in the app would ever have mentioned the absence.
+
+**2. The master PIN could unlock the lockout but never END it.** This one was
+worse, because the app *instructed* people into it: unlocking with the master
+PIN shows *"Set a new treasurer PIN from Menu → Change PIN so the group can use
+their own again"* — and `openChangePin()` opened by demanding the current
+treasurer PIN, the very one they had just proved they had forgotten. The master
+PIN exists for exactly this situation and could not finish the job.
+
+`changeNeedsCurrentPin()` is now the single rule, used by the flow AND by the
+progress bar so a two-step flow cannot draw three dots: prove the current PIN
+unless there is none, **or you are in on the master PIN this session**
+(`unlockedViaMaster`, set only after a successful database check). Not a new
+permission — `pf_set_pin` already allows it, and the app already promised it.
+A test asserts the control case: an ordinary PIN unlock still proves the
+current PIN, or anyone holding an unlocked phone could lock the group out.
+
+## The payment schedule is editable now (Menu → Group → Payment schedule)
+
+Found while auditing what "complete" was hiding. `cycles.due_date` has existed
+since the first schema, and all 30 dates are written **once** by
+`supabase/seed.sql`, generated two and a half years ahead. Nothing in `js/`
+ever wrote them — every reference was a read, and `schema.sql`'s own comment
+says *"edit freely"*, meaning in SQL.
+
+Those dates are not decoration. They drive `isOverdue()`, every red chip, the
+treasurer's attention queue and the share text. A paluwagan slips — somebody's
+salary is late, a round starts two weeks after the last one closed — and the
+app then confidently accused people of being late with the only fix being the
+Supabase SQL editor. The same shape of gap the Member sign-in panel was built
+to close for emails, on data that makes accusations about people.
+
+Category: **UI Only**. **No migration** — 011's `cycles_treasurer` already
+permits the write.
+
+- **Gated on `isTreasurerAccount()`, not on `unlocked`.** 011 keys the policy
+  off `members.is_treasurer`, which the shared PIN cannot express, so a
+  PIN-gated row would offer the other four a button Postgres refuses. Checked
+  in the menu row, in the render branch and in both handlers — `openScheduleModal`
+  and `saveSchedule` are exported on `PowerFund`, so the absent row is not the
+  gate. (The bootstrap fallback inside `isTreasurerAccount()` stands: with
+  nobody flagged, 011 is not in force either.)
+- **"Move later cycles too", on by default.** The real use case is "round 3
+  started two weeks late", which is 28 edits by hand — the kind of chore that
+  leaves a feature unused and the schedule wrong. It also keeps the ordering
+  correct for free.
+- **The shift measures from the last VALID date, not the previous draft.** A
+  date input empties itself between segments when edited with the keyboard
+  (`"2026-10-15"` → `""` → `"2026-11-15"`), so measuring against the draft saw
+  a move out of nothing and skipped the shift for anyone not using the picker.
+  Found while writing the test, not in the browser.
+- **Strictly increasing is ENFORCED**, and it is a technical invariant rather
+  than an invented business rule: `currentCycle()` returns the first cycle in
+  number order whose date has not passed, while `completedCyclesCount()` counts
+  every cycle whose date has. Out of order those two disagree and the app shows
+  one cycle as current while counting a later one as done.
+- **Moving a settled cycle is WARNED, never blocked.** `onTimeStats()` judges
+  `paid_at <= due_date`, so moving a cycle that already has confirmed payments
+  rewrites who is on record as having paid on time. A schedule that genuinely
+  slipped should still move — the screen names the affected cycles instead of
+  refusing, and refusing would be inventing a rule nobody asked for.
+- `updateCycleDueDates()` sends **only `due_date`**, row by row. An upsert would
+  need every NOT NULL column back in the payload, and sending `cycle_number`
+  with it is how a typo renumbers the schedule. `requireRows()`, not `.single()`
+  — the tenth place that bug could have landed.
+- **No approved mockup exists for this screen.** It borrows the established
+  `.modal` treatment the way Edit member names does. Flagged for UI/UX QA as
+  new design, not as a port.
+
 ## Migrations
 
 Run in the Supabase SQL editor, in order. `006` also needs a one-off
@@ -863,10 +1177,12 @@ exported handlers — is gated on it, never on `unlocked`.
   would hand one-tap treasurer mode to any member who simply skips sign-in —
   and until 011 is applied, treasurer mode in the UI is real write access to
   every table. A test asserts both halves.
-- **Destructive actions still ask for the PIN** (Reset all data, Restore,
-  Undo release, Transfer role). Left as-is on purpose. Open question worth
-  revisiting: a treasurer who never sets a PIN cannot satisfy them, since the
-  unlock flow is no longer where a PIN gets created.
+- **Three actions still ask for the PIN**, and the list matters because an
+  earlier version of this note had it wrong: **Reset all data**, **Transfer
+  treasurer role** and **Remove treasurer**. Restore and Undo release do NOT
+  (Restore asks you to type REPLACE; Undo release asks neither). Grep
+  `requirePin: true` before repeating any list of them.
+  **The dead end this created is now closed** — see "Two PIN dead ends" above.
 - **Consequence to remember:** the "You are / Edit" profile card lives in the
   member branch of the Menu, so an auto-unlocked admin does not see it. Their
   route to their own name and photo is Menu → Account → **Edit my profile**,
@@ -1192,6 +1508,11 @@ which would have read as migration bugs:
   real Supabase grants. Without it every policy denies for the wrong reason —
   and that is a false PASS on every DENY assertion, which is the dangerous
   direction.
+- **`run()` only sniffed `UPDATE n`, so every DELETE assertion passed blind.**
+  RLS refuses a DELETE the same way it refuses an UPDATE — `DELETE 0`, no
+  error — so the helper saw no error, no zero-row UPDATE, and reported OK.
+  Found by adding the first DELETE case (cycles); it now reads both verbs.
+  Any DENY result recorded before this that was a DELETE proved nothing.
 
 Bump `CACHE` in `sw.js` on every deploy that changes the shell.
 

@@ -168,7 +168,13 @@ window.PFViews.home = function (ctx) {
       // which made the most common state (nothing to do) the tallest thing on
       // the screen.
       const optional = myStatus.kind === "paid";
-      return `<div class="my-status-card my-status-${myStatus.kind}">
+      // DesktopHomeMember.dc.html titles this card "Your status this cycle".
+      // On the phone it sits directly under the header with nothing to be
+      // confused with, and the artboards there carry no heading — so this is
+      // the wide shell only, as with everything else in the right rail.
+      return `${
+        isWide ? '<p class="home-panel-title my-status-head">Your status this cycle</p>' : ""
+      }<div class="my-status-card my-status-${myStatus.kind}">
         <div class="my-status-row">
           ${
             myStatus.mark
@@ -182,6 +188,10 @@ window.PFViews.home = function (ctx) {
             ${
               myStatus.detail
                 ? `<span class="my-status-detail">${escapeHtml(myStatus.detail)}</span>`
+                : ""
+            }${
+              myStatus.since
+                ? `<span class="my-status-since">${escapeHtml(myStatus.since)}</span>`
                 : ""
             }
           </span>
@@ -273,33 +283,38 @@ window.PFViews.home = function (ctx) {
     const remaining = C.remainingAmount(state.contributions);
     const overallPct = Math.round(C.progressPercentOverall(state.contributions));
     const pendingPesos = C.pendingTotal(state.contributions);
-    // Scope has to be on the label. The hero directly below shows the CURRENT
-    // ROUND's progress, and the design carries only that one hero — two
-    // unlabelled progress bars reading 20% and 0% within a single scroll look
-    // like a fault rather than two questions. Demoted to a strip in CSS so the
-    // hero stays the primary answer; the lifetime total is worth keeping, just
-    // not worth competing.
-    return `<div class="fund-total">
-      <p class="fund-total-label">Whole fund · all ${C.TOTAL_ROUNDS} rounds</p>
-      <div class="fund-total-amount">${C.peso(collected)} <span>/ ${C.peso(
-      C.TARGET_AMOUNT
-    )}</span></div>
-      <div class="fund-total-bar"><div class="fund-total-fill" style="width:${Math.min(
-        100,
-        Math.max(0, overallPct)
-      )}%"></div></div>
-      <div class="fund-total-meta">${
-        C.allRoundsComplete(state.contributions, rounds)
-          ? "Fund complete"
-          : `${overallPct}% collected · <b>${C.peso(remaining)}</b> to go`
-      }${
+    // ONE LINE, AND NO SECOND PROGRESS BAR.
+    //
+    // The type was never the problem — .battery-amount is 30px against this
+    // block's 16px, so the hero already won on size (measured, after an
+    // independent QA pass reported the opposite). What made this outrank the
+    // hero was SHAPE and POSITION: a three-line block with its own progress
+    // bar, sitting first, above the round the member can actually act on.
+    //
+    // rounds-notes: Rounds was "split out of Home so the dashboard stays
+    // glanceable", and no Home artboard carries a whole-fund meter at all.
+    // The lifetime total is still worth knowing — it is just a footnote to
+    // the round, not a competitor to it. The bar is gone because the hero
+    // directly below is a progress meter, and two of them in one scroll read
+    // as a fault rather than as two questions.
+    const pendingClause =
       pendingPesos > 0
-        ? ` <span class="fund-total-pending">+ ${C.peso(
+        ? ` · <span class="fund-total-pending">+${C.peso(
             pendingPesos
-          )} awaiting review</span>`
-        : ""
-    }</div>
-    </div>`;
+          )} in review</span>`
+        : "";
+    return `<p class="fund-total">
+      <span class="fund-total-label">Whole fund</span>
+      ${
+        C.allRoundsComplete(state.contributions, rounds)
+          ? `<b>${C.peso(collected)}</b> of ${C.peso(
+              C.TARGET_AMOUNT
+            )} · all ${C.TOTAL_ROUNDS} rounds complete`
+          : `<b>${C.peso(collected)}</b> of ${C.peso(
+              C.TARGET_AMOUNT
+            )} · ${overallPct}% · ${C.peso(remaining)} to go`
+      }${pendingClause}
+    </p>`;
   })();
 
   // Rounds whose payout is funded and unreleased. Computed once, up here,
@@ -333,9 +348,6 @@ window.PFViews.home = function (ctx) {
         // on-time only counts contributions that carry a paid_at.
         myMember
           ? (function () {
-              const mine = getPayout(myMember.member_order);
-              const amount =
-                mine && mine.amount != null ? mine.amount : C.GOAL_PER_ROUND;
               const st = C.onTimeStats(state.contributions, state.cycles, myMember.id);
               const paidLine =
                 st.counted === 0
@@ -343,9 +355,12 @@ window.PFViews.home = function (ctx) {
                   : st.onTime === st.counted
                   ? `You made all ${st.counted} of your dated contributions on time.`
                   : `You paid ${st.onTime} of ${st.counted} dated contributions on time.`;
-              return `<p class="fund-complete-personal">You received <b>${C.peso(
-                amount
-              )}</b> in Round ${myMember.member_order}. ${escapeHtml(paidLine)}</p>`;
+              // The RECEIPT half lives on the status card above (app.js's
+              // myStatus, kind "done"), so this carries only the record it
+              // does not — how you paid in. Saying "You received ₱30,000 in
+              // Round 2" in both places is the same duplication that was just
+              // removed, moved down one card.
+              return `<p class="fund-complete-personal">${escapeHtml(paidLine)}</p>`;
             })()
           : ""
       }
@@ -370,6 +385,14 @@ window.PFViews.home = function (ctx) {
       // A payout is sitting there ready to send. "All caught up" immediately
       // under that card would contradict it, so the release card speaks for
       // itself and this panel stays out of the way.
+    } else if (nothingWaiting && nothingYet) {
+      // DAY ONE ALREADY SAID IT, and said it better. all-caught-up-notes is
+      // explicit that the panel is "distinct from Day One's one-time empty
+      // state, since this is mid-fund with an active, partly-funded round" —
+      // and DesktopHomeDayOne is its own artboard. Both rendered together, with
+      // "No payments waiting for review, nothing overdue, and no payout to
+      // release" being technically true and useless on a fund where nothing
+      // has ever happened.
     } else if (nothingWaiting) {
       // Nothing waiting. Say so explicitly — an absent panel is ambiguous
       // (is it clear, or did it fail to load?), and a caught-up queue is
@@ -475,8 +498,15 @@ window.PFViews.home = function (ctx) {
                      busy ? "disabled" : ""
                    }>Start Round ${nextRound}</button>
                  </div>`
-              : `<p class="attention-group-label">▶ Round ${nextRound} is ready to start</p>
-                 <button class="contribute-btn" onclick="PowerFund.askStartNextRound()">Start Round ${nextRound}</button>`
+              : // NOT .contribute-btn. treasurer-funded-notes subordinates this
+                // deliberately — Release Payout leads and Start Next Round is
+                // the quieter line inside it — and css/style.css says so at
+                // .payout-btn. But a later pass gave .contribute-btn a full
+                // gradient primary with a drop shadow, which outweighs
+                // .payout-btn's flat accent: Start Round ended up looking more
+                // urgent than sending somebody their ₱30,000.
+                `<p class="attention-group-label">▶ Round ${nextRound} is ready to start</p>
+                 <button class="start-round-btn" onclick="PowerFund.askStartNextRound()">Start Round ${nextRound}</button>`
           }
         </div>`;
       }
@@ -617,7 +647,11 @@ window.PFViews.home = function (ctx) {
       pendingCount || overdueCount
         ? `<div class="cycle-note">${
             pendingCount
-              ? `<b style="color:var(--accent)">${pendingCount} pending treasurer review</b>`
+              ? // Purple and "in review", like every other surface. This was
+                // the last amber one AND the last different wording: the same
+                // payment read purple/"In review" in Insights and
+                // amber/"pending treasurer review" on the round card.
+                `<b style="color:var(--pending-review)">${pendingCount} in review</b>`
               : ""
           }${pendingCount && overdueCount ? " · " : ""}${
             overdueCount
@@ -864,7 +898,15 @@ window.PFViews.home = function (ctx) {
       // and their own status IS the lead.
       S.dayOne +
       S.rejected +
-      (unlocked ? S.complete + S.release + S.attention + S.myStatus : S.myStatus + S.complete) +
+      (unlocked ? S.release + S.attention : "") +
+      S.myStatus +
+      // S.complete sits AFTER the personal card for both roles. It used to be
+      // pulled to the front for a treasurer by the rule above — but that rule
+      // is about a QUEUE outranking a personal card, and when the fund is
+      // complete there is no queue and no release (both are gated on
+      // !allDone). So the only thing it did was make the terminal screen read
+      // in a different order for the treasurer than for everyone else.
+      S.complete +
       S.payoutNudge +
       S.fundTotal + S.hero + S.cta + S.roster + S.roundsLink + S.prevRounds +
       S.spacer
@@ -958,9 +1000,12 @@ window.PFViews.home = function (ctx) {
         const amt = C.roundCollected(state.contributions, r);
         const p = Math.min(100, (amt / C.GOAL_PER_ROUND) * 100);
         const recip = members.find((m) => m.member_order === r);
-        return `<div class="home-round-cell ${st}" title="Round ${r}${
+        const isNow = !allDone && r === curRound;
+        return `<div class="home-round-cell ${st}${isNow ? " is-now" : ""}" title="Round ${r}${
           recip ? " — " + escapeHtml(recip.name) : ""
-        }: ${C.peso(amt)} of ${C.peso(C.GOAL_PER_ROUND)}">
+        }: ${C.peso(amt)} of ${C.peso(C.GOAL_PER_ROUND)}${
+          isNow ? " — collecting now" : ""
+        }">
           <div class="home-round-bar"><div class="home-round-fill" style="height:${p}%"></div></div>
           <span class="home-round-label">R${r}</span>
         </div>`;
@@ -985,6 +1030,21 @@ window.PFViews.home = function (ctx) {
         "share",
         15
       )}<span>Share fund status</span></button>
+      ${
+        // DesktopHomeMember.dc.html's second quick action is "View payment QR
+        // code". That is NOT built here, deliberately: openQrModal() is the
+        // treasurer's MANAGE screen, the QR a member actually needs is already
+        // in the contribute sheet at the moment they need it, and a read-only
+        // twin of a treasurer screen is more surface than the gap deserves.
+        // A member's own payout destination is the useful second action and is
+        // already built. Recorded as a substitution, not as the artboard's row.
+        !unlocked && payoutOwner
+          ? `<button type="button" class="home-quick-btn" onclick="PowerFund.openPayoutQrModal()">${icon(
+              "qr",
+              15
+            )}<span>My payout details</span></button>`
+          : ""
+      }
     </div>
   </div>`;
 
@@ -996,11 +1056,9 @@ window.PFViews.home = function (ctx) {
         ${S.fundTotal}${S.hero}${S.roster}${S.roundsLink}${recentPanel}${S.prevRounds}
       </div>
       <aside class="home-rail">
-        ${S.rejected}${
-          unlocked
-            ? `${S.complete}${S.release}${S.attention}${S.myStatus}`
-            : `${S.myStatus}${S.complete}`
-        }${S.payoutNudge}${overview}${quick}
+        ${S.rejected}${unlocked ? `${S.release}${S.attention}` : ""}${
+          S.myStatus
+        }${S.complete}${S.payoutNudge}${overview}${quick}
       </aside>
     </div>` +
     S.cta +

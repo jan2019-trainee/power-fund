@@ -219,6 +219,26 @@
   let editNamesValues = {};
   let editNamesError = null;
 
+  /* Treasurer -> Group -> "Payment schedule". The 30 due dates are written once
+   * by supabase/seed.sql, two and a half years ahead, and had no editing
+   * surface at all — the schema comment says "edit freely", meaning in SQL.
+   * They drive every overdue chip, the attention queue and isOverdue(), so a
+   * fund whose schedule slipped by a month accused people of being late and
+   * the only fix was the Supabase SQL editor. A draft map keyed by cycle id,
+   * a live-validated error, one save — the same shape as edit-names. */
+  let scheduleModalOpen = false;
+  let scheduleValues = {};
+  /* The last VALID date seen for each cycle, which is what a shift measures
+   * from. It cannot be the previous draft value: editing a date field with the
+   * keyboard empties it between segments ("2026-10-15" -> "" -> "2026-11-15"),
+   * so measuring against the draft would see a move out of nothing and skip
+   * the shift entirely for anybody not using the picker. */
+  let scheduleLastValid = {};
+  let scheduleError = null;
+  /* Changing one date and dragging the rest with it is the actual use case
+   * ("round 3 started two weeks late"). Off, this edits one date alone. */
+  let scheduleShift = true;
+
   /* Treasurer -> Account -> "Member sign-in". The addresses a Google login is
    * matched against (migration 008) had no UI at all: they could only be set
    * with a hand-written SQL update, which meant the one person who could roll
@@ -926,6 +946,39 @@
     return !((state && state.members) || []).some((m) => m.is_treasurer);
   }
 
+  /** Will Postgres refuse this viewer's money writes?
+   *
+   *  Migration 011 keys confirm / reject / revert / record-as-paid / release
+   *  off `members.is_treasurer`. The treasurer PIN is SHARED WITH ALL FIVE
+   *  MEMBERS by design, so unlocking treasurer mode says nothing about whether
+   *  the writes behind it will land: four of five were being offered Confirm
+   *  Payment on a real claim and finding out by pressing it.
+   *
+   *  NOT `!isTreasurerAccount()`. That is false whenever the app cannot
+   *  identify the viewer at all — auth off, signed out, a link that broke —
+   *  and a fund on AUTH_MODE "off" has flagged members, so keying off it would
+   *  disable every money action for a legitimate treasurer who simply has no
+   *  session. Same direction as canUnlockTreasurer(): act only on a viewer we
+   *  can POSITIVELY identify as somebody other than the treasurer, and stay
+   *  out of the way in every uncertain case. Postgres is the real gate either
+   *  way; this only decides whether they meet a button that is not theirs or
+   *  an error that looks like a bug. */
+  function moneyWritesRefused() {
+    const mine = editableMember();
+    if (!mine || mine.is_treasurer) return false;
+    // Nobody flagged at all: the fund has no treasurer account yet, 011's
+    // readiness check refuses the lockdown, and the PIN is the only authority
+    // that exists. Same bootstrap escape hatch as isTreasurerAccount().
+    return ((state && state.members) || []).some((m) => m.is_treasurer);
+  }
+
+  /** The one sentence shown wherever a money action is disabled for this
+   *  reason, so it reads the same everywhere it appears. */
+  const MONEY_REFUSED_NOTE =
+    "Only the fund's flagged treasurer can confirm payments, reject them or " +
+    "release a payout. Treasurer mode is unlocked, but these writes are " +
+    "refused — see Menu → Security → Transfer treasurer role.";
+
   function openProfileModal() {
     const me = editableMember();
     if (!me) {
@@ -1458,6 +1511,14 @@
       // Reverting a confirmed contribution destroys a financial record — never
       // do it on the first tap.
       const due = C.dueDateOf(state.cycles, cycleNumber);
+      const broken = revertBreaksReleasedRound(memberId, cycleNumber);
+      if (broken) {
+        return showError(
+          `Round ${broken} has already been paid out. Undo that release first ` +
+            `— otherwise the round keeps a ${C.peso(C.GOAL_PER_ROUND)} payout ` +
+            `on record while holding less than that in confirmed payments.`
+        );
+      }
       // Undoing a confirmed payment removes money from a round, so it is never
       // a single tap — but it stays in the grid, next to the pill that was
       // tapped, instead of throwing a dialog over the whole screen.
@@ -1488,6 +1549,7 @@
   /** The actual direct (cash) record, after the inline confirmation. */
   async function confirmMarkPaid() {
     if (busy || !markPaidTarget) return;
+    if (moneyWritesRefused()) return showError(MONEY_REFUSED_NOTE);
     const { memberId, cycleNumber } = markPaidTarget;
     markPaidTarget = null;
     busy = true;
@@ -1522,8 +1584,37 @@
   }
 
   /** The actual revert, after the confirmation dialog. */
+  /** Would reverting this cycle leave its round paid out but under-funded?
+   *
+   *  markPayoutReleased() hard-gates release on isRoundFunded(), so the app
+   *  asserts funded-implies-released in one direction — and let the other one
+   *  be broken silently. Two taps produced a round badged Completed at
+   *  ₱28,000 / ₱30,000 with a ₱30,000 payout on record against it, with no
+   *  warning at the moment of the change and no marker afterwards.
+   *
+   *  Refused rather than double-confirmed: the correct order already exists
+   *  and every step of it is built — Undo Release, revert, release again. */
+  function revertBreaksReleasedRound(memberId, cycleNumber) {
+    const round = C.roundOfCycle(cycleNumber);
+    if (!getPayout(round).released) return null;
+    const row = C.contributionFor(state.contributions, memberId, cycleNumber);
+    if (!row || row.status !== C.STATUS_PAID) return null;
+    return round;
+  }
+
   async function doRevertContribution(memberId, cycleNumber) {
     if (busy) return;
+    if (moneyWritesRefused()) return showError(MONEY_REFUSED_NOTE);
+    // Checked here as well as where the panel opens: confirmUndoPaid is
+    // exported on PowerFund, so the absent panel is not the gate.
+    const broken = revertBreaksReleasedRound(memberId, cycleNumber);
+    if (broken) {
+      return showError(
+        `Round ${broken} has already been paid out. Undo that release first — ` +
+          `otherwise the round keeps a ${C.peso(C.GOAL_PER_ROUND)} payout on ` +
+          `record while holding less than that in confirmed payments.`
+      );
+    }
     busy = true;
     render();
     try {
@@ -1633,6 +1724,7 @@
   /** Shared worker: mark the given pending cycles as confirmed-paid. */
   async function confirmCycles(memberId, cycles) {
     if (busy || !cycles || !cycles.length) return;
+    if (moneyWritesRefused()) return showError(MONEY_REFUSED_NOTE);
     busy = true;
     render();
     try {
@@ -1694,6 +1786,7 @@
 
   async function doRejectReview() {
     if (!reviewTarget || busy) return;
+    if (moneyWritesRefused()) return showError(MONEY_REFUSED_NOTE);
     const { memberId, cycles } = reviewTarget;
     const note = rejectNoteValue.trim();
     if (!note) {
@@ -1820,7 +1913,11 @@
         `This permanently clears <b>every contribution</b>, the <b>activity log</b>, ` +
         `and <b>all payout status</b> (including released payouts). Uploaded payment ` +
         `screenshots are removed too.<br><br>` +
-        `Members, their names, the payout order, cycle dates and the treasurer PIN ` +
+        `Members, their names, the payout order${
+          // Don't promise to keep a PIN the fund does not have — the same
+          // dialog's amber note says there is none, 120px away.
+          hasTreasurerPin() ? ", cycle dates and the treasurer PIN" : " and cycle dates"
+        } ` +
         `are kept.<br><br>This cannot be undone.`,
       confirmLabel: "Reset everything",
       requireType: "RESET",
@@ -2133,17 +2230,64 @@
     confirmDialog = null;
     render();
   }
+  /** Patch the button by hand rather than calling render(): render() reassigns
+   *  innerHTML, which would destroy the field being typed into and lose the
+   *  caret — the same reason refreshEditNamesValidity() exists. */
+  function refreshConfirmGate() {
+    const btn = document.querySelector(".modal .confirm-yes");
+    if (btn) btn.disabled = busy || confirmGateUnmet(confirmDialog);
+  }
   function setConfirmType(v) {
     if (confirmDialog) confirmDialog.typeValue = v;
+    refreshConfirmGate();
   }
   function setConfirmPin(v) {
     if (confirmDialog) confirmDialog.pinValue = v;
+    refreshConfirmGate();
+  }
+
+  /** Is the confirm dialog's gate unsatisfied? The design is explicit about
+   *  this one (canvas.json, menu-pin-notes): "type RESET (case-insensitive)
+   *  AND enter the PIN before 'Reset everything' enables — the button is
+   *  genuinely disabled/enabled live based on both fields. No destructive
+   *  action is ever one tap away."
+   *
+   *  It was disabled only while `busy`, so "Reset everything" rendered as a
+   *  saturated red primary on an empty dialog. submitConfirm() validated, so
+   *  nothing was destroyed — but the gate was invisible until after the press,
+   *  which teaches the treasurer to press first and read second on the screen
+   *  that wipes every contribution. The PIN is checked for PRESENCE here and
+   *  for correctness in submitConfirm(): the button must not become the gate. */
+  function confirmGateUnmet(d) {
+    if (!d) return true;
+    if (
+      d.requireType &&
+      String(d.typeValue || "").trim().toUpperCase() !==
+        d.requireType.toUpperCase()
+    ) {
+      return true;
+    }
+    return !!(d.requirePin && !String(d.pinValue || "").trim());
   }
 
   async function submitConfirm() {
     if (!confirmDialog || busy) return;
     const d = confirmDialog;
 
+    // FIRST, before the type-to-confirm check. A PIN that does not exist cannot
+    // be typed. Before the PIN-free unlock this was unreachable — you could
+    // only be in treasurer mode by having typed a PIN, so one existed. A
+    // Google-verified treasurer now unlocks without one, so a fund that never
+    // set a treasurer PIN could reach this dialog and be told "Incorrect PIN"
+    // forever, with nothing saying why. Exported on PowerFund, so the render's
+    // version of this is not the gate — and the order matters, because the
+    // render hides the type-to-confirm field in this state, which would
+    // otherwise fail first with "Type RESET exactly to confirm".
+    if (d.requirePin && !hasTreasurerPin()) {
+      d.error = "No treasurer PIN is set yet — this action needs one.";
+      d.pinValue = "";
+      return render();
+    }
     if (
       d.requireType &&
       d.typeValue.trim().toUpperCase() !== d.requireType.toUpperCase()
@@ -2179,6 +2323,16 @@
     if (kind === "unlink") return doUnlinkMember(ctx.memberId);
     if (kind === "transferRole") return doTransferRole(ctx.toId);
     if (kind === "removeTreasurer") return doRemoveTreasurer(ctx.memberId);
+  }
+
+  /** The way out of the dead end above: leave the destructive action and go
+   *  create the PIN it wants. Deliberately does NOT resume the action
+   *  afterwards — re-confirming a reset or a role transfer on purpose is
+   *  cheap, and resuming one automatically after a detour is not. */
+  function startPinForConfirm() {
+    if (!unlocked) return;
+    confirmDialog = null;
+    openChangePin();
   }
 
   // ===================================================================
@@ -2265,6 +2419,21 @@
     render();
   }
 
+  /** Does the change-PIN flow need its "prove the current one" step?
+   *
+   *  No, in two cases. There is nothing to prove when no PIN exists — and,
+   *  the one that mattered: NOT AFTER A MASTER-PIN UNLOCK. The master PIN is
+   *  the group's way back in when the treasurer PIN has been forgotten, and
+   *  the app says so out loud on the way in ("Set a new treasurer PIN from
+   *  Menu → Change PIN"). Demanding the forgotten PIN on that very screen made
+   *  that instruction impossible to follow and left the master PIN able to
+   *  unlock the session but never to end the lockout — which is the whole
+   *  reason it exists. The master PIN was verified against the database this
+   *  session, so the authority is real, not assumed. */
+  function changeNeedsCurrentPin() {
+    return hasTreasurerPin() && !unlockedViaMaster;
+  }
+
   function openChangePin() {
     pinInputValue = "";
     pinError = null;
@@ -2272,7 +2441,7 @@
     // Changing an existing PIN starts by proving you know it — otherwise
     // anyone who finds an unlocked phone can lock the group out of its own
     // treasurer mode.
-    pinStep = hasTreasurerPin() ? "current" : "new";
+    pinStep = changeNeedsCurrentPin() ? "current" : "new";
     pinModalMode = "change";
     render();
   }
@@ -2498,9 +2667,6 @@
     render();
   }
 
-  /** Parse the release-modal amount field. Blank => the ₱30,000 default.
-   *  This is a historical record only — it never touches round funding. */
-
   /** Release, but explicitly WITHOUT a receipt, after an upload has failed.
    *  The break-glass: refusing outright is right for a transient failure, but
    *  if the storage bucket is missing the treasurer can never record a payout
@@ -2515,6 +2681,7 @@
 
   async function markPayoutReleased(opts) {
     if (!payoutModalRound || busy) return;
+    if (moneyWritesRefused()) return showError(MONEY_REFUSED_NOTE);
     const skipReceipt = !!(opts && opts.skipReceipt === true);
     const round = payoutModalRound;
     // Guard at the action level: a payout can only be released once the round
@@ -2885,6 +3052,278 @@
       await reload();
     } catch (e) {
       editNamesError = e.message;
+      busy = false;
+      return render();
+    }
+    busy = false;
+    render();
+  }
+
+
+  // ===================================================================
+  // Payment schedule (treasurer)
+  //
+  // Category: UI Only. `cycles.due_date` has existed since the first schema
+  // and migration 011's `cycles_treasurer` policy already permits the write —
+  // what was missing was any way to reach it from the app.
+  //
+  // Gated on isTreasurerAccount(), not on `unlocked`: 011 keys the policy off
+  // members.is_treasurer, which the shared PIN cannot express, so gating this
+  // on the PIN would offer four other people a button Postgres is going to
+  // refuse. (isTreasurerAccount() keeps its bootstrap fallback to the PIN for
+  // a fund with nobody flagged yet — there, 011 is not in force either.)
+  // ===================================================================
+
+  /** "YYYY-MM-DD" -> local midnight Date. Matches C.parseDueDate exactly, so
+   *  the editor and the overdue rules can never disagree about a day. */
+  function isoToDate(iso) {
+    return new Date(iso + "T00:00:00");
+  }
+  function dateToIso(d) {
+    const p = (n) => String(n).padStart(2, "0");
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+  }
+  /** Add whole days, via setDate() so a DST boundary moves the clock and not
+   *  the calendar day — the thing this screen is actually about. */
+  function shiftIso(iso, days) {
+    const d = isoToDate(iso);
+    d.setDate(d.getDate() + days);
+    return dateToIso(d);
+  }
+  /** Whole days from a to b. Rounded for the same DST reason: an hour lost
+   *  across the gap would otherwise truncate a 14-day move to 13. */
+  function daysBetweenIso(aIso, bIso) {
+    return Math.round((isoToDate(bIso) - isoToDate(aIso)) / 86400000);
+  }
+  function validIso(v) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(v || ""))) return false;
+    const d = isoToDate(v);
+    if (isNaN(d.getTime())) return false;
+    // A date input accepts a typed year, and "0202" is one keystroke from
+    // "2027". Out here it is not a schedule, it is a typo.
+    const y = d.getFullYear();
+    return y >= 2000 && y <= 2100 && dateToIso(d) === v;
+  }
+
+  /** Cycles in cycle_number order, which is the order everything here assumes.
+   *  state.cycles arrives ordered from the query; sorted again because the
+   *  ordering is load-bearing and a realtime patch could append out of band. */
+  function orderedCycles() {
+    return [...((state && state.cycles) || [])].sort(
+      (a, b) => a.cycle_number - b.cycle_number
+    );
+  }
+
+  function openScheduleModal() {
+    if (!isTreasurerAccount()) return;
+    scheduleValues = {};
+    scheduleLastValid = {};
+    orderedCycles().forEach((c) => {
+      scheduleValues[c.id] = c.due_date;
+      scheduleLastValid[c.id] = c.due_date;
+    });
+    scheduleError = null;
+    scheduleShift = true;
+    scheduleModalOpen = true;
+    render();
+  }
+  function closeScheduleModal() {
+    scheduleModalOpen = false;
+    scheduleValues = {};
+    scheduleLastValid = {};
+    scheduleError = null;
+    render();
+  }
+
+  function setScheduleShift(on) {
+    scheduleShift = !!on;
+  }
+
+  /** Put every date back to what is on file. With the shift on, one edit
+   *  rewrites up to 29 rows, and Cancel-then-reopen was the only way back —
+   *  which throws away the other edits too. */
+  function resetScheduleDraft() {
+    if (!scheduleModalOpen) return;
+    scheduleValues = {};
+    scheduleLastValid = {};
+    orderedCycles().forEach((c) => {
+      scheduleValues[c.id] = c.due_date;
+      scheduleLastValid[c.id] = c.due_date;
+    });
+    scheduleError = null;
+    render();
+  }
+
+  /**
+   * Move one cycle, and — with the shift on — everything after it by the same
+   * number of days. The delta is measured against the DRAFT value, not the
+   * stored one, so two successive nudges compound the way the treasurer means
+   * them to rather than both being measured from the original date.
+   */
+  function setScheduleDate(cycleId, value) {
+    scheduleValues[cycleId] = value;
+    if (validIso(value)) {
+      const from = scheduleLastValid[cycleId];
+      scheduleLastValid[cycleId] = value;
+      const delta = validIso(from) ? daysBetweenIso(from, value) : 0;
+      if (scheduleShift && delta !== 0) {
+        const list = orderedCycles();
+        const at = list.findIndex((c) => String(c.id) === String(cycleId));
+        for (let i = at + 1; at !== -1 && i < list.length; i++) {
+          const id = list[i].id;
+          if (validIso(scheduleValues[id])) {
+            scheduleValues[id] = shiftIso(scheduleValues[id], delta);
+            scheduleLastValid[id] = scheduleValues[id];
+          }
+        }
+      }
+    }
+    refreshScheduleValidity();
+  }
+
+  /** The one rule set, shared by the live check and the save.
+   *  Returns a message, or null when the draft is savable. */
+  function scheduleProblem() {
+    const list = orderedCycles();
+    if (!list.length) return "This fund has no cycles yet.";
+    for (const c of list) {
+      if (!validIso(scheduleValues[c.id])) {
+        return `Cycle ${c.cycle_number} needs a valid date.`;
+      }
+    }
+    // Strictly increasing, because currentCycle() returns the FIRST cycle in
+    // number order whose date has not passed while completedCyclesCount()
+    // counts every cycle whose date has. Out of order those two disagree, and
+    // the app shows one cycle as current while counting a later one as done.
+    for (let i = 1; i < list.length; i++) {
+      const prev = scheduleValues[list[i - 1].id];
+      const cur = scheduleValues[list[i].id];
+      if (isoToDate(cur) <= isoToDate(prev)) {
+        return (
+          `Cycle ${list[i].cycle_number} must fall after cycle ` +
+          `${list[i - 1].cycle_number}. Each cycle is due after the one before it.`
+        );
+      }
+    }
+    return null;
+  }
+
+  /** Cycles whose date the draft moves AND which already carry a confirmed
+   *  payment. Not a blocker — a schedule that really slipped should move — but
+   *  onTimeStats() judges paid_at against due_date, so moving one of these
+   *  rewrites who is recorded as having paid on time. The screen has to say so
+   *  rather than quietly restating history. */
+  function scheduleSettledMoves() {
+    const out = [];
+    for (const c of orderedCycles()) {
+      if (scheduleValues[c.id] === c.due_date) continue;
+      const paid = (state.contributions || []).some(
+        (r) => String(r.cycle_id) === String(c.id) && r.status === 2
+      );
+      if (paid) out.push(c.cycle_number);
+    }
+    return out;
+  }
+
+  /** Patch the affected nodes by hand. render() reassigns innerHTML, which
+   *  would close the open date picker and drop the caret — and with the shift
+   *  on, one edit changes up to 29 other inputs, so their values have to be
+   *  written back here too. */
+  function refreshScheduleValidity() {
+    scheduleError = scheduleProblem();
+    const box = document.getElementById("scheduleError");
+    if (box) {
+      box.textContent = scheduleError || "";
+      box.hidden = !scheduleError;
+    }
+    const save = document.getElementById("scheduleSave");
+    if (save) save.disabled = busy || !!scheduleError;
+
+    document.querySelectorAll(".schedule-modal .schedule-date").forEach((el) => {
+      const id = el.getAttribute("data-cycle");
+      const v = scheduleValues[id];
+      // Never write back into the field being typed in: replacing its value
+      // mid-entry is how a date input eats a half-typed year.
+      if (el !== document.activeElement && v != null && el.value !== v) el.value = v;
+      el.classList.toggle("invalid", !validIso(v));
+      // The dimming was computed once at render, so a cycle shifted OUT of the
+      // past stayed greyed — on the screen whose whole job is moving dates.
+      const row = el.closest(".schedule-row");
+      if (row) {
+        row.classList.toggle(
+          "past",
+          validIso(v) && isoToDate(v) < C.startOfDay(new Date())
+        );
+      }
+    });
+
+    const moved = orderedCycles().filter(
+      (c) => scheduleValues[c.id] !== c.due_date
+    ).length;
+    const count = document.getElementById("scheduleCount");
+    if (count) {
+      count.textContent = moved
+        ? moved === 1
+          ? "1 cycle moved"
+          : moved + " cycles moved"
+        : "No changes yet";
+    }
+    const reset = document.getElementById("scheduleReset");
+    if (reset) reset.hidden = !moved;
+    const warn = document.getElementById("scheduleSettled");
+    if (warn) {
+      const settled = scheduleSettledMoves();
+      warn.hidden = !settled.length;
+      warn.textContent = settled.length
+        ? "Cycle " +
+          settled.join(", ") +
+          (settled.length === 1 ? " has" : " have") +
+          " already-confirmed payments. Moving the due date changes whether" +
+          " those count as paid on time."
+        : "";
+    }
+  }
+
+  async function saveSchedule() {
+    if (busy || !isTreasurerAccount()) return;
+    const problem = scheduleProblem();
+    if (problem) {
+      scheduleError = problem;
+      return render();
+    }
+    const changed = orderedCycles().filter(
+      (c) => scheduleValues[c.id] !== c.due_date
+    );
+    if (!changed.length) return closeScheduleModal();
+
+    busy = true;
+    render();
+    try {
+      await window.DB.updateCycleDueDates(
+        changed.map((c) => ({ id: c.id, due_date: scheduleValues[c.id] }))
+      );
+      // Named, not counted, but bounded: eighteen dates in one log line is
+      // unreadable and the log is read by all five. The first change is the
+      // one that explains the rest, since the others followed it.
+      const first = changed[0];
+      const detail =
+        `cycle ${first.cycle_number} moved ${C.formatDate(isoToDate(first.due_date))}` +
+        ` → ${C.formatDate(isoToDate(scheduleValues[first.id]))}`;
+      await logActivity(
+        changed.length === 1
+          ? `Payment schedule updated: ${detail}`
+          : `Payment schedule updated: ${changed.length} cycles moved (${detail})`,
+        { type: "admin" }
+      );
+      closeScheduleModal();
+      await reload();
+      showSuccess(
+        changed.length === 1
+          ? "Due date updated."
+          : `${changed.length} due dates updated.`
+      );
+    } catch (e) {
+      scheduleError = e.message;
       busy = false;
       return render();
     }
@@ -3349,6 +3788,9 @@
     bell: '<path d="M6 8a6 6 0 0 1 12 0c0 4 1.5 5.5 2 6H4c.5-.5 2-2 2-6Z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
     party: '<path d="M4 20l4.5-11L19 19.5 4 20Z"/><path d="M14 4.5v2M18.5 8h2M16.8 6.2l1.4-1.4"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
+    calendar:
+      '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/>' +
+      '<path d="M8 3v4"/><path d="M16 3v4"/>',
     trash:
       '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/><path d="M9 7V4h6v3"/>',
     // From OnboardingWelcome.dc.html's emblem.
@@ -3556,11 +3998,42 @@
   const NAV_DESKTOP = ["home", "rounds", "members", "activity", "insights"];
   const navItems = (ids) =>
     ids.map((id) => TAB_VIEWS.find((t) => t.id === id)).filter(Boolean);
+  /** The desktop Members pane opened EMPTY — ~750x780px of "Pick a member to
+   *  see their cycle history" on arrival, where the artboard ships with a
+   *  member selected and populated, and where this screen's own sibling
+   *  (Rounds) already auto-opens.
+   *
+   *  DESKTOP ONLY: on the phone `selectedMemberId` drives the accordion, so
+   *  pre-selecting would open somebody's row unasked.
+   *
+   *  Called on ENTERING the view, not on every render with nothing selected —
+   *  clicking the open row again deselects it on desktop, and the latter would
+   *  re-select it instantly and make that action look broken. */
+  function autoSelectMember() {
+    if (!isWide || selectedMemberId != null || !state || !state.members) return;
+    const id = accountMemberId || myMemberId;
+    const mine = id
+      ? state.members.find((m) => String(m.id) === String(id))
+      : null;
+    // (rounds, contributions) — that is the signature, and reversing it made
+    // this silently pick the wrong recipient rather than throw.
+    const round = C.currentRound(state.payouts, state.contributions);
+    const recipient = state.members.find(
+      (m) => Number(m.member_order) === Number(round)
+    );
+    const pick = mine || recipient || sortedMembers()[0];
+    if (pick) selectedMemberId = pick.id;
+  }
+
   function setView(view) {
     if (currentView === view) return;
     // Leaving Members drops the drill-down, so coming back lands on the
     // roster rather than whoever was open several taps ago.
     if (currentView === "members") selectedMemberId = null;
+    if (view === "members") {
+      selectedMemberId = null;
+      autoSelectMember();
+    }
     undoPaidTarget = null;
     markPaidTarget = null;
     currentView = view;
@@ -3682,7 +4155,12 @@
 
       const chip =
         st === C.STATUS_PENDING
-          ? `<span class="activity-chip-state pending">Pending review</span>`
+          ? // "In review" everywhere a STATUS is labelled — the desktop
+            // Activity column, the Insights donut, the roster and the Members
+            // accordion all said that while this one said "Pending review".
+            // Six spellings of one state; the colour was consistent and the
+            // words were not.
+            `<span class="activity-chip-state pending">In review</span>`
           : st === C.STATUS_REJECTED
           ? `<span class="activity-chip-state rejected">Rejected</span>`
           : "";
@@ -3699,28 +4177,49 @@
       </div>`;
     };
 
+    // "Untouched": type=all, member=all, and the round filter still unset (null
+    // means "use the current round", which is what hides rows on arrival).
+    const filtersAtDefault =
+      activityFilter === "all" &&
+      activityMemberFilter === "all" &&
+      activityRoundFilter === null;
+
     // Title and filter chips are shared; the body below differs per shell.
     const head = `<div class="view-head${isWide ? " view-head-row" : ""}">
       <div class="view-head-text">
       <h2 class="view-title">Activity</h2>
-      <p class="view-sub">${"Every contribution, payout &amp; admin action"} · ${
+      <p class="view-sub">${"Every contribution, payout &amp; admin action"}${
         // Don't print a total the table isn't showing: with the round filter
-        // defaulting to the current round, "8 entries loaded" above 3 rows
-        // reads as a fault.
-        visible.length === log.length
-          ? `${log.length} ${log.length === 1 ? "entry" : "entries"} loaded`
-          : `showing ${visible.length} of ${log.length} loaded`
+        // defaulting to the current round, "8 entries" above 3 rows reads as a
+        // fault. And not "loaded" — that is how a developer describes a fetch,
+        // not how the log describes itself; the suffix is dropped entirely
+        // when nothing is filtered out.
+        log.length === 0
+          ? ""
+          : visible.length === log.length
+          ? ` · ${log.length} ${log.length === 1 ? "entry" : "entries"}`
+          : ` · showing ${visible.length} of ${log.length}`
       }</p>
       </div>
       ${
         // The design puts Export CSV in the desktop header; the phone shell
         // keeps it in Menu, where there is room for it.
-        isWide
+        //
+        // TREASURER MODE ONLY — because the member Menu already says "Payment
+        // tools, exports and fund settings are only available in treasurer
+        // mode", and the mobile shell gives a member no export at all. Three
+        // surfaces disagreed and the desktop header was the outlier: it handed
+        // a member the export the Menu had just told them they could not have.
+        // Gated rather than granted, so this promises nothing new.
+        // ...and not over an EMPTY log: filtering and exporting nothing are
+        // controls that cannot do anything, on the one screen whose whole
+        // message is that there is nothing here yet.
+        isWide && unlocked && log.length > 0
           ? `<button type="button" class="head-action" onclick="PowerFund.exportCsv()">Export CSV</button>`
           : ""
       }
     </div>
-    <div class="activity-chips">${Object.entries(filterLabels)
+    ${log.length === 0 ? "" : `<div class="activity-chips">${Object.entries(filterLabels)
       .map(
         ([type, label]) => `
       <button type="button" class="activity-chip ${
@@ -3766,7 +4265,7 @@
             </label>
           </span>`
         : ""
-    }</div>`;
+    }</div>`}`;
 
     const listHtml = `${
       log.length === 0
@@ -3892,7 +4391,14 @@
       // untagged ones — a partial view of financial history must never look
       // whole.
       hiddenTotal > 0
-        ? `<p class="activity-unattributed">${icon("alert", 13)}<span><b>${hiddenTotal} ${
+        ? `<p class="activity-unattributed${
+            // desktop-activity-filters-live-notes has the round filter DEFAULT
+            // to the current round, so this fired on arrival — the first thing
+            // a treasurer saw on the screen was a warning about a state they
+            // had not created. The sentence is good and stays; only the alarm
+            // goes, until they narrow it themselves.
+            filtersAtDefault ? " quiet" : ""
+          }">${filtersAtDefault ? "" : icon("alert", 13)}<span><b>${hiddenTotal} ${
             hiddenTotal === 1 ? "entry is" : "entries are"
           } hidden by the current filters.</b>${
             unattributed > 0
@@ -3924,8 +4430,18 @@
     if (amt == null || amt === 0) return "";
     const settled = st == null || Number(st) === C.STATUS_PAID;
     const abs = C.peso(Math.abs(amt));
-    if (!settled) return `<span class="activity-amt flat">${escapeHtml(abs)}</span>`;
     const out = amt < 0;
+    // A NEGATIVE AMOUNT IS ALWAYS A SIGNED DEBIT, whatever refStatus says.
+    // Unsigned-and-flat is right for a claim that is not money yet (in review,
+    // rejected) — but a reverted confirmation is logged with
+    // refStatus: STATUS_UNPAID and a negative amount, so it fell into that
+    // branch and rendered "₱1,000.00" in plain text while a released payout
+    // rendered "−₱30,000.00". Two events that both take money out of a round,
+    // formatted as an unmistakable debit and as a neutral. In a financial log
+    // the sign is the fastest read, so it cannot be unreliable.
+    if (!settled && !out) {
+      return `<span class="activity-amt flat">${escapeHtml(abs)}</span>`;
+    }
     return `<span class="activity-amt ${out ? "out" : "in"}">${
       out ? "−" : "+"
     }${escapeHtml(abs)}</span>`;
@@ -4066,12 +4582,10 @@
       <h2 class="view-title">Insights</h2>
       <p class="view-sub">How the fund is tracking, from confirmed payments only</p>
     </div>`;
-    // On-time rate, with the change since the previous round. A trend needs two
-    // rounds with dated payments in them; before that it just states the rate.
+    // On-time rate, with the change between the two most recent rounds that
+    // have one. A trend needs two rounds with dated payments in them; before
+    // that it just states the rate. See trendHtml below.
     const curRound = C.currentRound(state.payouts, contributions);
-    const thisRound = C.onTimeRateForRound(contributions, state.cycles, curRound);
-    const prevRound =
-      curRound > 1 ? C.onTimeRateForRound(contributions, state.cycles, curRound - 1) : null;
     const overallOnTime = (() => {
       let on = 0;
       let n = 0;
@@ -4082,14 +4596,29 @@
       }
       return n ? (on / n) * 100 : null;
     })();
+    // THE TWO MOST RECENT ROUNDS THAT ACTUALLY HAVE A RATE, not strictly
+    // (curRound, curRound - 1). A round that has just started has no dated
+    // payments, so its rate is null and the delta vanished for most of every
+    // round's life — which is why neither QA capture showed one.
+    //
+    // It also NAMES BOTH ROUNDS. The tile's value is the LIFETIME rate, so a
+    // bare "↑4pts" beside it reads as "the lifetime figure went up 4 points",
+    // which is not what is being measured.
     let trendHtml = "";
-    if (thisRound.rate !== null && prevRound && prevRound.rate !== null) {
-      const delta = Math.round(thisRound.rate - prevRound.rate);
+    (function () {
+      const rated = [];
+      for (let r = curRound; r >= 1 && rated.length < 2; r--) {
+        const x = C.onTimeRateForRound(contributions, state.cycles, r);
+        if (x.rate !== null) rated.push({ round: r, rate: x.rate });
+      }
+      if (rated.length < 2) return;
+      const [now, before] = rated;
+      const delta = Math.round(now.rate - before.rate);
       trendHtml =
         delta === 0
-          ? `level with Round ${curRound - 1}`
-          : `${delta > 0 ? "↑" : "↓"} ${Math.abs(delta)}pts vs Round ${curRound - 1}`;
-    }
+          ? `R${now.round} level with R${before.round}`
+          : `R${now.round} ${delta > 0 ? "↑" : "↓"}${Math.abs(delta)}pts vs R${before.round}`;
+    })();
 
     // Name who is behind rather than only counting: "1 · Dan · Round 2".
     const missed = C.missedContributions(contributions, state.cycles, members);
@@ -4709,7 +5238,7 @@
     if (due && status === "collecting") text += `Cycle due: ${C.formatDate(due)}\n`;
     text += `\n`;
     if (paid.length) text += `✅ Paid: ${paid.join(", ")}\n`;
-    if (pending.length) text += `🟣 Pending review: ${pending.join(", ")}\n`;
+    if (pending.length) text += `🟣 In review: ${pending.join(", ")}\n`;
     if (rejected.length) text += `❌ Needs resending: ${rejected.join(", ")}\n`;
     if (overdue.length) text += `🔴 Overdue: ${overdue.join(", ")}\n`;
     if (notDue.length) text += `⏰ Not yet due: ${notDue.join(", ")}\n`;
@@ -4793,6 +5322,7 @@
       payoutModalRound ||
       shareModalOpen ||
       editNamesModalOpen ||
+      scheduleModalOpen ||
       memberAccountsModalOpen ||
       transferRoleModalOpen ||
       reorderModalOpen ||
@@ -4825,6 +5355,7 @@
     if (restoreState && restoreState.phase !== "working") return closeRestoreState();
     if (reorderModalOpen) return closeReorderModal();
     if (editNamesModalOpen) return closeEditNamesModal();
+    if (scheduleModalOpen) return closeScheduleModal();
     if (memberAccountsModalOpen) return closeMemberAccountsModal();
     if (transferRoleModalOpen) return closeTransferRole();
     if (shareModalOpen) return closeShareModal();
@@ -5170,11 +5701,24 @@
     let myStatus = null;
     if (myMember) {
       if (allDone) {
+        // THE PERSONAL CARD SAYS THE PERSONAL THING. It used to repeat the
+        // green Fund-complete card's own sentence — "All 5 rounds collected
+        // and paid out" — verbatim, 40px above it and clipped mid-word by the
+        // card's one-line detail, so the terminal state showed the same
+        // message twice and one copy was broken. The fund-level sentence
+        // belongs to the green card (js/views/home.js); this one carries the
+        // viewer's own result, which no other element states.
+        const mine = getPayout(myMember.member_order);
+        const got = mine && mine.amount != null ? mine.amount : C.GOAL_PER_ROUND;
         myStatus = {
           kind: "done",
-          word: "Fund complete",
-          detail: `All ${C.TOTAL_ROUNDS} rounds collected and paid out — thanks!`,
-          mark: "party",
+          word: "All settled",
+          detail: `You received ${C.peso(got)} in Round ${myMember.member_order}.`,
+          // "check", not "party" — Menu's "Replay the intro" row already uses
+          // the party glyph, and a terminal state sharing an icon with a
+          // how-to-use-the-app link teaches nothing. The green card beside it
+          // uses check for the same concept.
+          mark: "check",
           label: `All ${C.TOTAL_ROUNDS} rounds complete — thanks, ${escapeHtml(
             myMember.name
           )}!`,
@@ -5212,10 +5756,20 @@
             actionCycle: canAct ? payCycle : null,
           };
         } else if (myCycleStatus === C.STATUS_PENDING) {
+          // HOW LONG the treasurer has had it. DesktopHomeMember.dc.html carries
+          // "Submitted 2 hours ago" under this line, and it is the one thing on
+          // the card the member cannot work out for themselves — without it
+          // there is no way to tell a claim sent an hour ago from one sitting
+          // unreviewed for a week. Read from the row, so it is absent rather
+          // than invented when created_at is missing (rows written before it
+          // was recorded).
+          const pendRow = C.contributionFor(state.contributions, myMember.id, payCycle);
+          const sentAt = pendRow && pendRow.created_at;
           myStatus = {
             kind: "pending",
             word: "Submitted",
             detail: "Awaiting treasurer verification",
+            since: sentAt ? `Submitted ${activityTimeLabel(sentAt)}` : null,
             mark: "clock",
             label: "Submitted — awaiting treasurer verification",
             actionCycle: null,
@@ -5300,6 +5854,13 @@
 
     if (!hasAutoOpened) {
       openRound = curRound;
+      // The desktop Members pane opened EMPTY — ~750x780px of "Pick a member
+      // to see their cycle history" on arrival, where the artboard ships with
+      // a member selected and its detail populated, and where this screen's
+      // own sibling (Rounds, one line above) already auto-opens. Preference
+      // order: your own row if the app knows who you are, otherwise the round
+      // currently collecting's recipient, otherwise payout position 1.
+      if (currentView === "members") autoSelectMember();
       hasAutoOpened = true;
     }
 
@@ -5421,6 +5982,9 @@
       overdueListOpen, startRoundConfirming, isWide, selectedMemberId,
       undoPaidTarget, markPaidTarget,
       hasMasterPin: hasMasterPin(),
+      hasTreasurerPin: hasTreasurerPin(),
+      moneyRefused: moneyWritesRefused(),
+      MONEY_REFUSED_NOTE,
       // Accounts (migration 008). The mode drives whether Menu shows an
       // Account group at all; the email is what "Signed in as ..." prints.
       authMode: AUTH_MODE,
@@ -5819,8 +6383,18 @@
                 : // The mockup: a green Confirm carrying a tick, then "Reject
                   // claim" as a red outline. Close lives in the header × now,
                   // so a third stacked button is no longer needed.
-                  `<button class="modal-btn-primary modal-btn-confirm" onclick="PowerFund.confirmReview()" ${
-                    busy ? "disabled" : ""
+                  `${
+                    // Say it before the press, not after. 011 refuses both of
+                    // these for anyone but the flagged treasurer, and the PIN
+                    // that opened this modal is shared with all five members.
+                    moneyWritesRefused()
+                      ? `<p class="money-refused">${icon(
+                          "alert",
+                          14
+                        )}<span>${escapeHtml(MONEY_REFUSED_NOTE)}</span></p>`
+                      : ""
+                  }<button class="modal-btn-primary modal-btn-confirm" onclick="PowerFund.confirmReview()" ${
+                    busy || moneyWritesRefused() ? "disabled" : ""
                   }>${
                     busy
                       ? "Working…"
@@ -5828,7 +6402,9 @@
                           multi ? `Confirm all ${rc.length} as paid` : "Confirm Payment"
                         }</span>`
                   }</button>
-                   <button class="modal-btn-secondary reject" onclick="PowerFund.rejectReview()">Reject claim</button>`
+                   <button class="modal-btn-secondary reject" onclick="PowerFund.rejectReview()" ${
+                     moneyWritesRefused() ? "disabled" : ""
+                   }>Reject claim</button>`
             }
           </div>
         </div>
@@ -5850,7 +6426,9 @@
           ? hasMasterPin()
             ? "Choose a new master PIN"
             : "Choose a master PIN"
-          : "Choose a new PIN",
+          : hasTreasurerPin()
+          ? "Choose a new PIN"
+          : "Choose a treasurer PIN",
         confirm: isMasterFlow ? "Confirm the master PIN" : "Confirm the new PIN",
         done: isMasterFlow ? "Master PIN saved" : "PIN changed",
       };
@@ -5931,7 +6509,7 @@
       // Which steps this flow has, so the progress bar counts only real ones:
       // setting a first PIN has no current-PIN step to prove.
       const flowSteps =
-        pinModalMode === "change" && hasTreasurerPin()
+        pinModalMode === "change" && changeNeedsCurrentPin()
           ? ["current", "new", "confirm"]
           : ["new", "confirm"];
       const stepIndex = flowSteps.indexOf(pinStep);
@@ -6458,6 +7036,102 @@
       </div>`;
     }
 
+    // FLAGGED TREASURER ONLY — see openScheduleModal(). Checked here as well
+    // as in the menu row, because the open* handlers are exported on
+    // PowerFund and the render must never take the caller's word for it.
+    if (scheduleModalOpen && isTreasurerAccount()) {
+      const list = orderedCycles();
+      const today = C.startOfDay(new Date());
+      const movedCount = list.filter((c) => scheduleValues[c.id] !== c.due_date).length;
+      const settled = scheduleSettledMoves();
+
+      let rows = "";
+      let lastRound = 0;
+      for (const c of list) {
+        const round = C.roundOfCycle(c.cycle_number);
+        if (round !== lastRound) {
+          lastRound = round;
+          rows += `<p class="schedule-round">Round ${round}</p>`;
+        }
+        const v = scheduleValues[c.id] != null ? scheduleValues[c.id] : c.due_date;
+        const past = validIso(v) && isoToDate(v) < today;
+        rows += `<label class="schedule-row${past ? " past" : ""}">
+          <span class="schedule-cycle">Cycle ${c.cycle_number}</span>
+          <input type="date" class="schedule-date${validIso(v) ? "" : " invalid"}"
+                 data-cycle="${escapeHtml(c.id)}" value="${escapeHtml(v || "")}"
+                 aria-label="Cycle ${c.cycle_number} due date"
+                 onchange="PowerFund.setScheduleDate('${c.id}', this.value)"
+                 oninput="PowerFund.setScheduleDate('${c.id}', this.value)">
+        </label>`;
+      }
+
+      html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeScheduleModal()">
+        <div class="modal schedule-modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <h3 id="dlg-title">Payment schedule</h3>
+          <p class="modal-sub">When each cycle falls due. This is what marks a
+            payment overdue — it changes no amount and removes nothing.</p>
+
+          <label class="schedule-shift">
+            <input type="checkbox" ${scheduleShift ? "checked" : ""}
+                   onchange="PowerFund.setScheduleShift(this.checked)">
+            <span>
+              <span class="schedule-shift-label">Move later cycles too</span>
+              <span class="schedule-shift-note">Push one cycle back and the rest
+                of the schedule follows by the same number of days.</span>
+            </span>
+          </label>
+
+          ${/* ABOVE the list, not below it. With the list at 50vh both of
+                these sat under it, so the settled-cycle warning and the live
+                validation error — the two things this screen exists to say —
+                were off the bottom of the viewport at the exact moment they
+                appeared. The error carries role="alert", so it was being
+                announced to a screen reader while invisible on screen. */ ""}
+          <p class="schedule-settled" id="scheduleSettled" role="status"${
+            settled.length ? "" : " hidden"
+          }>${
+            settled.length
+              ? escapeHtml(
+                  "Cycle " +
+                    settled.join(", ") +
+                    (settled.length === 1 ? " has" : " have") +
+                    " already-confirmed payments. Moving the due date changes" +
+                    " whether those count as paid on time."
+                )
+              : ""
+          }</p>
+          <p class="pin-error" id="scheduleError" role="alert"${
+            scheduleError ? "" : " hidden"
+          }>${escapeHtml(scheduleError || "")}</p>
+
+          <p class="schedule-countline">
+            ${/* A SIBLING, not markup inside #scheduleCount:
+                  refreshScheduleValidity() sets that node with textContent on
+                  every keystroke, which would delete a button nested in it. */ ""}
+            <span class="schedule-count" id="scheduleCount">${
+              movedCount
+                ? movedCount === 1
+                  ? "1 cycle moved"
+                  : movedCount + " cycles moved"
+                : "No changes yet"
+            }</span>
+            <button type="button" class="schedule-reset" id="scheduleReset"
+                    onclick="PowerFund.resetScheduleDraft()"${
+                      movedCount ? "" : " hidden"
+                    }>Reset changes</button>
+          </p>
+          <div class="schedule-list">${rows}</div>
+
+          <div class="modal-actions">
+            <button class="modal-btn-primary" id="scheduleSave" onclick="PowerFund.saveSchedule()" ${
+              busy || scheduleProblem() ? "disabled" : ""
+            }>Save schedule</button>
+            <button class="modal-btn-secondary" onclick="PowerFund.closeScheduleModal()">Cancel</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
     // FLAGGED TREASURER: the addresses a login is matched against, and who has
     // actually signed in. Gated on isTreasurerAccount(), NOT on `unlocked` —
     // the treasurer PIN is shared with all five members, so gating this on the
@@ -6973,30 +7647,46 @@
     // Destructive-action confirmation (revert / undo release / reset / restore)
     if (confirmDialog) {
       const d = confirmDialog;
+      // A Google-verified treasurer unlocks with no PIN, so a fund that never
+      // set one can reach a PIN-gated action with nothing to type. Offering an
+      // input that can never be satisfied is the dead end; this offers the way
+      // out instead.
+      const pinMissing = d.requirePin && !hasTreasurerPin();
       html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeConfirm()">
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
           <h3 id="dlg-title">${escapeHtml(d.title)}</h3>
           <div class="confirm-body">${d.bodyHtml}</div>
           ${
-            d.requireType
+            d.requireType && !pinMissing
               ? `<input type="text" class="pin-input confirm-type-input" autocomplete="off" autocapitalize="characters" spellcheck="false"
                      placeholder="Type ${escapeHtml(d.requireType)}" value="${escapeHtml(d.typeValue)}"
                      oninput="PowerFund.setConfirmType(this.value)">`
               : ""
           }
           ${
-            d.requirePin
+            d.requirePin && !pinMissing
               ? `<input type="password" inputmode="numeric" autocomplete="off" class="pin-input"
                      placeholder="Treasurer PIN" value="${escapeHtml(d.pinValue)}"
                      oninput="PowerFund.setConfirmPin(this.value)"
                      onkeydown="if(event.key==='Enter') PowerFund.submitConfirm()">`
               : ""
           }
+          ${
+            pinMissing
+              ? `<p class="confirm-no-pin">${icon("alert", 14)}<span>This fund has
+                   <b>no treasurer PIN</b> yet, and this action asks for one. Set
+                   one first, then start this again.</span></p>`
+              : ""
+          }
           ${d.error ? `<p class="pin-error">${escapeHtml(d.error)}</p>` : ""}
           <div class="modal-actions">
-            <button class="modal-btn-primary confirm-yes" onclick="PowerFund.submitConfirm()" ${
-              busy ? "disabled" : ""
-            }>${escapeHtml(d.confirmLabel)}</button>
+            ${
+              pinMissing
+                ? `<button class="modal-btn-primary confirm-set-pin" onclick="PowerFund.startPinForConfirm()">Set a treasurer PIN</button>`
+                : `<button class="modal-btn-primary confirm-yes" onclick="PowerFund.submitConfirm()" ${
+                    busy || confirmGateUnmet(d) ? "disabled" : ""
+                  }>${escapeHtml(d.confirmLabel)}</button>`
+            }
             <button class="modal-btn-secondary" onclick="PowerFund.closeConfirm()">Cancel</button>
           </div>
         </div>
@@ -7304,6 +7994,7 @@
     submitConfirm,
     closePinModal,
     openChangePin,
+    startPinForConfirm,
     openMasterPin,
     submitPin,
     pinKey,
@@ -7351,6 +8042,12 @@
       editNamesValues[id] = v;
       refreshEditNamesValidity();
     },
+    openScheduleModal,
+    closeScheduleModal,
+    setScheduleShift,
+    setScheduleDate,
+    resetScheduleDraft,
+    saveSchedule,
   };
 
   if (document.readyState === "loading") {

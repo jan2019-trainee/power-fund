@@ -32,6 +32,11 @@ const PIN = "1234";
 
 const shots = [];
 const errors = [];
+/* Some captures INDUCE a failure on purpose — the error toast has to come from
+   a real failed write, not a poked state. Without this the harness reports the
+   deliberate 500 as a page error and exits non-zero, which would train the
+   next reader to ignore the error list. */
+let expectErrors = false;
 
 function uuid(n) {
   return `00000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
@@ -41,9 +46,14 @@ function uuid(n) {
 // Each is a complete Supabase snapshot. Named for the situation a reviewer
 // needs to judge, not for the data that produces it.
 
+const MASTER_PIN = "9999";
 const SETTINGS = {
   ...M.SETTINGS,
   treasurer_pin: PIN,
+  // A fund WITH a master PIN, so the recovery path is photographable. It must
+  // differ from the treasurer PIN — the app refuses the two being the same,
+  // since the master PIN exists for when the treasurer PIN is what is lost.
+  master_pin: MASTER_PIN,
   fund_name: "ViTAMiN Fund 2027",
   qr_code_url: null,
 };
@@ -158,9 +168,39 @@ const complete = (() => {
 
 // --- Harness ---------------------------------------------------------------
 
-async function serve(page, data) {
+async function serve(page, data, authMode) {
+  // AUTH_MODE IS PINNED, NOT INHERITED. The shipped value is a deploy-time
+  // decision, and it is now "required" — so without this every capture in this
+  // file was a screenshot of the sign-in wall. That is not a hypothetical: it
+  // is what this harness produced until it was noticed, ~40 identical images
+  // handed to a reviewer as "the app".
+  await page.route("**/js/config.js", async (route) => {
+    const res = await route.fetch();
+    return route.fulfill({
+      status: 200,
+      contentType: "application/javascript",
+      body: (await res.text()).replace(
+        /AUTH_MODE:\s*"[a-z]*"/,
+        `AUTH_MODE: "${authMode || "off"}"`
+      ),
+    });
+  });
   await page.route("**/rest/v1/**", (route) => {
-    const table = new URL(route.request().url()).pathname.split("/").pop();
+    const url = new URL(route.request().url());
+    // Real PostgREST 404s a function it does not have. Answering 200 [] makes
+    // the app believe migration 010's PIN vault exists and returned nothing,
+    // which is the one reading that must never be reported as "no PIN is set".
+    if (url.pathname.includes("/rpc/")) {
+      return route.fulfill({
+        status: 404,
+        contentType: "application/json",
+        body: JSON.stringify({
+          code: "42883",
+          message: "Could not find the function",
+        }),
+      });
+    }
+    const table = url.pathname.split("/").pop();
     const rows = data[table];
     return route.fulfill({
       status: 200,
@@ -185,22 +225,91 @@ async function serve(page, data) {
   });
 }
 
-async function open(browser, data, viewport, member) {
+/** The Supabase auth storage key is derived from the project ref, so read it
+ *  rather than hardcode one: a stale copy seeds the wrong key, the session is
+ *  silently ignored, and the result looks exactly like "the account-gated
+ *  surfaces are missing". */
+let _ref = null;
+function projectRef() {
+  if (_ref) return _ref;
+  const src = fs.readFileSync(path.join(__dirname, "..", "js", "config.js"), "utf8");
+  const m = src.match(/SUPABASE_URL:\s*"https:\/\/([^.]+)\./);
+  if (!m) throw new Error("Couldn't read SUPABASE_URL from js/config.js");
+  _ref = m[1];
+  return _ref;
+}
+const FAKE_USER_ID = "11111111-1111-1111-1111-111111111111";
+
+/**
+ * opts.authMode  "off" (default) | "optional" | "required"
+ * opts.signedInAs  a member row to seed a Google session for. The account-only
+ *   surfaces (Member sign-in, Transfer role, Payment schedule) key off
+ *   members.is_treasurer on a LINKED row, so `member` — which only writes the
+ *   per-device pf_my_member_id preference — cannot reach them.
+ * opts.fresh  leave the onboarding/sign-in-prompt keys unset.
+ */
+async function open(browser, data, viewport, member, opts) {
+  const o = opts || {};
   const page = await browser.newPage({ viewport });
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("console", (m) => {
-    if (m.type() === "error" && !/realtime|websocket/i.test(m.text())) {
+    // The RPC 404 is deliberate (see serve()), and the realtime socket is not
+    // available here. Reporting either drowns the errors that do matter.
+    if (
+      !expectErrors &&
+      m.type() === "error" &&
+      !/realtime|websocket/i.test(m.text()) &&
+      !/404 \(Not Found\)/.test(m.text())
+    ) {
       errors.push(`console: ${m.text()}`);
     }
   });
-  await serve(page, data);
-  await page.addInitScript((id) => {
-    if (id) window.localStorage.setItem("pf_my_member_id", id);
+  await serve(page, data, o.authMode);
+  await page.addInitScript((a) => {
+    if (a.id) window.localStorage.setItem("pf_my_member_id", a.id);
     else window.localStorage.removeItem("pf_my_member_id");
-  }, member || "");
+    if (!a.fresh) {
+      // Otherwise the intro, and then the sign-in prompt, front every capture.
+      window.localStorage.setItem("pf_onboarded", "1");
+      window.localStorage.setItem("pf_signin_skipped", "1");
+    }
+    if (a.email) {
+      window.localStorage.setItem(`sb-${a.ref}-auth-token`, JSON.stringify({
+        access_token: "qa-access-token",
+        token_type: "bearer",
+        expires_in: 31536000,
+        expires_at: Math.floor(Date.now() / 1000) + 31536000,
+        refresh_token: "qa-refresh-token",
+        user: { id: a.uid, email: a.email, aud: "authenticated" },
+      }));
+    }
+  }, {
+    id: member || "",
+    fresh: !!o.fresh,
+    ref: projectRef(),
+    uid: FAKE_USER_ID,
+    email: o.signedInAs ? o.signedInAs.email : "",
+  });
+  if (o.signedInAs) {
+    await page.route("**/auth/v1/**", (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
+  }
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(1700);
+  await page.waitForTimeout(o.signedInAs ? 2400 : 1700);
   return page;
+}
+
+/** The roster as it looks after migration 008's one-off, with one member
+ *  linked to the fake Google session. Returns the whole snapshot plus the
+ *  linked row, so a caller can pass it straight to open()'s signedInAs. */
+function withAccounts(data, linkedIndex) {
+  const members = data.members.map((m, i) => ({
+    ...m,
+    email: `${m.name.toLowerCase()}@example.com`,
+    auth_user_id: i === linkedIndex ? FAKE_USER_ID : null,
+    is_treasurer: i === 0,
+  }));
+  return { data: { ...data, members }, me: members[linkedIndex] };
 }
 
 async function unlock(page) {
@@ -263,6 +372,17 @@ async function tabs(page, prefix, list) {
     executablePath: process.env.PF_CHROMIUM || undefined,
     args: ["--no-sandbox"],
   });
+
+  // EVERY PAGE GETS ITS OWN CONTEXT, WITH THE SERVICE WORKER BLOCKED.
+  // page.route() does not intercept what a service worker fetches, and sw.js
+  // claims the client on the first load — so from the second navigation on,
+  // every mock here was bypassed and the page rendered the real config. A
+  // fresh context per page, not one shared: each capture relies on its own
+  // localStorage, and sharing would leak identity between scenarios.
+  browser.newPage = async (opt) => {
+    const context = await browser.newContext({ ...(opt || {}), serviceWorkers: "block" });
+    return context.newPage();
+  };
 
   const CORE = [
     { view: "home", note: "Home" },
@@ -381,10 +501,28 @@ async function tabs(page, prefix, list) {
     await p.locator(".mark-paid-panel button", { hasText: "Cancel" }).click();
     await p.waitForTimeout(300);
   }
-  const paidChip = p.locator(".member-chip.paid").first();
-  if (await paidChip.count()) {
+  // A confirmed chip in a round that has NOT been paid out. Round 1 is
+  // released in these fixtures, and reverting inside a released round is now
+  // refused, so the panel would never open there. Find an open round whose
+  // accordion has no release record, rather than taking the first paid chip
+  // on the page.
+  let paidChip = null;
+  for (const head of await p.locator(".round-header").all()) {
+    const card = head.locator("xpath=..");
+    if (await card.locator(".payout-status-box").count()) continue; // released
+    if (!/is-open/.test((await card.getAttribute("class")) || "")) {
+      await head.click();
+      await p.waitForTimeout(450);
+    }
+    const c = card.locator(".member-chip.paid").first();
+    if (await c.count()) { paidChip = c; break; }
+  }
+  if (paidChip) {
     await paidChip.click();
     await p.waitForTimeout(500);
+    if (!(await p.locator(".undo-paid-panel").count())) {
+      throw new Error("undo panel did not open on an unreleased round");
+    }
     await p.locator(".undo-paid-panel").scrollIntoViewIfNeeded();
     await p.waitForTimeout(250);
     await shot(p, "t-mobile-undo-paid", "Undo one confirmed payment, inline", true);
@@ -418,6 +556,362 @@ async function tabs(page, prefix, list) {
   await p.waitForTimeout(400);
   await shot(p, "t-desktop-activity-all", "Activity table, All rounds");
   await p.close();
+
+  // ---- ACCOUNT-GATED SURFACES ----
+  // These key off members.is_treasurer on a LINKED row, so pf_my_member_id and
+  // the shared PIN cannot reach them at all. Without a seeded Google session
+  // they were simply absent from the review — not deferred, just unphotographed.
+  console.log("\nSigned-in treasurer · account-only surfaces");
+  {
+    const acct = withAccounts(midFund, 0); // Regine, flagged and linked
+    for (const [label, vp] of [["mobile", MOBILE], ["desktop", DESKTOP]]) {
+      p = await open(browser, acct.data, vp, null, {
+        authMode: "optional",
+        signedInAs: acct.me,
+      });
+      // A Google-verified treasurer unlocks with no PIN. If a modal appears the
+      // session did not link, and every shot below would be a locked screen
+      // labelled as a treasurer one.
+      await p.locator(".unlock-btn").click();
+      await p.waitForTimeout(600);
+      if (await p.locator(".modal-overlay").count()) {
+        throw new Error(
+          "treasurer mode asked for a PIN — the seeded session did not link, " +
+            "so these captures would be mislabelled"
+        );
+      }
+      await p.evaluate(() => window.PowerFund.setView("menu"));
+      await p.waitForTimeout(500);
+      await shot(p, `a-${label}-menu`, "Menu, signed-in treasurer (no PIN needed to unlock)");
+
+      const overlays = [
+        ["schedule", "Payment schedule — the 30 due dates", () => window.PowerFund.openScheduleModal()],
+        ["member-signin", "Member sign-in — the addresses a login is matched against", () => window.PowerFund.openMemberAccountsModal()],
+        ["transfer-role", "Transfer treasurer role", () => window.PowerFund.openTransferRole()],
+        ["change-pin", "Change PIN, step 1 of 3", () => window.PowerFund.openChangePin()],
+        ["master-pin", "Set or change the master PIN", () => window.PowerFund.openMasterPin()],
+        ["reset", "Reset all fund data — type RESET plus the PIN", () => window.PowerFund.resetData()],
+      ];
+      for (const [name, note, fn] of overlays) {
+        await p.evaluate(fn);
+        await p.waitForTimeout(600);
+        await shot(p, `a-${label}-${name}`, note);
+        // closeTopModal() is not exported; Escape is the public route, and the
+        // PIN wizard can stack two.
+        for (let i = 0; i < 4 && (await p.locator(".modal-overlay").count()); i++) {
+          await p.keyboard.press("Escape").catch(() => {});
+          await p.waitForTimeout(220);
+        }
+      }
+
+      // The schedule with a shift applied — the state a reviewer has to judge,
+      // since the untouched list says nothing about what the feature does.
+      await p.evaluate(() => window.PowerFund.openScheduleModal());
+      await p.waitForTimeout(600);
+      const dates = p.locator(".schedule-date");
+      const v = await dates.nth(2).inputValue();
+      const d = new Date(v + "T00:00:00");
+      d.setDate(d.getDate() + 14);
+      const pad = (n) => String(n).padStart(2, "0");
+      await dates.nth(2).fill(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
+      await p.waitForTimeout(500);
+      await shot(p, `a-${label}-schedule-moved`, "Payment schedule after a 14-day shift — settled-cycle warning");
+      await p.close();
+    }
+
+    // A fund that never set a treasurer PIN. The verified treasurer unlocks
+    // without one, so a PIN-gated action has nothing to type — this is the
+    // dialog that used to answer "Incorrect PIN" forever.
+    const noPin = {
+      ...acct.data,
+      app_settings: { ...acct.data.app_settings, treasurer_pin: null, master_pin: null },
+    };
+    p = await open(browser, noPin, MOBILE, null, {
+      authMode: "optional",
+      signedInAs: acct.me,
+    });
+    await p.locator(".unlock-btn").click();
+    await p.waitForTimeout(600);
+    await p.evaluate(() => window.PowerFund.setView("menu"));
+    await p.waitForTimeout(450);
+    await shot(p, "a-mobile-menu-no-pin", "Menu on a fund with no treasurer PIN — the Security row says so");
+    await p.evaluate(() => window.PowerFund.resetData());
+    await p.waitForTimeout(600);
+    await shot(p, "a-mobile-no-pin-confirm", "A PIN-gated action with no PIN to type — offers to create one");
+    await p.close();
+  }
+
+  // Unlocked with the MASTER PIN: Change PIN must not then demand the
+  // treasurer PIN the person has just proved they have forgotten.
+  console.log("\nMaster-PIN recovery");
+  p = await open(browser, midFund, MOBILE, null);
+  await p.locator(".unlock-btn").click();
+  await p.waitForTimeout(400);
+  await p.keyboard.type(MASTER_PIN);
+  await p.locator(".modal-btn-primary").first().click();
+  await p.waitForTimeout(900);
+  await shot(p, "e-mobile-master-unlocked", "Unlocked with the master PIN — the nudge to set a new treasurer PIN");
+  await p.evaluate(() => window.PowerFund.openChangePin());
+  await p.waitForTimeout(500);
+  await shot(p, "e-mobile-master-change-pin", "Change PIN after a master unlock — two steps, no current-PIN demand");
+  await p.close();
+
+  // The sign-in gate itself, which is what AUTH_MODE "required" actually ships.
+  console.log("\nSign-in gate");
+  for (const [label, vp] of [["mobile", MOBILE], ["desktop", DESKTOP]]) {
+    p = await open(browser, midFund, vp, null, { authMode: "required" });
+    await shot(p, `e-${label}-signin-gate`, "AUTH_MODE required, signed out — no way past");
+    await p.close();
+  }
+
+  // ---- THE SCREENS THE FIRST QA PASS COULD NOT SEE ----
+  // Everything here was classified J ("not yet verified") in the first report,
+  // because it needs a LINKED ACCOUNT, a first-run device, an AUTH_MODE other
+  // than "off", or a file — and the harness offered none of those. Unreviewed
+  // is not approved, so these are captured rather than asserted about.
+  console.log("\nMember-account surfaces (My payout details, profile)");
+  {
+    const acct = withAccounts(midFund, 2); // Jan: linked, NOT the treasurer
+    for (const [label, vp] of [["mobile", MOBILE], ["desktop", DESKTOP]]) {
+      p = await open(browser, acct.data, vp, null, {
+        authMode: "optional",
+        signedInAs: acct.me,
+      });
+      const gated = [
+        ["payout-details", "My payout details — bank picker, account fields, QR (a PORT of MyPayoutQRManage)",
+          () => window.PowerFund.openPayoutQrModal()],
+        ["edit-profile", "Edit Profile — a port of EditProfile.dc.html",
+          () => window.PowerFund.openProfileModal()],
+        ["share", "Share fund status",
+          () => window.PowerFund.openShareModal()],
+      ];
+      for (const [name, note, fn] of gated) {
+        await p.evaluate(fn);
+        await p.waitForTimeout(600);
+        await shot(p, `acct-${label}-${name}`, note);
+        if (name === "edit-profile") {
+          // Change Photo opens OVER Edit Profile and is the one Escape closes
+          // first — so it is captured here, from the screen it belongs to.
+          await p.evaluate(() => window.PowerFund.openPhotoSheet());
+          await p.waitForTimeout(600);
+          await shot(p, `acct-${label}-change-photo`, "Change Photo, over Edit Profile (ProfilePhotoSheet.dc.html)");
+        }
+        for (let i = 0; i < 4 && (await p.locator(".modal-overlay").count()); i++) {
+          await p.keyboard.press("Escape").catch(() => {});
+          await p.waitForTimeout(220);
+        }
+      }
+      await p.close();
+    }
+  }
+
+  console.log("\nOnboarding — first run, both frames");
+  for (const [label, vp] of [["mobile", MOBILE], ["desktop", DESKTOP]]) {
+    p = await open(browser, midFund, vp, null, { fresh: true });
+    for (let i = 1; i <= 6; i++) {
+      if (!(await p.locator(".onboarding").count())) break;
+      await shot(p, `ob-${label}-${i}`, `Onboarding step ${i}`);
+      const next = p.locator(".ob-next").first();
+      if (await next.count()) {
+        await next.click();
+      } else {
+        // The final step is the who-am-I picker, which has no Next.
+        await shot(p, `ob-${label}-picker`, "Onboarding — which member are you");
+        break;
+      }
+      await p.waitForTimeout(500);
+    }
+    await p.close();
+  }
+
+  console.log("\nAccount dead-ends (AUTH_MODE required)");
+  {
+    const linkedElsewhere = withAccounts(midFund, 0).data;
+    linkedElsewhere.members = linkedElsewhere.members.map((m, i) =>
+      i === 0 ? { ...m, auth_user_id: "99999999-9999-9999-9999-999999999999" } : m
+    );
+    const noEmails = {
+      ...midFund,
+      members: midFund.members.map((m) => ({ ...m, email: null, auth_user_id: null })),
+    };
+    const cases = [
+      ["unknown", "Signed in with an address on no member row", withAccounts(midFund, 0).data,
+        { email: "stranger@example.com" }],
+      ["taken", "The matching member row belongs to another login", linkedElsewhere,
+        { email: "regine@example.com" }],
+      ["no-email", "The roster carries no addresses at all — migration 008's one-off never ran",
+        noEmails, { email: "regine@example.com" }],
+    ];
+    for (const [name, note, data, who] of cases) {
+      p = await open(browser, data, MOBILE, null, { authMode: "required", signedInAs: who });
+      await shot(p, `e-mobile-account-${name}`, note);
+      await p.close();
+    }
+  }
+
+  console.log("\nTreasurer modals that had no capture");
+  for (const [label, vp] of [["mobile", MOBILE], ["desktop", DESKTOP]]) {
+    p = await open(browser, midFund, vp, null);
+    await unlock(p);
+    for (const [name, note, fn] of [
+      ["payment-qr", "Payment QR code — what members scan", () => window.PowerFund.openQrModal()],
+      ["edit-names", "Edit member names", () => window.PowerFund.openEditNamesModal()],
+      ["reorder", "Reorder payout order", () => window.PowerFund.openReorderModal()],
+    ]) {
+      await p.evaluate(fn);
+      await p.waitForTimeout(600);
+      await shot(p, `t-${label}-${name}`, note);
+      for (let i = 0; i < 4 && (await p.locator(".modal-overlay").count()); i++) {
+        await p.keyboard.press("Escape").catch(() => {});
+        await p.waitForTimeout(220);
+      }
+    }
+    // The Security group, scrolled INTO VIEW. The existing menu captures stop
+    // above it, so the first report could not see it at all.
+    await p.evaluate(() => window.PowerFund.setView("menu"));
+    await p.waitForTimeout(500);
+    const sec = p.locator(".section-label", { hasText: "Security" }).first();
+    if (await sec.count()) {
+      await sec.scrollIntoViewIfNeeded();
+      await p.waitForTimeout(300);
+      await shot(p, `t-${label}-menu-security`, "Menu → Security, scrolled into view", true);
+    }
+    await p.close();
+  }
+
+  console.log("\nThe payment sheets as DESKTOP modals");
+  {
+    // Above 640px these become centred modals rather than bottom sheets, and
+    // above 900px what is behind them blurs. Neither was ever captured.
+    p = await open(browser, midFund, DESKTOP, M.MEMBERS[2].id);
+    await p.evaluate((id) => window.PowerFund.openContributeModal(id, 7), M.MEMBERS[2].id);
+    await p.waitForTimeout(700);
+    await shot(p, "d-desktop-contribute", "Contribute as a centred desktop modal");
+    await p.close();
+
+    p = await open(browser, midFund, DESKTOP, null);
+    await unlock(p);
+    const pend = M.CONTRIBUTIONS.find((c) => c.status === 1);
+    const pc = (M.CYCLES.find((c) => c.id === pend.cycle_id) || {}).cycle_number;
+    await p.evaluate((a) => window.PowerFund.openReviewModal(a.id, a.c), { id: pend.member_id, c: pc });
+    await p.waitForTimeout(700);
+    await shot(p, "d-desktop-review", "Review Payment as a centred desktop modal");
+    await p.close();
+
+    p = await open(browser, funded, DESKTOP, null);
+    await unlock(p);
+    await p.evaluate(() => window.PowerFund.openPayoutModal(2));
+    await p.waitForTimeout(700);
+    await shot(p, "d-desktop-release", "Release Payout as a centred desktop modal");
+    await p.close();
+  }
+
+  console.log("\nLightbox, restore, and the untested width");
+  {
+    p = await open(browser, midFund, MOBILE, M.MEMBERS[1].id);
+    await p.evaluate(() => window.PowerFund.openLightbox("https://example.invalid/proof.jpg"));
+    await p.waitForTimeout(600);
+    await shot(p, "e-mobile-lightbox", "Proof zoom — close button below the image");
+    await p.close();
+
+    // Restore: both the invalid file and the REPLACE confirmation. pickRestoreFile
+    // builds a detached <input> and clicks it, which Playwright sees as a
+    // filechooser — so this drives the real path rather than poking state.
+    for (const [name, note, body] of [
+      ["restore-invalid", "Restore — the file is not a Power Fund backup", "{ not json"],
+      ["restore-confirm", "Restore — type REPLACE to confirm",
+        JSON.stringify({
+          version: 2,
+          exported_at: new Date().toISOString(),
+          contributions: M.CONTRIBUTIONS.slice(0, 12),
+          payouts: M.PAYOUTS,
+          members: M.MEMBERS,
+        })],
+    ]) {
+      p = await open(browser, midFund, MOBILE, null);
+      await unlock(p);
+      const chooser = p.waitForEvent("filechooser");
+      await p.evaluate(() => window.PowerFund.pickRestoreFile());
+      const fc = await chooser;
+      await fc.setFiles({
+        name: "power-fund-backup.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(body),
+      });
+      await p.waitForTimeout(800);
+      await shot(p, `t-mobile-${name}`, note);
+      await p.close();
+    }
+
+    // 641-899px: the mobile tab bar with desktop-sized touch targets and
+    // desktop-positioned modals. No capture has ever fallen in this band.
+    p = await open(browser, midFund, { width: 768, height: 1024 }, M.MEMBERS[1].id);
+    await shot(p, "e-768-home", "Home at 768px — mobile shell, desktop sheet/touch rules");
+    await p.evaluate(() => window.PowerFund.setView("menu"));
+    await p.waitForTimeout(500);
+    await shot(p, "e-768-menu", "Menu at 768px");
+    await p.evaluate((id) => window.PowerFund.openContributeModal(id, 7), M.MEMBERS[1].id);
+    await p.waitForTimeout(700);
+    await shot(p, "e-768-contribute", "Contribute at 768px — sheet or modal?");
+    await p.close();
+  }
+
+  console.log("\nBoot failure and the toast stack");
+  {
+    // NoConnection.dc.html. Every table fails, so the app never boots — and it
+    // only claims "No connection" when the failure really looks like one.
+    for (const [label, vp] of [["mobile", MOBILE], ["desktop", DESKTOP]]) {
+      const q = await browser.newPage({ viewport: vp });
+      await q.route("**/js/config.js", async (r) => {
+        const res = await r.fetch();
+        return r.fulfill({ status: 200, contentType: "application/javascript",
+          body: (await res.text()).replace(/AUTH_MODE:\s*"[a-z]*"/, 'AUTH_MODE: "off"') });
+      });
+      await q.addInitScript(() => {
+        try {
+          localStorage.setItem("pf_onboarded", "1");
+          localStorage.setItem("pf_signin_skipped", "1");
+        } catch (e) {}
+      });
+      await q.route("**/rest/v1/**", (r) => r.abort("connectionfailed"));
+      await q.route("**/realtime/v1/**", (r) => r.abort());
+      await q.goto(BASE, { waitUntil: "domcontentloaded" });
+      await q.waitForTimeout(2500);
+      await shot(q, `e-${label}-boot-failure`, "Boot failure — the fund could not be loaded");
+      await q.close();
+    }
+
+    // A real failed write, not a poked state: the toast has to carry Retry,
+    // and it is bottom-anchored above the tab bar on the phone. The 500 below
+    // is deliberate, so the error collector is muted for this one page.
+    expectErrors = true;
+    p = await open(browser, midFund, MOBILE, null);
+    await unlock(p);
+    await p.route("**/rest/v1/contributions**", (r) =>
+      r.request().method() === "GET"
+        ? r.fulfill({ status: 200, contentType: "application/json",
+            body: JSON.stringify(midFund.contributions) })
+        : r.fulfill({ status: 500, contentType: "application/json",
+            body: JSON.stringify({ message: "Internal server error" }) })
+    );
+    const pend2 = M.CONTRIBUTIONS.find((c) => c.status === 1);
+    const pc2 = (M.CYCLES.find((c) => c.id === pend2.cycle_id) || {}).cycle_number;
+    await p.evaluate((a) => window.PowerFund.openReviewModal(a.id, a.c), { id: pend2.member_id, c: pc2 });
+    await p.waitForTimeout(600);
+    await p.locator(".modal-btn-confirm").click();
+    await p.waitForTimeout(1500);
+    await shot(p, "e-mobile-toast-error", "A failed write — error toast with Retry, above the tab bar");
+    await p.close();
+    expectErrors = false;
+
+    // The success side of the same stack. Exporting used to save silently.
+    p = await open(browser, midFund, DESKTOP, null);
+    await unlock(p);
+    await p.evaluate(() => window.PowerFund.exportCsv());
+    await p.waitForTimeout(900);
+    await shot(p, "e-desktop-toast-success", "Confirmation toast — bottom-right on desktop");
+    await p.close();
+  }
 
   // ---- EDGE STATES ----
   console.log("\nEdge states");

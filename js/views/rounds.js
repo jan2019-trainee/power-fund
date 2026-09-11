@@ -41,7 +41,13 @@ window.PFViews.rounds = function (ctx) {
     const rStatus = C.roundStatus(state.contributions, rounds, r); // not_started|collecting|payout_pending|completed
     const endDue = C.dueDateOf(state.cycles, endCycle);
 
-    const headerHtml = `<div class="round ${isOpen ? "is-open" : ""}">
+    // ONE badge. The lifecycle pill and a separate amber "active" tag were two
+    // badges for one header — Rounds.dc.html carries a single "Current". The
+    // pill now says which round is live, so nothing is lost by dropping the
+    // tag; .is-current also marks the card itself.
+    const headerHtml = `<div class="round ${isOpen ? "is-open" : ""}${
+      r === curRound && !allDone ? " is-current" : ""
+    }">
       <div class="round-header" role="button" tabindex="0" aria-expanded="${
         isOpen ? "true" : "false"
       }" onclick="PowerFund.toggleRound(${r})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();PowerFund.toggleRound(${r})}">
@@ -49,7 +55,7 @@ window.PFViews.rounds = function (ctx) {
           isOpen ? "open" : ""
         }">▸</span> Round ${r} — ${recipient ? escapeHtml(recipient.name) : "—"} ${
       ROUND_PILL[rStatus]
-    }${r === curRound && !allDone ? ' <span class="round-active-tag">active</span>' : ""}</div>
+    }</div>
         <div class="round-status">${C.peso(roundCollected)} / ${C.peso(C.GOAL_PER_ROUND)}${
       fullyFunded ? "" : ` · ${Math.round(C.progressPercentRound(state.contributions, r))}%`
     }${roundPending ? ` · ${roundPending} pending` : ""}${
@@ -148,7 +154,7 @@ window.PFViews.rounds = function (ctx) {
                   // rejected chip gets the direct cash-record confirmation.
                   const tip = unlocked
                     ? status === 1
-                      ? "Pending review — tap to review"
+                      ? "In review — tap to review"
                       : status === 2
                       ? "Confirmed paid — tap to undo"
                       : status === 3
@@ -165,14 +171,20 @@ window.PFViews.rounds = function (ctx) {
                     : overdue
                     ? "Overdue — tap to contribute"
                     : "Tap to contribute";
-                  // Treasurer mode makes every chip clickable, including
-                  // paid/pending ones that would otherwise look like plain
-                  // status badges — a dashed border marks those as also
-                  // being buttons (tap to revert / review), not just info.
-                  // Home marks a rejected chip as tappable for a treasurer
-                  // (home.js), so this must too — the same chip carried the
-                  // affordance on one screen and not the other.
-                  const treasurerTap = unlocked && status !== 0;
+                  // THE AFFORDANCE GOES ON WHAT THIS VIEWER CAN ACT ON, which
+                  // is `clickable` — nothing else. It used to be
+                  // `unlocked && status !== 0`, which marked the chips that
+                  // were already settled and withheld the mark from the
+                  // unpaid ones, on both sides of the gate:
+                  //
+                  //   * a member's OWN payable chip carried only
+                  //     `cursor: pointer` — mouse-only, and this is a phone
+                  //     app, so the one action they came for was invisible
+                  //     while the four chips they are forbidden to tap looked
+                  //     identical to it;
+                  //   * a treasurer's unpaid chips (tap to record cash) had no
+                  //     mark either, while paid and pending ones did.
+                  const actionable = clickable;
                   // A real <button>, not a <span onclick>. Every per-cycle
                   // money action on this screen — confirm, revert, record,
                   // resubmit — is driven from these chips, and as spans they
@@ -182,7 +194,7 @@ window.PFViews.rounds = function (ctx) {
                   // buttons; this makes the two agree.
                   return `<button type="button" class="member-chip ${cls} ${
                     clickable ? "editable" : ""
-                  } ${treasurerTap ? "treasurer-tap" : ""}" ${
+                  } ${actionable ? "actionable" : ""}" ${
                     clickable ? "" : "disabled"
                   } onclick="PowerFund.cellClicked('${inlineArg(
                     m.id
@@ -267,8 +279,23 @@ window.PFViews.rounds = function (ctx) {
                   : ""
               }</div>
                  ${
+                   // A round that is released but no longer funded is a fund
+                   // whose own books contradict each other. Releasing is gated
+                   // on isRoundFunded(), so this is only reachable through a
+                   // revert in the wrong order — now refused, but a fund that
+                   // already got here must SAY so rather than merely be wrong.
+                   C.isRoundFunded(state.contributions, r)
+                     ? ""
+                     : `<p class="payout-shortfall">${icon("alert", 13)}<span>Paid
+                          out in full, but this round now holds only
+                          ${C.peso(C.roundCollected(state.contributions, r))} in
+                          confirmed payments — ${C.peso(
+                            C.GOAL_PER_ROUND - C.roundCollected(state.contributions, r)
+                          )} short.</span></p>`
+                 }
+                 ${
                    unlocked
-                     ? `<button class="reset-btn" onclick="PowerFund.unmarkPayoutReleased(${r})">Undo</button>`
+                     ? `<button class="reset-btn" onclick="PowerFund.unmarkPayoutReleased(${r})">Undo Release</button>`
                      : ""
                  }
                </div>`
@@ -310,7 +337,14 @@ window.PFViews.rounds = function (ctx) {
               recipient ? escapeHtml(recipient.name) : "—"
             } · ${C.peso(roundCollected)} / ${C.peso(C.GOAL_PER_ROUND)} raised</p>
           </div>
-          <button type="button" class="head-action" onclick="PowerFund.exportRoundCsv(${r})">Export round CSV</button>
+          ${
+            // Treasurer mode only, like Activity's Export CSV — the member
+            // Menu says exports are treasurer-only and the mobile shell gives
+            // a member none, so a desktop member getting one was the outlier.
+            unlocked
+              ? `<button type="button" class="head-action" onclick="PowerFund.exportRoundCsv(${r})">Export round CSV</button>`
+              : ""
+          }
         </div>`;
         detailHtml += bodyHtml;
       }

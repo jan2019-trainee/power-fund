@@ -165,7 +165,14 @@ async function tabsRender(browser, label, viewport, errors, wide) {
     if (m.type() === "error" && !expected) errors.push(`${label}: ${text}`);
   });
   page.on("pageerror", (e) => errors.push(`${label}: ${e}`));
-  await serve(page, M.TABLE_DATA);
+  // A fund that HAS a treasurer PIN. The Security row names the missing one
+  // when there is none ("Set a treasurer PIN"), and the mock does not persist
+  // the wizard's write — so the default fixture would leave this check reading
+  // a menu that disagrees with the PIN the test just set.
+  await serve(page, {
+    ...M.TABLE_DATA,
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234" },
+  });
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(1500);
 
@@ -735,16 +742,39 @@ async function membersAndMenu(browser, errors) {
   await wide.waitForTimeout(350);
 
   check("members/desktop: split layout", (await wide.locator(".members-split").count()) === 1);
+  // POPULATED ON ARRIVAL. It used to open empty — ~750x780px of "Pick a
+  // member" where the artboard ships with a member selected, and where this
+  // screen's own sibling (Rounds) already auto-opens. With nobody identified
+  // the pick is the collecting round's recipient.
   check(
-    "members/desktop: empty pane explains itself",
-    (await wide.locator(".members-detail-empty").count()) === 1
+    "members/desktop: the pane is populated on arrival",
+    (await wide.locator(".members-detail .detail-name").count()) === 1 &&
+      (await wide.locator(".members-detail-empty").count()) === 0,
+    await wide.locator(".members-detail").innerText().catch(() => "")
   );
-  await wide.locator(".member-row").nth(1).click();
+  check(
+    "members/desktop: and it picks the current round's recipient",
+    /Sarah/.test(await wide.locator(".members-detail .detail-name").innerText()),
+    await wide.locator(".members-detail .detail-name").innerText()
+  );
+  // A DIFFERENT row, deliberately: nth(1) is the auto-selected one, and
+  // clicking the open row toggles it shut — which is how the auto-select
+  // first broke this check.
+  await wide.locator(".member-row").nth(3).click();
   await wide.waitForTimeout(300);
   check(
     "members/desktop: picking fills the pane",
     (await wide.locator(".members-detail .detail-name").count()) === 1 &&
       (await wide.locator(".members-detail .round-line").count()) > 0
+  );
+  // The empty state is still reachable, and must still explain itself — the
+  // auto-select must not be re-applied on the render after a deselect, or
+  // clicking the open row would look like a dead button.
+  await wide.locator(".member-row").nth(3).click();
+  await wide.waitForTimeout(300);
+  check(
+    "members/desktop: deselecting empties the pane and it explains itself",
+    (await wide.locator(".members-detail-empty").count()) === 1
   );
   check(
     "members/desktop: history not duplicated inline",
@@ -865,8 +895,11 @@ async function activityAndInsights(browser, errors) {
   );
   const chips = (await page.locator(".activity-chip-state").allInnerTexts()).join("|");
   check(
+    // "In review", not "Pending review" — one label for one state. The desktop
+    // Activity column, the Insights donut, the roster and the Members
+    // accordion all said "In review" while this chip said "Pending review".
     "p7/status chips shown",
-    /Pending review/i.test(chips) && /Rejected/i.test(chips),
+    /In review/i.test(chips) && /Rejected/i.test(chips),
     chips
   );
   // Rows written before migration 006 have no typed data and must simply show
@@ -3103,6 +3136,711 @@ async function extraTreasurer(browser, errors) {
   await solo.close();
 }
 
+/** The P3 items with behaviour rather than colour: each was invisible to the
+ *  suite, and two turned out to be defects rather than polish. */
+async function polishPass(browser, errors) {
+  // ---- Activity: an empty log offers no controls, and no "loaded" ----------
+  const empty = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  empty.on("pageerror", (e) => errors.push(`p3/empty: ${e}`));
+  await serve(empty, { ...M.TABLE_DATA, activity_log: [] });
+  await empty.goto(BASE, { waitUntil: "domcontentloaded" });
+  await empty.waitForTimeout(1600);
+  await empty.evaluate(() => window.PowerFund.setView("activity"));
+  await empty.waitForTimeout(500);
+  check("p3/an empty log offers no filter chips",
+    (await empty.locator(".activity-chip").count()) === 0);
+  check("p3/nor an export of nothing",
+    (await empty.locator(".head-action", { hasText: "Export CSV" }).count()) === 0);
+  const emptySub = await empty.locator(".view-sub").innerText();
+  check("p3/and does not say 'loaded'", !/loaded/i.test(emptySub), emptySub);
+  await empty.close();
+
+  // ---- Activity: the hidden-rows note is quiet at the DEFAULT filters ------
+  // desktop-activity-filters-live-notes defaults the round filter to the
+  // current round, so this fired on arrival: the first thing a treasurer saw
+  // was a warning about a state they had not created.
+  const act = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  act.on("pageerror", (e) => errors.push(`p3/activity: ${e}`));
+  await serve(act, M.TABLE_DATA);
+  await act.goto(BASE, { waitUntil: "domcontentloaded" });
+  await act.waitForTimeout(1600);
+  await act.evaluate(() => window.PowerFund.setView("activity"));
+  await act.waitForTimeout(500);
+  const note = act.locator(".activity-unattributed");
+  if (await note.count()) {
+    check("p3/the hidden-rows note arrives quiet, not as an alert",
+      (await note.getAttribute("class")).includes("quiet"),
+      await note.getAttribute("class"));
+    check("p3/and carries no alert icon at the default",
+      (await note.locator(".icon").count()) === 0);
+    // Narrow it by hand and it becomes an alert again.
+    await act.evaluate(() => window.PowerFund.setActivityFilter("payout"));
+    await act.waitForTimeout(400);
+    const n2 = act.locator(".activity-unattributed");
+    if (await n2.count()) {
+      check("p3/but alerts once the viewer narrows it themselves",
+        !(await n2.getAttribute("class")).includes("quiet"),
+        await n2.getAttribute("class"));
+    }
+  }
+  await act.close();
+
+  // ---- Rounds: ONE badge, and the current round still identifiable --------
+  const rounds = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  rounds.on("pageerror", (e) => errors.push(`p3/rounds: ${e}`));
+  await serve(rounds, M.TABLE_DATA);
+  await rounds.goto(BASE, { waitUntil: "domcontentloaded" });
+  await rounds.waitForTimeout(1600);
+  await rounds.locator(".tab-item", { hasText: "Rounds" }).click();
+  await rounds.waitForTimeout(500);
+  check("p3/the second 'active' badge is gone",
+    (await rounds.locator(".round-active-tag").count()) === 0);
+  check("p3/each round header carries exactly one state badge",
+    (await rounds.locator(".round-header .round-state").count()) ===
+      (await rounds.locator(".round-header").count()),
+    `${await rounds.locator(".round-header .round-state").count()} badges / ${await rounds.locator(".round-header").count()} headers`);
+  check("p3/and the current round is still marked on the card",
+    (await rounds.locator(".round.is-current").count()) === 1);
+  await rounds.close();
+
+  // ---- The schedule draft can be put back -------------------------------
+  const sch = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  sch.on("pageerror", (e) => errors.push(`p3/schedule: ${e}`));
+  const members = rosterWithEmails();
+  members[0].auth_user_id = FAKE_USER_ID;
+  await serve(sch, { ...M.TABLE_DATA, members });
+  await withAuthMode(sch, "optional", { signedIn: true, email: "regine@example.com" });
+  await sch.goto(BASE, { waitUntil: "domcontentloaded" });
+  await sch.waitForTimeout(2400);
+  await sch.locator(".unlock-btn").click();
+  await sch.waitForTimeout(500);
+  await sch.evaluate(() => window.PowerFund.openScheduleModal());
+  await sch.waitForTimeout(500);
+  const dates = sch.locator(".schedule-date");
+  const before = await dates.evaluateAll((els) => els.map((e) => e.value));
+  check("p3/Reset changes is hidden while nothing has moved",
+    (await sch.locator("#scheduleReset").isVisible()) === false);
+  const d = new Date(before[2] + "T00:00:00");
+  d.setDate(d.getDate() + 14);
+  const pad = (n) => String(n).padStart(2, "0");
+  await dates.nth(2).fill(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
+  await sch.waitForTimeout(400);
+  check("p3/and appears once something has",
+    (await sch.locator("#scheduleReset").isVisible()) === true);
+  // The count is patched with textContent on every keystroke — a button nested
+  // inside it would have been deleted by the first edit.
+  check("p3/the count still reads correctly beside it",
+    /28 cycles moved/.test(await sch.locator("#scheduleCount").innerText()),
+    await sch.locator("#scheduleCount").innerText());
+  await sch.locator("#scheduleReset").click();
+  await sch.waitForTimeout(400);
+  const after = await dates.evaluateAll((els) => els.map((e) => e.value));
+  check("p3/Reset changes puts every date back",
+    JSON.stringify(after) === JSON.stringify(before),
+    `${after[2]} vs ${before[2]}`);
+  check("p3/and the button hides itself again",
+    (await sch.locator("#scheduleReset").isVisible()) === false);
+  await sch.close();
+}
+
+/** The terminal screen must read the same way for everyone. S.complete used to
+ *  be pulled ahead of the personal card for a treasurer by a rule about the
+ *  attention QUEUE outranking it — but when the fund is complete there is no
+ *  queue and no release (both gated on !allDone), so all that rule did was
+ *  give the treasurer a different reading order on the last screen the group
+ *  ever sees. */
+async function fundCompleteOrder(browser, errors) {
+  // Every cycle confirmed for everyone, every payout released.
+  const rows = [];
+  let id = 90000;
+  M.CYCLES.forEach((cy) =>
+    M.MEMBERS.forEach((m) =>
+      rows.push({
+        id: `00000000-0000-0000-0000-${String(id++).padStart(12, "0")}`,
+        cycle_id: cy.id,
+        member_id: m.id,
+        status: 2,
+        amount: C_AMOUNT,
+        proof_url: null,
+        paid_at: new Date(2026, 8, 14).toISOString(),
+      })
+    )
+  );
+  const data = {
+    ...M.TABLE_DATA,
+    contributions: rows,
+    payouts: M.PAYOUTS.map((p, i) => ({
+      ...p,
+      released: true,
+      amount: 30000,
+      released_on: "2027-01-10",
+      recipient_member_id: M.MEMBERS[i].id,
+      recipient_name: M.MEMBERS[i].name,
+      started_at: new Date().toISOString(),
+    })),
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234" },
+  };
+
+  /** Which comes first in the DOM: the personal card or the green panel? */
+  const order = async (page) =>
+    page.evaluate(() => {
+      const mine = document.querySelector(".my-status-card");
+      const done = document.querySelector(".fund-complete-panel");
+      if (!mine || !done) return mine ? "status-only" : done ? "complete-only" : "neither";
+      return mine.compareDocumentPosition(done) & Node.DOCUMENT_POSITION_FOLLOWING
+        ? "status-then-complete"
+        : "complete-then-status";
+    });
+
+  for (const label of ["member", "treasurer"]) {
+    const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+    page.on("pageerror", (e) => errors.push(`complete/${label}: ${e}`));
+    await serve(page, data);
+    await page.addInitScript((id) => {
+      try { localStorage.setItem("pf_my_member_id", id); } catch (e) {}
+    }, M.MEMBERS[1].id);
+    await page.goto(BASE, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(1800);
+    if (label === "treasurer") await unlockTreasurer(page);
+    check(`complete/${label}: the personal card leads`,
+      (await order(page)) === "status-then-complete", await order(page));
+    // And the personal card must not repeat the green panel's own sentence.
+    const mineTxt = await page.locator(".my-status-card").innerText();
+    const doneTxt = await page.locator(".fund-complete-panel").innerText();
+    check(`complete/${label}: no duplicated sentence`,
+      !/rounds collected and paid out/i.test(mineTxt), mineTxt.replace(/\s+/g, " "));
+    check(`complete/${label}: and the receipt is stated once`,
+      /You received/.test(mineTxt) && !/You received/.test(doneTxt),
+      doneTxt.replace(/\s+/g, " "));
+    await page.close();
+  }
+}
+
+/** 641-899px: iPad portrait and a phone in landscape. Three breakpoints used
+ *  to disagree about what device this is — the shell switches at 900px, but the
+ *  sheet treatment and the 44px touch targets both stopped at 640px — so this
+ *  band got the thumb-reach tab bar with mouse-sized hit areas and
+ *  desktop-positioned centre modals. No check had ever run inside it. */
+async function tabletBand(browser, errors) {
+  const page = await browser.newPage({ viewport: { width: 768, height: 1024 } });
+  page.on("pageerror", (e) => errors.push(`tablet: ${e}`));
+  await serve(page, M.TABLE_DATA);
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1800);
+
+  check("tablet/768px gets the MOBILE shell", (await page.locator(".tab-bar").count()) === 1);
+  check("tablet/and no desktop sidebar nav label",
+    (await page.locator(".tab-item", { hasText: "Board Members" }).count()) === 0);
+
+  // The sheet must be bottom-anchored, like the shell it belongs to.
+  await page.evaluate((id) => window.PowerFund.openContributeModal(id, 7), M.MEMBERS[1].id);
+  await page.waitForTimeout(600);
+  const sheet = await page.locator(".modal-overlay.sheet .modal").boundingBox();
+  const vh = await page.evaluate(() => window.innerHeight);
+  check("tablet/the payment sheet is bottom-anchored, not centred",
+    Math.abs(sheet.y + sheet.height - vh) <= 2,
+    `bottom at ${Math.round(sheet.y + sheet.height)} of ${vh}`);
+  check("tablet/and it spans the width",
+    sheet.width >= 760, `${Math.round(sheet.width)}px`);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+
+  // Touch targets: this is still a thumb interface.
+  await page.locator(".tab-item", { hasText: "Rounds" }).click();
+  await page.waitForTimeout(500);
+  // The chips live inside a round's accordion; a collapsed one has no box.
+  if (!(await page.locator(".round.is-open .member-chip").count())) {
+    await page.locator(".round-header").first().click();
+    await page.waitForTimeout(500);
+  }
+  const chipLoc = page.locator(".round.is-open .member-chip").first();
+  const chip = (await chipLoc.count()) ? await chipLoc.boundingBox() : null;
+  check("tablet/cycle chips keep the 44px touch target",
+    !!chip && chip.height >= 44,
+    chip ? `${Math.round(chip.height)}px` : "(no visible chip)");
+  check("tablet/no sideways scroll",
+    (await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)) === true);
+  await page.close();
+}
+
+/** P1-2: treasurer mode says nothing about whether the writes behind it land.
+ *  011 keys confirm/reject/revert/record/release off members.is_treasurer, and
+ *  the PIN that opens the mode is shared with all five members by design. */
+async function moneyGate(browser, errors) {
+  // A member the app can POSITIVELY identify as not the treasurer: Jan is
+  // signed in and linked, Regine carries the flag.
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`money-gate: ${e}`));
+  const members = rosterWithEmails();
+  members[2].auth_user_id = FAKE_USER_ID;
+  await serve(page, {
+    ...M.TABLE_DATA,
+    members,
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234" },
+  });
+  await withAuthMode(page, "optional", { signedIn: true, email: "jan@example.com" });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
+
+  // Premise: they really can unlock. canUnlockTreasurer() hides the button
+  // only from someone it can identify as a non-treasurer — so it IS hidden
+  // here, and the mode is reached the way the guard must survive: the
+  // exported handler. If this premise breaks, the checks below prove nothing.
+  await page.evaluate(() => { window.PowerFund.toggleUnlock(); });
+  await page.waitForTimeout(400);
+  if (await page.locator(".modal-overlay").count()) {
+    await page.keyboard.type("1234");
+    await page.locator(".modal-btn-primary").first().click();
+    await page.waitForTimeout(800);
+  }
+
+  const pending = M.CONTRIBUTIONS.find((c) => c.status === 1);
+  const cyc = (M.CYCLES.find((c) => c.id === pending.cycle_id) || {}).cycle_number;
+  await page.evaluate(
+    (a) => window.PowerFund.openReviewModal(a.id, a.cycle),
+    { id: pending.member_id, cycle: cyc }
+  );
+  await page.waitForTimeout(500);
+  const openedReview = (await page.locator(".modal-btn-confirm").count()) === 1;
+  check("money-gate/premise: a PIN-unlocked member reaches Review Payment", openedReview);
+
+  if (openedReview) {
+    check("money-gate/it says the writes are refused, before the press",
+      (await page.locator(".money-refused").count()) === 1);
+    check("money-gate/Confirm Payment is disabled",
+      (await page.locator(".modal-btn-confirm").isDisabled()) === true);
+    check("money-gate/Reject claim is disabled",
+      (await page.locator(".modal-btn-secondary.reject").isDisabled()) === true);
+  }
+
+  // The buttons are not the gate — every handler is exported on PowerFund.
+  let wrote = false;
+  await page.route("**/rest/v1/contributions**", (r) => {
+    if (r.request().method() !== "GET") wrote = true;
+    return r.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await page.evaluate(() => window.PowerFund.confirmReview());
+  await page.waitForTimeout(500);
+  check("money-gate/the exported confirm handler refuses too", wrote === false);
+  check("money-gate/and explains why",
+    /flagged treasurer/.test(await page.locator(".save-error-banner").innerText()),
+    await page.locator(".save-error-banner").innerText());
+  await page.close();
+
+  // THE DIRECTION THAT MATTERS MORE. isTreasurerAccount() is false whenever
+  // the app cannot identify the viewer at all — and a fund on AUTH_MODE "off"
+  // still has flagged members, so keying this off it would disable every money
+  // action for a legitimate treasurer with no session. It must not.
+  const off = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  off.on("pageerror", (e) => errors.push(`money-gate/off: ${e}`));
+  await serve(off, {
+    ...M.TABLE_DATA,
+    members: rosterWithEmails(), // flags set, nobody linked
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234" },
+  });
+  await off.goto(BASE, { waitUntil: "domcontentloaded" });
+  await off.waitForTimeout(2000);
+  await unlockTreasurer(off);
+  await off.evaluate(
+    (a) => window.PowerFund.openReviewModal(a.id, a.cycle),
+    { id: pending.member_id, cycle: cyc }
+  );
+  await off.waitForTimeout(500);
+  check("money-gate/auth off: a flagged roster does NOT disable the treasurer",
+    (await off.locator(".modal-btn-confirm").isDisabled()) === false);
+  check("money-gate/auth off: and no refusal notice is shown",
+    (await off.locator(".money-refused").count()) === 0);
+  await off.close();
+}
+
+/** The findings from the independent UI/UX QA pass that were implementation
+ *  gaps rather than product decisions. Every one of these passed the suite
+ *  before the fix, because nothing asserted the behaviour at all. */
+async function qaFindings(browser, errors) {
+  // ---- P0: reverting a confirmed payment inside a RELEASED round ----------
+  // markPayoutReleased() gates release on isRoundFunded(), so the app asserted
+  // funded-implies-released one way and let the other be broken silently: two
+  // taps produced a round badged Completed at ₱28,000 / ₱30,000 with a ₱30,000
+  // payout on record. The fixtures are already in that state (Verdz is short
+  // on cycles 5-6 of round 1, which is released), which is what makes the
+  // shortfall marker testable.
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`qa-p0: ${e}`));
+  await serve(page, {
+    ...M.TABLE_DATA,
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234" },
+  });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2000);
+  await unlockTreasurer(page);
+
+  // Premise: round 1 really is released, and Regine really is confirmed on
+  // cycle 1 — without both, a refusal proves nothing.
+  const premise = await page.evaluate(() => {
+    const p = window.PowerFund;
+    return { hasRevert: typeof p.confirmUndoPaid === "function" };
+  });
+  check("qa-p0/premise: the revert handler is exported", premise.hasRevert === true);
+  check(
+    "qa-p0/premise: round 1 is released in the fixtures",
+    M.PAYOUTS[0].released === true
+  );
+
+  await page.locator(".tab-item", { hasText: "Rounds" }).click();
+  await page.waitForTimeout(500);
+  await page.locator(".round-header").first().click();
+  await page.waitForTimeout(500);
+
+  // An already-broken fund must SAY so rather than merely be wrong.
+  // Read the count FIRST and only then the text: innerText() on a zero-count
+  // locator throws, which aborts the whole run instead of reporting one FAIL —
+  // and a check that cannot fail cleanly is no use when verifying the fix.
+  const shortfalls = await page.locator(".payout-shortfall").count();
+  const shortfallText = shortfalls
+    ? await page.locator(".payout-shortfall").first().innerText()
+    : "(none rendered)";
+  check("qa-p0/a released-but-unfunded round is flagged", shortfalls === 1, shortfallText);
+  check("qa-p0/and names the shortfall", /short/.test(shortfallText), shortfallText);
+  check(
+    "qa-p2/the release reversal says what it reverses",
+    /Undo Release/.test(await page.locator(".payout-status-box").first().innerText()),
+    await page.locator(".payout-status-box").first().innerText()
+  );
+
+  // Tapping a confirmed chip in a released round must not open the undo panel.
+  const paidChip = page.locator(".member-chip.paid").first();
+  await paidChip.click();
+  await page.waitForTimeout(500);
+  check("qa-p0/the undo panel does not open on a released round",
+    (await page.locator(".undo-paid-panel").count()) === 0);
+  const banner = (await page.locator(".save-error-banner").count())
+    ? await page.locator(".save-error-banner").first().innerText()
+    : "(no error banner)";
+  check("qa-p0/and it says to undo the release first",
+    /already been paid out/.test(banner), banner);
+
+  // cellClicked is exported, so the chip not being tappable is not the gate.
+  // A REAL member id, or this calls a no-op and passes either way.
+  const before = await page.locator(".member-chip.paid").count();
+  await page.evaluate((id) => window.PowerFund.cellClicked(id, 1), M.MEMBERS[0].id);
+  await page.waitForTimeout(400);
+  check("qa-p0/the exported handler refuses it too",
+    (await page.locator(".undo-paid-panel").count()) === 0);
+  const after = await page.locator(".member-chip.paid").count();
+  check("qa-p0/no confirmed payment was removed", after === before, `${before} → ${after}`);
+  await page.close();
+
+  // ---- P1: the destructive confirm button was never disabled --------------
+  // canvas.json's menu-pin-notes names this property explicitly: "type RESET
+  // AND enter the PIN before 'Reset everything' enables — genuinely
+  // disabled/enabled live based on both fields".
+  const d = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  d.on("pageerror", (e) => errors.push(`qa-p1: ${e}`));
+  await serve(d, {
+    ...M.TABLE_DATA,
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234" },
+  });
+  await d.goto(BASE, { waitUntil: "domcontentloaded" });
+  await d.waitForTimeout(2000);
+  await unlockTreasurer(d);
+  await d.evaluate(() => window.PowerFund.resetData());
+  await d.waitForTimeout(500);
+
+  const yes = d.locator(".modal .confirm-yes");
+  check("qa-p1/Reset is disabled on an empty dialog",
+    (await yes.isDisabled()) === true);
+  await d.locator(".confirm-type-input").fill("RESET");
+  await d.waitForTimeout(250);
+  check("qa-p1/still disabled with RESET typed but no PIN",
+    (await yes.isDisabled()) === true);
+  await d.locator('.modal input[placeholder="Treasurer PIN"]').fill("1234");
+  await d.waitForTimeout(250);
+  check("qa-p1/enabled once both fields are filled",
+    (await yes.isDisabled()) === false);
+  // Live in both directions — the design says "disabled/enabled live".
+  await d.locator(".confirm-type-input").fill("RESE");
+  await d.waitForTimeout(250);
+  check("qa-p1/and disables again when the word is broken",
+    (await yes.isDisabled()) === true);
+  await d.close();
+}
+
+/** The two PIN dead ends, both created by the PIN-free unlock landing on top
+ *  of rules written when treasurer mode could only be entered with a PIN. */
+async function pinDeadEnds(browser, errors) {
+  // 1. A GOOGLE-VERIFIED TREASURER ON A FUND WITH NO TREASURER PIN.
+  //    They unlock with no PIN, so nothing ever mentions that none exists —
+  //    until a destructive action asks for one that cannot be typed.
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`pin-deadend: ${e}`));
+  const members = rosterWithEmails();
+  members[0].auth_user_id = FAKE_USER_ID;
+  await serve(page, {
+    ...M.TABLE_DATA,
+    members,
+    app_settings: { ...M.SETTINGS, treasurer_pin: null, master_pin: null },
+  });
+  await withAuthMode(page, "optional", { signedIn: true, email: "regine@example.com" });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
+  await page.locator(".unlock-btn").click();
+  await page.waitForTimeout(500);
+  check("pin-deadend/a verified treasurer unlocks with no PIN modal",
+    (await page.locator(".modal-overlay").count()) === 0);
+  await page.locator(".tab-item", { hasText: "Menu" }).click();
+  await page.waitForTimeout(400);
+
+  const pinRow = page.locator(".menu-row", { hasText: "treasurer PIN" }).first();
+  const pinRowText = (await pinRow.innerText()).replace(/\s+/g, " ");
+  check("pin-deadend/the menu says no PIN is set",
+    /Set a treasurer PIN/.test(pinRowText), pinRowText);
+  check("pin-deadend/and names what needs it",
+    /Reset all data/.test(await page.locator(".menu-row", { hasText: "Set a treasurer PIN" }).first().innerText()));
+
+  await page.locator(".reset-btn.danger").click();
+  await page.waitForTimeout(450);
+  check("pin-deadend/the confirm says there is no PIN, not 'incorrect'",
+    (await page.locator(".confirm-no-pin").count()) === 1);
+  check("pin-deadend/it offers no PIN field to type into",
+    (await page.locator('.modal input[placeholder="Treasurer PIN"]').count()) === 0);
+  // Hidden too: typing RESET into a dialog that cannot be submitted is busywork.
+  check("pin-deadend/nor the type-to-confirm field",
+    (await page.locator(".confirm-type-input").count()) === 0);
+  check("pin-deadend/and offers the way out instead of Reset",
+    (await page.locator(".confirm-set-pin").count()) === 1 &&
+      (await page.locator(".confirm-yes").count()) === 0);
+
+  // submitConfirm is exported, so the hidden field is not the gate — and the
+  // missing-PIN check must beat the type-to-confirm one, or the message would
+  // be "Type RESET exactly to confirm" for a dialog with no RESET field.
+  await page.evaluate(() => window.PowerFund.submitConfirm());
+  await page.waitForTimeout(400);
+  check("pin-deadend/the handler refuses, and says why",
+    /No treasurer PIN is set/.test(await page.locator(".modal .pin-error").innerText()),
+    await page.locator(".modal .pin-error").innerText());
+
+  await page.locator(".confirm-set-pin").click();
+  await page.waitForTimeout(450);
+  check("pin-deadend/the way out opens PIN creation, not 'change'",
+    /Choose a treasurer PIN/.test(await page.locator(".modal h3").innerText()),
+    await page.locator(".modal h3").innerText());
+  check("pin-deadend/a first PIN has two steps, not three",
+    (await page.locator(".pin-step").count()) === 2);
+  await page.close();
+
+  // 2. THE MASTER-PIN LOCKOUT. Unlocking with the master PIN tells you to set a
+  //    new treasurer PIN from Menu → Change PIN — and that screen used to open
+  //    by demanding the very PIN you just proved you had forgotten.
+  const m = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  m.on("pageerror", (e) => errors.push(`pin-master: ${e}`));
+  await serve(m, {
+    ...M.TABLE_DATA,
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234", master_pin: "9999" },
+  });
+  await m.goto(BASE, { waitUntil: "domcontentloaded" });
+  await m.waitForTimeout(2000);
+  await m.locator(".unlock-btn").click();
+  await m.waitForTimeout(400);
+  await m.keyboard.type("9999");
+  await m.locator(".modal-btn-primary").first().click();
+  await m.waitForTimeout(900);
+  check("pin-master/the master PIN unlocks", (await m.locator(".unlock-btn").innerText()).length > 0);
+  await m.locator(".tab-item", { hasText: "Menu" }).click();
+  await m.waitForTimeout(400);
+  await m.locator(".menu-row", { hasText: "Change PIN" }).first().click();
+  await m.waitForTimeout(450);
+  check(
+    "pin-master/Change PIN does NOT demand the forgotten PIN",
+    /Choose a new PIN/.test(await m.locator(".modal h3").innerText()),
+    await m.locator(".modal h3").innerText()
+  );
+  check("pin-master/and the progress bar counts two steps",
+    (await m.locator(".pin-step").count()) === 2);
+  await m.close();
+
+  // The control: an ordinary unlock still has to prove the current PIN, or
+  // anyone holding an unlocked phone could lock the group out of its own fund.
+  const norm = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  norm.on("pageerror", (e) => errors.push(`pin-normal: ${e}`));
+  await serve(norm, {
+    ...M.TABLE_DATA,
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234", master_pin: "9999" },
+  });
+  await norm.goto(BASE, { waitUntil: "domcontentloaded" });
+  await norm.waitForTimeout(2000);
+  await norm.locator(".unlock-btn").click();
+  await norm.waitForTimeout(400);
+  await norm.keyboard.type("1234");
+  await norm.locator(".modal-btn-primary").first().click();
+  await norm.waitForTimeout(900);
+  await norm.locator(".tab-item", { hasText: "Menu" }).click();
+  await norm.waitForTimeout(400);
+  await norm.locator(".menu-row", { hasText: "Change PIN" }).first().click();
+  await norm.waitForTimeout(450);
+  check(
+    "pin-normal/an ordinary unlock still proves the current PIN",
+    /Enter your current PIN/.test(await norm.locator(".modal h3").innerText()),
+    await norm.locator(".modal h3").innerText()
+  );
+  check("pin-normal/three steps",
+    (await norm.locator(".pin-step").count()) === 3);
+  await norm.close();
+}
+
+/** Payment schedule — the 30 due dates, which until now could only be changed
+ *  in SQL. Gated on the ACCOUNT (011's cycles_treasurer keys off
+ *  members.is_treasurer), not on the shared PIN. */
+async function paymentSchedule(browser, errors) {
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`schedule: ${e}`));
+  const members = rosterWithEmails();
+  members[0].auth_user_id = FAKE_USER_ID; // Regine, flagged AND signed in
+  const data = { ...M.TABLE_DATA, members };
+  await serve(page, data);
+
+  const writes = [];
+  await page.route("**/rest/v1/cycles**", async (route) => {
+    const req = route.request();
+    if (req.method() === "GET") {
+      return route.fulfill({
+        status: 200, contentType: "application/json",
+        body: JSON.stringify(data.cycles),
+      });
+    }
+    let body = {};
+    try { body = JSON.parse(req.postData() || "{}"); } catch (e) {}
+    const target = data.cycles.find((c) => req.url().includes(c.id));
+    writes.push({ cycle: target && target.cycle_number, body });
+    Object.assign(target || {}, body);
+    return route.fulfill({
+      status: 200, contentType: "application/json",
+      body: JSON.stringify([target || {}]),
+    });
+  });
+  await withAuthMode(page, "optional", { signedIn: true, email: "regine@example.com" });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
+  await page.locator(".unlock-btn").click();
+  await page.waitForTimeout(500);
+  await page.locator(".tab-item", { hasText: "Menu" }).click();
+  await page.waitForTimeout(400);
+
+  const rowLoc = page.locator(".menu-row", { hasText: "Payment schedule" });
+  check("schedule/the treasurer gets a Payment schedule row", (await rowLoc.count()) === 1);
+  await rowLoc.first().click();
+  await page.waitForTimeout(450);
+
+  const dates = page.locator(".schedule-modal .schedule-date");
+  check("schedule/every cycle is editable", (await dates.count()) === 30, `${await dates.count()} fields`);
+  check(
+    "schedule/grouped by round",
+    (await page.locator(".schedule-modal .schedule-round").count()) === 5
+  );
+  check("schedule/nothing is moved on open", /No changes yet/.test(
+    await page.locator("#scheduleCount").innerText()
+  ));
+
+  const vals = () => dates.evaluateAll((els) => els.map((e) => e.value));
+  const before = await vals();
+  const plusDays = (iso, n) => {
+    const d = new Date(iso + "T00:00:00");
+    d.setDate(d.getDate() + n);
+    const p = (x) => String(x).padStart(2, "0");
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+  };
+
+  // THE REASON THE SCREEN EXISTS: a round started late, so cycle 3 and
+  // everything after it moves. Doing that one field at a time is 28 edits.
+  await dates.nth(2).fill(plusDays(before[2], 14));
+  await page.waitForTimeout(350);
+  const after = await vals();
+  check("schedule/shift leaves earlier cycles alone",
+    after[0] === before[0] && after[1] === before[1],
+    `${after[0]} / ${after[1]}`);
+  check("schedule/the edited cycle moves",
+    after[2] === plusDays(before[2], 14), after[2]);
+  check(
+    "schedule/and every later cycle moves with it",
+    after.slice(3).every((v, i) => v === plusDays(before[i + 3], 14)),
+    after.slice(3, 6).join(" ")
+  );
+  check("schedule/it counts what moved", /28 cycles moved/.test(
+    await page.locator("#scheduleCount").innerText()
+  ));
+  // onTimeStats() judges paid_at against due_date, so moving a settled cycle
+  // rewrites who is on record as having paid on time. Not blocked — said.
+  check(
+    "schedule/it warns about already-confirmed cycles",
+    (await page.locator("#scheduleSettled").isVisible()) &&
+      /paid on time/.test(await page.locator("#scheduleSettled").innerText())
+  );
+
+  // Shift off: one date alone.
+  await page.locator(".schedule-shift input").uncheck();
+  await page.waitForTimeout(150);
+  const pre = await vals();
+  await dates.nth(19).fill(plusDays(pre[19], 1));
+  await page.waitForTimeout(300);
+  const post = await vals();
+  check("schedule/with the shift off only that cycle moves",
+    post[19] === plusDays(pre[19], 1) && post[20] === pre[20],
+    `${post[19]} / ${post[20]}`);
+
+  // Out of order is refused: currentCycle() returns the first cycle whose date
+  // has not passed while completedCyclesCount() counts every one that has, so
+  // an unordered schedule makes those two disagree.
+  await dates.nth(1).fill(plusDays(post[2], 5));
+  await page.waitForTimeout(300);
+  check("schedule/out-of-order dates are refused", /must fall after cycle 2/.test(
+    await page.locator("#scheduleError").innerText()
+  ), await page.locator("#scheduleError").innerText());
+  check("schedule/and Save is disabled while they are",
+    (await page.locator("#scheduleSave").isDisabled()) === true);
+
+  await dates.nth(1).fill(pre[1]);
+  await page.waitForTimeout(300);
+  check("schedule/fixing it re-enables Save",
+    (await page.locator("#scheduleSave").isDisabled()) === false);
+
+  await page.locator("#scheduleSave").click();
+  await page.waitForTimeout(1600);
+  check("schedule/the modal closes on save", (await page.locator(".schedule-modal").count()) === 0);
+  check("schedule/only the cycles that moved are written",
+    writes.length === 28, `${writes.length} write(s)`);
+  check("schedule/cycles 1 and 2 are left alone",
+    !writes.some((w) => w.cycle === 1 || w.cycle === 2),
+    writes.map((w) => w.cycle).slice(0, 3).join(","));
+  check(
+    "schedule/each write carries due_date and nothing else",
+    writes.every((w) => Object.keys(w.body).length === 1 && "due_date" in w.body),
+    JSON.stringify(writes[0] && writes[0].body)
+  );
+  await page.close();
+
+  // THE GATE. The treasurer PIN is shared with all five members, so unlocking
+  // treasurer mode with it must NOT reach a table 011 makes account-only.
+  const pin = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  pin.on("pageerror", (e) => errors.push(`schedule/pin: ${e}`));
+  const roster = rosterWithEmails();
+  roster[2].auth_user_id = FAKE_USER_ID; // Jan is signed in; Regine is the treasurer
+  await serve(pin, {
+    ...M.TABLE_DATA,
+    members: roster,
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234" },
+  });
+  await withAuthMode(pin, "optional", { signedIn: true, email: "jan@example.com" });
+  await pin.goto(BASE, { waitUntil: "domcontentloaded" });
+  await pin.waitForTimeout(2500);
+  await pin.evaluate(() => window.PowerFund.openScheduleModal());
+  await pin.waitForTimeout(400);
+  // Exported on PowerFund, so an absent menu row is not the gate.
+  check(
+    "schedule/a member who is not the flagged treasurer cannot open it",
+    (await pin.locator(".schedule-modal").count()) === 0
+  );
+  await pin.close();
+}
+
 /** Transfer treasurer role — moving `members.is_treasurer`, the flag Postgres
  *  checks. The PIN cannot express this, which is the whole point. */
 async function transferRole(browser, errors) {
@@ -4177,11 +4915,14 @@ async function desktopHeaderActions(browser, errors) {
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(1500);
 
+  // Export is TREASURER-ONLY, both directions — the member Menu says exports
+  // are only available in treasurer mode and the mobile shell gives a member
+  // none, so a desktop member getting one made three surfaces disagree.
   await page.locator(".tab-bar .tab-item", { hasText: "Activity" }).click();
   await page.waitForTimeout(300);
   check(
-    "head/Activity carries Export CSV",
-    (await page.locator(".view-head .head-action", { hasText: "Export CSV" }).count()) === 1
+    "head/Activity hides Export CSV while locked",
+    (await page.locator(".view-head .head-action", { hasText: "Export CSV" }).count()) === 0
   );
 
   await page.locator(".tab-bar .tab-item", { hasText: "Members" }).click();
@@ -4191,6 +4932,12 @@ async function desktopHeaderActions(browser, errors) {
     (await page.locator(".view-head .head-action").count()) === 0
   );
   await unlockTreasurer(page);
+  await page.locator(".tab-bar .tab-item", { hasText: "Activity" }).click();
+  await page.waitForTimeout(300);
+  check(
+    "head/Activity carries Export CSV for the treasurer",
+    (await page.locator(".view-head .head-action", { hasText: "Export CSV" }).count()) === 1
+  );
   await page.locator(".tab-bar .tab-item", { hasText: "Members" }).click();
   await page.waitForTimeout(300);
   check(
@@ -4383,6 +5130,13 @@ async function bootFailure(browser) {
   await unlockVisibility(browser, errors);
   await extraTreasurer(browser, errors);
   await transferRole(browser, errors);
+  await paymentSchedule(browser, errors);
+  await pinDeadEnds(browser, errors);
+  await qaFindings(browser, errors);
+  await moneyGate(browser, errors);
+  await tabletBand(browser, errors);
+  await fundCompleteOrder(browser, errors);
+  await polishPass(browser, errors);
   await signInPrompt(browser, errors);
   await onboarding(browser, errors);
   console.log("\nBackup round-trip");

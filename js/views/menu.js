@@ -19,6 +19,7 @@ window.PFViews.menu = function (ctx) {
   const {
     members, unlocked, myMember, escapeHtml, icon, memberAvatar, C, hasMasterPin,
     authMode, sessionEmail, identityLocked, signInStatus, isTreasurerAccount,
+    hasTreasurerPin, isWide,
     payoutOwner, maskAccount
   } = ctx;
 
@@ -32,8 +33,16 @@ window.PFViews.menu = function (ctx) {
       <span class="menu-row-chevron">›</span>
     </button>`;
 
+  /* ONE ELEMENT PER GROUP. The label and its list used to be two siblings,
+     which is why the desktop 2-column grid could not be used for them: grid
+     auto-placement would have put a heading in one column and its rows in the
+     other. So everything stacked in column 1 and the right column held only
+     the explainer card — leaving Security and the Danger zone far below the
+     fold with half the viewport empty, which is exactly what desktop-notes
+     asks a "full 2-column settings page" to avoid. */
   const group = (label, rows) =>
-    `<p class="section-label">${label}</p><div class="menu-list">${rows.join("")}</div>`;
+    `<section class="menu-group"><p class="section-label">${label}</p>` +
+    `<div class="menu-list">${rows.join("")}</div></section>`;
 
   let html = `<div class="view-head">
     <h2 class="view-title">Menu</h2>
@@ -80,11 +89,34 @@ window.PFViews.menu = function (ctx) {
         "PowerFund.openReorderModal()",
         "Round N always pays whoever is in position N"
       ),
+      // FLAGGED TREASURER ONLY. Migration 011 makes `cycles` treasurer-only by
+      // members.is_treasurer, which the shared PIN cannot express — so showing
+      // this to a PIN-unlocked member would offer a button Postgres refuses.
+      ...(isTreasurerAccount
+        ? [
+            row(
+              "calendar",
+              "Payment schedule",
+              "PowerFund.openScheduleModal()",
+              "When each cycle falls due \u2014 what marks a payment overdue"
+            ),
+          ]
+        : []),
       row("share", "Share fund status", "PowerFund.openShareModal()"),
     ]);
 
     html += group("Security", [
-      row("key", "Change PIN", "PowerFund.openChangePin()", "The PIN that unlocks treasurer mode"),
+      // Says when there ISN'T one. A Google-verified treasurer unlocks without
+      // a PIN, so nothing else in the app would ever mention that the fund has
+      // none — until a destructive action asks for it and cannot be satisfied.
+      row(
+        "key",
+        hasTreasurerPin ? "Change PIN" : "Set a treasurer PIN",
+        "PowerFund.openChangePin()",
+        hasTreasurerPin
+          ? "The PIN that unlocks treasurer mode"
+          : "Not set \u2014 Reset all data, Transfer role and Remove treasurer all need it"
+      ),
       // The recovery PIN had no UI at all — it existed only as a one-off SQL
       // statement, so a fund deployed without it had no way back from a
       // forgotten treasurer PIN and nothing anywhere said so.
@@ -293,8 +325,14 @@ window.PFViews.menu = function (ctx) {
     ),
   ]);
 
-  html += `<div class="footer-note">
-    <b>How this works</b>
+  /* COLLAPSED BY DEFAULT ON THE PHONE. This is a wall of reference text sitting
+     directly under a "Replay the intro" row that leads to the same material,
+     and on mobile it was the longest thing on the screen — Menu became a
+     document. A <details> keeps it one tap away without making everyone scroll
+     past it; the desktop grid gives it a column of its own, where it reads as
+     the reference card it is, so it stays open there (CSS). */
+  html += `<details class="footer-note" ${isWide ? "open" : ""}>
+    <summary><b>How this works</b></summary>
     <ul class="how-it-works-list">
       <li><b>The fund:</b> ${members.length} members × ${C.peso(
     C.CONTRIBUTION_AMOUNT
@@ -310,7 +348,7 @@ window.PFViews.menu = function (ctx) {
         C.GOAL_PER_ROUND
       )} — Collecting → Payout Pending → Completed. "Release payout" and "Start next round" are separate steps, so a previous round can stay Payout Pending while a new one collects</li>
     </ul>
-  </div>`;
+  </details>`;
 
   return html;
 };

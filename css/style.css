@@ -203,6 +203,13 @@ body {
 }
 .my-status-cta:hover { background: #ffb733; }
 
+.my-status-since {
+  display: block;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.my-status-head { margin: 0 0 8px; }
 .my-status-paid, .my-status-done { border-left-color: var(--success); }
 .my-status-pending { border-left-color: var(--pending-review); }
 .my-status-due { border-left-color: var(--accent); }
@@ -685,19 +692,24 @@ body {
   border-style: dashed;
 }
 
-/* Treasurer mode makes every paid/pending chip clickable (revert / review),
-   not just unpaid ones — a dashed border marks those as also being buttons,
-   so a green/orange pill doesn't read as purely informational. */
-.member-chip.treasurer-tap,
-.mini-chip.treasurer-tap {
-  border-style: dashed;
+/* "This chip is a button FOR YOU." Applied to whatever this viewer can
+   actually act on — a member's own owed cycle, every cycle for the treasurer.
+
+   NOT border-style. Dashed already means "sent and refused" on .rejected, so
+   overloading it made a rejected chip and a merely-tappable one look the same,
+   and the old hover flipped dashed to SOLID to signal hover — which turned a
+   rejected chip momentarily into an overdue one, collapsing the exact
+   distinction the dash carries. An inset ring in the chip's own colour reads
+   as a raised control at every status, works on touch (where :hover never
+   fires), and leaves the border alone. */
+.member-chip.actionable {
+  box-shadow: inset 0 0 0 1px currentColor;
 }
-.member-chip.treasurer-tap:hover,
-.member-chip.treasurer-tap:focus-visible,
-.mini-chip.treasurer-tap:hover,
-.mini-chip.treasurer-tap:focus-visible {
-  border-style: solid;
+.member-chip.actionable:hover,
+.member-chip.actionable:focus-visible {
+  filter: brightness(1.18);
 }
+.mini-chip.actionable { box-shadow: inset 0 0 0 1px currentColor; }
 .today-tag {
   display: inline-block;
   background: var(--accent);
@@ -738,6 +750,28 @@ body {
   line-height: 1.6;
 }
 .footer-note b { color: var(--text-primary); }
+/* The disclosure, styled so it does not read as a bare browser triangle. */
+.footer-note > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-primary);
+}
+.footer-note > summary::-webkit-details-marker { display: none; }
+.footer-note > summary::after {
+  content: "▸";
+  color: var(--text-muted);
+  font-size: 12px;
+  transition: transform 0.18s ease;
+}
+.footer-note[open] > summary::after { transform: rotate(90deg); }
+.footer-note[open] > summary { margin-bottom: 10px; }
+@media (prefers-reduced-motion: reduce) {
+  .footer-note > summary::after { transition: none; }
+}
 
 .activity-section { margin-bottom: 12px; }
 .activity-list { max-height: 320px; overflow-y: auto; }
@@ -899,8 +933,15 @@ body {
    actions sit near the thumb rather than mid-screen. Only these three: the
    rest of the app's dialogs are centered in the design too, and the desktop
    artboards specify centered modals for all of them, so this is scoped to
-   narrow viewports. */
-@media (max-width: 640px) {
+   narrow viewports.
+
+   899px, NOT 640px — this must track the SHELL. `isWide` switches the shell at
+   900px (a JS branch, not a reflow), so between 641 and 899px — iPad portrait,
+   a phone in landscape — the app drew the thumb-reach mobile tab bar with
+   desktop-positioned, unblurred centre modals. Three breakpoints disagreeing
+   about what device this is gave that band the worst half of each design, and
+   no capture in the QA set fell inside it. 768px is now captured. */
+@media (max-width: 899px) {
   .modal-overlay.sheet {
     align-items: flex-end;
     padding: 0;
@@ -1139,6 +1180,11 @@ body {
   box-sizing: border-box;
 }
 .pin-input:focus { border-color: var(--accent); }
+/* The 4px tracking is right for the DIGITS and unreadable as a hint —
+   "T r e a s u r e r   P I N" and "T Y P E   R E S E T" read as a rendering
+   fault rather than as placeholder text. The typed value keeps its spacing. */
+.pin-input::placeholder,
+.confirm-type-input::placeholder { letter-spacing: normal; }
 .pin-error { color: #E15353; font-size: 12px; margin: 0 0 12px; text-align: center; }
 
 .name-input {
@@ -1154,6 +1200,198 @@ body {
 }
 .edit-names-modal { text-align: left; }
 .edit-names-modal h3, .edit-names-modal .modal-sub { text-align: center; }
+
+/* Treasurer mode is open, but this viewer's money writes are refused by
+   Postgres (migration 011 keys them off members.is_treasurer, and the PIN that
+   opened the mode is shared with the whole group). Amber, not red: nothing has
+   gone wrong — the buttons simply are not theirs. */
+.money-refused {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  text-align: left;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 10px;
+  padding: 10px 11px;
+  margin: 0 0 12px;
+}
+.money-refused .icon { flex: none; margin-top: 2px; }
+
+/* An already-released round that no longer holds its full goal. Only reachable
+   on a fund that got there before the guard existed — but it must read as the
+   contradiction it is, not as a normal release record. */
+.payout-shortfall {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-radius: 9px;
+  padding: 8px 10px;
+  margin: 8px 0 0;
+}
+.payout-shortfall .icon { flex: none; margin-top: 2px; }
+
+/* The confirm dialog's "there is no PIN to type" notice. Amber rather than
+   red: nothing has gone wrong and nothing has been refused — the action is
+   simply waiting on a credential that was never created. */
+.confirm-no-pin {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  text-align: left;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 10px;
+  padding: 10px 11px;
+  margin: 14px 0 0;
+}
+.confirm-no-pin .icon { flex: none; margin-top: 2px; }
+.confirm-no-pin b { color: var(--accent); }
+
+/* --- Payment schedule (treasurer) ----------------------------------------
+   Thirty date fields is a lot of rows, so the list scrolls inside the dialog
+   and the cycle number carries the identity — the treasurer arrives knowing
+   which cycle slipped, not which date is currently on it. Cycles already in
+   the past are dimmed: they are still editable (that is the whole point when
+   a schedule slipped weeks ago) but they are not what you came for. */
+.schedule-modal { text-align: left; }
+.schedule-modal h3, .schedule-modal .modal-sub { text-align: center; }
+.schedule-modal .modal-sub { margin-bottom: 14px; }
+
+.schedule-shift {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 11px 12px;
+  margin-bottom: 12px;
+  cursor: pointer;
+}
+.schedule-shift input { margin-top: 2px; flex: none; width: 16px; height: 16px; accent-color: var(--accent); }
+.schedule-shift-label { display: block; font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
+.schedule-shift-note { display: block; font-size: 12px; line-height: 1.45; color: var(--text-muted); margin-top: 2px; }
+
+/* A bordered box, not a bare run of rows: thirty cycles cannot fit, so the
+   list scrolls — and without an edge the cut-off row under the Save button
+   reads as a rendering fault rather than as "there is more below". */
+.schedule-list {
+  max-height: 50vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 10px 11px;
+}
+.schedule-round {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 12px 0 6px;
+}
+.schedule-round:first-child { margin-top: 0; }
+
+.schedule-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 0;
+}
+.schedule-cycle { font-size: 13.5px; color: var(--text-primary); }
+.schedule-row.past .schedule-cycle { color: var(--text-muted); }
+
+.schedule-date {
+  flex: none;
+  width: 156px;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 8px 10px;
+  color: var(--text-primary);
+  font-size: 13.5px;
+  font-family: inherit;
+}
+.schedule-date:focus { outline: none; border-color: var(--accent); }
+.schedule-date.invalid { border-color: var(--danger); background: var(--danger-soft); }
+
+.schedule-settled {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 9px;
+  padding: 9px 11px;
+  margin: 0 0 10px;
+}
+.schedule-modal #scheduleError { margin: 0 0 10px; }
+/* Save stays reachable however long the list is. The modal is the scroller
+   (max-height: 90vh), so sticking the actions to its bottom edge means the
+   footer never depends on where the inner list happens to be scrolled to. */
+.schedule-modal .modal-actions {
+  position: sticky;
+  bottom: -24px;
+  background: var(--bg-card);
+  padding-bottom: 4px;
+  margin-bottom: 0;
+}
+/* Above the list, like the warning. Below it, the sticky footer covered it on
+   desktop — and it is the only thing that says how much one edit changed. */
+.schedule-countline {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 10px;
+  margin: 0 2px 7px;
+}
+.schedule-count { font-size: 12px; color: var(--text-muted); }
+.schedule-reset {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+}
+.schedule-reset:hover { text-decoration: underline; }
+
+@media (max-width: 480px) {
+  .schedule-date { width: 138px; }
+  /* The warning and the validation error are the whole point of this screen,
+     and with the list at 50vh they were pushed off the bottom together with
+     Save — on the one phone size most likely to be used. */
+  .schedule-list { max-height: 38vh; }
+}
+
+/* Desktop: 30 rows in a 360px column on a 1440px screen was the narrowest
+   presentation of the app's longest list on its widest viewport. desktop-notes
+   asks these modals to use the room. Two columns fit a whole round-pair
+   without scrolling. */
+@media (min-width: 900px) {
+  .schedule-modal { max-width: 640px; }
+  .schedule-list {
+    max-height: 58vh;
+    column-count: 2;
+    column-gap: 26px;
+  }
+  /* A round heading must not be orphaned at the foot of a column. */
+  .schedule-round { break-after: avoid; break-inside: avoid; }
+  .schedule-row { break-inside: avoid; }
+  .schedule-date { width: 150px; }
+}
 
 /* --- Member sign-in (treasurer) ------------------------------------------
    One block per member: who they are and where their login stands on the top
@@ -1205,7 +1443,11 @@ body {
   margin-top: 2px;
 }
 .acct-pill.ok   { color: var(--success); }
-.acct-pill.wait { color: var(--pending-review); }
+/* Amber, NOT --pending-review. Purple means "a payment awaiting the
+   treasurer" everywhere else in the app, and a second unrelated meaning for a
+   load-bearing hue dilutes the one that matters. "Hasn't signed in yet" is a
+   rollout item to chase, which is what amber says here. */
+.acct-pill.wait { color: var(--accent); }
 .acct-pill.none { color: var(--text-muted); font-weight: 500; }
 .acct-unlink {
   flex-shrink: 0;
@@ -1556,6 +1798,24 @@ body {
   padding: 11px 12px;
 }
 .payout-btn:hover { filter: brightness(1.06); }
+/* Start Round N: outlined, deliberately quieter than .payout-btn. It used
+   .contribute-btn, which a later pass promoted to a gradient primary with a
+   drop shadow — so the non-urgent action ended up outweighing "send somebody
+   their ₱30,000", which is the one stacking question treasurer-funded-notes
+   answers on purpose. */
+.start-round-btn {
+  width: 100%;
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-family: 'Inter', sans-serif;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 9px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.start-round-btn:hover { background: var(--accent-soft); }
 .payout-field-label {
   display: block;
   text-align: left;
@@ -1781,23 +2041,30 @@ body {
   vertical-align: middle;
   white-space: nowrap;
 }
-.round-state.collecting { background: var(--success-soft); color: var(--success); }
-.round-state.pending { background: rgba(245,166,35,0.16); color: var(--accent); }
+/* ONE round-lifecycle palette, used here AND by the desktop Home strip below.
+   These disagreed three ways: Collecting was green here and amber on the
+   strip; Completed was green in both; and Collecting and Completed — the two
+   most opposed round states — therefore shared a colour and were told apart
+   only by their word. The strip additionally painted Payout Pending in
+   --pending-review, which is the exact claim the note above .member-chip
+   refuses to make: a round awaiting release is not a payment awaiting review.
+
+   Amber for the two in-flight states, which is a real progression, with an
+   outline separating pending from collecting; green only for done. */
+.round-state.collecting { background: rgba(245,166,35,0.16); color: var(--accent); }
+.round-state.pending {
+  background: transparent;
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
 .round-state.completed { background: var(--success-soft); color: var(--success); }
 .round-state.not-started { background: rgba(255,255,255,0.06); color: var(--text-muted); }
 
-.round-active-tag {
-  display: inline-block;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--accent);
-  border: 1px solid var(--accent);
-  padding: 1px 6px;
-  border-radius: 20px;
-  vertical-align: middle;
-}
+/* The current round, marked on the CARD rather than with a second badge
+   beside the lifecycle pill. "Collecting" already implies current (only one
+   round collects), but "Payout Pending" does not — so the marker has to live
+   somewhere, and a left accent edge is the idiom .my-status-* already uses. */
+.round.is-current { border-left: 3px solid var(--accent); }
 
 .prev-round {
   background: var(--bg-card);
@@ -1867,52 +2134,30 @@ body {
    progress indicator (the design has no second one); this carries the
    lifetime figure without competing for that job — no card chrome, smaller
    numerals, scope stated in the label. */
+/* One quiet line above the round hero — see the note in js/views/home.js.
+   It used to be a three-line block with its own progress bar, which outranked
+   the hero by shape and position even though the hero's figure is nearly
+   twice the size. */
 .fund-total {
-  background: none;
-  border: none;
+  display: block;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
   border-bottom: 1px solid var(--border);
-  border-radius: 0;
-  padding: 0 2px 12px;
-  margin-bottom: 14px;
+  padding: 0 2px 11px;
+  margin: 0 0 14px;
 }
 .fund-total-label {
   font-family: 'Space Grotesk', sans-serif;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-muted);
-  margin: 0 0 6px;
+  margin-right: 7px;
 }
-/* Deliberately smaller than the hero's round figure — this is context, the
-   hero is the headline. */
-.fund-total-amount {
-  font-family: 'Space Grotesk', sans-serif;
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-.fund-total-amount span { color: var(--text-muted); font-size: 13px; font-weight: 500; }
-.fund-total-bar {
-  height: 6px;
-  border-radius: 4px;
-  background: var(--bg-card-alt);
-  margin: 10px 0 8px;
-  overflow: hidden;
-}
-.fund-total-fill {
-  height: 100%;
-  border-radius: 4px;
-  background: var(--success);
-  transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
-}
-.fund-total-meta { font-size: 12.5px; color: var(--text-muted); }
-.fund-total-meta b { color: var(--text-primary); font-weight: 600; }
+.fund-total b { color: var(--text-primary); font-weight: 600; }
 .fund-total-pending { color: var(--accent); white-space: nowrap; }
-
-@media (prefers-reduced-motion: reduce) {
-  .fund-total-fill { transition: none; }
-}
 
 /* ==========================================================================
    Treasurer "Needs your attention" panel + pending-review queue (M3)
@@ -2263,8 +2508,11 @@ textarea:focus-visible,
   .battery-hero { padding: 26px 30px; }
 }
 
-/* ---- Larger tap targets on touch / small screens (R6) ---- */
-@media (max-width: 640px) {
+/* ---- Larger tap targets on touch / small screens (R6) ----
+   899px for the same reason as the sheet rule above: the mobile shell is a
+   thumb interface wherever it renders, and it renders up to 899px. This band
+   was getting the tab bar with mouse-sized hit areas. */
+@media (max-width: 899px) {
   .member-chip { min-height: 44px; padding: 10px 12px; }
   .mini-chip { min-height: 44px; }
   .reorder-arrows button { width: 40px; height: 40px; font-size: 14px; }
@@ -2272,7 +2520,8 @@ textarea:focus-visible,
   .reset-btn { min-height: 44px; }
   .reset-row { justify-content: flex-start; }
   .modal-btn-primary, .modal-btn-secondary { padding: 13px; min-height: 46px; }
-  .contribute-btn, .payout-btn, .hero-cta, .share-btn { min-height: 44px; }
+  .contribute-btn, .payout-btn, .hero-cta, .share-btn,
+  .start-round-btn { min-height: 44px; }
   .queue-btn, .queue-thumb { min-height: 44px; }
   .attention-more, .ph-receipt { min-height: 44px; }
   .warn-dismiss { min-width: 44px; min-height: 44px; }
@@ -2303,7 +2552,7 @@ textarea:focus-visible,
 
 /* ---- Tablet: keep the member grid and round rows comfortable between the
    480px mobile rule and the 900px .wrap max-width ---- */
-@media (min-width: 481px) and (max-width: 900px) {
+@media (min-width: 481px) and (max-width: 899px) {
   .member-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
   .modal { max-width: 420px; }
 }
@@ -2382,7 +2631,7 @@ textarea:focus-visible,
 }
 .pf-pwa-x:hover { opacity: 1; }
 
-@media (max-width: 640px) {
+@media (max-width: 899px) {
   .pf-pwa-btn { min-height: 44px; }
   .pf-pwa-x { min-height: 44px; min-width: 44px; }
 }
@@ -3129,8 +3378,17 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
     gap: 22px;
     align-items: start;
   }
-  .view-menu > .view-head { grid-column: 1 / -1; }
-  .view-menu > .footer-note { grid-column: 2; grid-row: 2 / span 20; margin-bottom: 0; }
+  /* The head, the mode card and the danger zone run full width; the groups
+     flow across both columns. The danger zone as a full-width band is the
+     point of the two columns — desktop-notes wants it "visibly separated",
+     and it was the thing being pushed off-screen. */
+  .view-menu > .view-head,
+  .view-menu > .mode-card,
+  .view-menu > .menu-locked-note,
+  .view-menu > .danger-zone { grid-column: 1 / -1; }
+  .view-menu > .menu-group { margin: 0; }
+  .view-menu > .menu-group .menu-list { margin-bottom: 0; }
+  .view-menu > .footer-note { grid-column: 1 / -1; margin: 8px 0 0; }
 }
 
 /* ROUNDS on desktop — master list beside the open round's detail. The list
@@ -3930,9 +4188,12 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
 
 /* A fund that exists but hasn't started. Without this the screen is 0%
    everywhere with nothing saying why, which reads as a fault. */
+/* Neutral, not the amber attention treatment. "Your fund just started" is a
+   milestone, and the amber card + warning-family framing read as something
+   needing action on a screen where nothing does. The party icon stays. */
 .dayone-card {
-  background: var(--accent-soft);
-  border: 1px solid rgba(245, 166, 35, 0.28);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 13px 16px;
   margin-bottom: 14px;
@@ -4082,7 +4343,18 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   }
   .home-round-fill { width: 100%; background: var(--accent); border-radius: 0 0 5px 5px; }
   .home-round-cell.completed .home-round-fill { background: var(--success); }
-  .home-round-cell.payout_pending .home-round-fill { background: var(--pending-review); }
+  /* Amber, NOT --pending-review: see the round-lifecycle palette above. The
+     full fill is what distinguishes this from a collecting round. */
+  .home-round-cell.payout_pending .home-round-fill { background: var(--accent); }
+  /* WHICH round, not just how much. The strip is five identical cells on day
+     one, and nothing in it said "you are here". */
+  .home-round-cell.is-now .home-round-label {
+    color: var(--accent);
+    font-weight: 700;
+  }
+  .home-round-cell.is-now .home-round-bar {
+    box-shadow: 0 0 0 1px var(--accent);
+  }
   .home-round-label { font-size: 11px; color: var(--text-muted); font-family: 'Space Grotesk', sans-serif; }
 
   .home-quick { display: flex; flex-direction: column; gap: 8px; }
@@ -4177,8 +4449,13 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   border-radius: 20px;
   white-space: nowrap;
 }
-.member-tag.paid-out { background: var(--accent-soft); color: var(--accent); }
-.member-tag.this-round { background: var(--success-soft); color: var(--success); }
+/* Amber = money moving / needs attention, green = settled — the vocabulary
+   .round-state uses and the rest of the app teaches. These were the other way
+   round: the member already paid out (nothing to do) was amber and the one
+   currently receiving (the live event) was green, which reads backwards on a
+   roster people scan. */
+.member-tag.paid-out { background: var(--success-soft); color: var(--success); }
+.member-tag.this-round { background: var(--accent-soft); color: var(--accent); }
 .member-tag.overdue, .member-tag.rejected { background: var(--danger-soft); color: var(--danger); }
 .member-tag.pending { background: var(--pending-review-soft); color: var(--pending-review); }
 .member-tag.upcoming { background: rgba(255, 255, 255, 0.06); color: var(--text-muted); }
@@ -4753,6 +5030,11 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   color: var(--text-muted);
 }
 .activity-unattributed .icon { color: var(--accent); flex-shrink: 0; margin-top: 2px; }
+/* Same sentence, no alarm: the filters are still where the app put them. */
+.activity-unattributed.quiet {
+  border-left-color: var(--border);
+  padding-left: 12px;
+}
 .activity-unattributed b { color: var(--text-primary); font-weight: 600; }
 
 /* Visible to screen readers only — the dropdowns show their current value as
@@ -4891,7 +5173,20 @@ body.modal-open .lightbox-overlay { touch-action: auto; }
   padding: 0;
   cursor: zoom-in;
 }
-.qr-card-img img { display: block; width: 100%; height: auto; border-radius: 6px; }
+/* BOUNDED IN BOTH AXES. `width: 100%; height: auto` alone let the sheet's
+   height be decided by whatever aspect ratio the treasurer uploaded: a full
+   phone screenshot of a GCash QR (390x844, the commonest way people capture
+   one) renders 476px tall at 220px wide, pushing the amount, the stepper, the
+   proof upload and "I've sent this" below the fold of a 92vh sheet. The
+   tap-to-enlarge lightbox is how you read a dense code, so the inline
+   rendering does not need to be tall. */
+.qr-card-img img {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+  border-radius: 6px;
+}
 .qr-card-expand {
   position: absolute;
   right: -6px;
@@ -5463,6 +5758,24 @@ body.auth-gate {
   text-align: center;
   animation: pfFadeUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
+/* Desktop: the composition this screen says it borrows.
+   DesktopOnboardingWelcome.dc.html is a 520px centred column with two large
+   radial glows in OPPOSITE corners — top-left amber, bottom-right teal — and
+   no card chrome. The gate was rendering the 320px mobile column with one
+   top-centre glow on a 1440px canvas, which is why it read as unstyled text on
+   a page rather than as a front door. The app's own onboarding already does
+   520px here (see .ob-body below); this makes the two agree. */
+@media (min-width: 900px) {
+  .signin-card { max-width: 520px; }
+  .signin-title { font-size: 30px; }
+  .signin-card .signin-sub { font-size: 15px; max-width: 440px; margin-inline: auto; }
+  /* NO extra glows here. The artboard's two corner washes already exist
+     app-wide as body::before / body::after (position: fixed, z-index: -1), and
+     adding a second pair inside .signin — which is overflow: hidden — clipped
+     each blurred circle into a hard rectangular seam across the page. Only the
+     column width and type scale belong in this query. */
+}
+
 .signin-emblem {
   width: 104px;
   height: 104px;

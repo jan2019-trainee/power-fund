@@ -46,6 +46,8 @@ them as new design.** Where they borrow, they borrow
 | Optional-mode warning banner | `optional` mode, same three conditions — a banner, not a wall |
 | **Member sign-in** panel | Menu → Account → Member sign-in (admin only) |
 | **Transfer treasurer role** | Menu → Security → Transfer treasurer role (admin only) |
+| **Payment schedule** | Menu → Group → Payment schedule (admin only) |
+| **No-treasurer-PIN confirm** | A PIN-gated action on a fund with no treasurer PIN |
 
 ---
 
@@ -54,6 +56,49 @@ them as new design.** Where they borrow, they borrow
 Test both frames for everything: **mobile ≤ 430px** and **desktop ≥ 900px**
 (`isWide` is a JS branch at 900px, not a CSS reflow — the two shells are
 genuinely different code paths).
+
+### Every screen is now captured
+The first pass could not review 20-odd screens — they needed a linked account,
+a first-run device, an `AUTH_MODE` other than `off`, or a file, and the harness
+offered none of those. `tests/qa-capture.js` now produces **174** screenshots
+including the two that were named as priorities and missing entirely:
+**My payout details** (`acct-*-payout-details`) and **Onboarding**
+(`ob-*-1..5`, `ob-*-picker`). Also added: Edit Profile and Change Photo, the
+three account dead-ends, Menu → Security scrolled into view, the payment QR /
+edit-names / reorder modals, the three payment sheets as desktop modals, the
+proof lightbox, both restore states, boot failure in both frames, the error
+and success toasts, and **768px** — a real device band (iPad portrait, phone
+landscape) that no capture had ever fallen in.
+
+### The two PIN dead ends (new copy — no mockup)
+Both only appear in states that were previously unreachable.
+- **A fund with no treasurer PIN.** Sign in as the flagged treasurer on a fund
+  whose `treasurer_pin` is unset, unlock (no PIN is asked for), then Menu →
+  Danger zone → Reset all fund data. The dialog must offer **"Set a treasurer
+  PIN"** and an amber note — not a PIN field, and not the RESET field. Menu →
+  Security must read **"Set a treasurer PIN"** and name what needs it.
+- **After a master-PIN unlock**, Menu → Change PIN must open at *"Choose a new
+  PIN"* with **two** step dots, not demand the forgotten PIN. Control: an
+  ordinary PIN unlock must still open at *"Enter your current PIN"* with three.
+
+### Payment schedule (new design — no mockup)
+The 30 due dates, editable from the app for the first time. Borrows the
+`.modal` treatment Edit member names uses.
+- **The list scrolls inside the dialog** (30 rows do not fit). It is a bordered
+  box on purpose: without an edge, the row clipped under Save reads as a
+  rendering fault rather than as "there is more below". Check that at 430px
+  and at a short desktop window.
+- **"Move later cycles too" is on by default.** Change one date and everything
+  after it moves by the same number of days. Check the counter under the list
+  updates, and that earlier cycles do not move.
+- **Try editing a date with the KEYBOARD, not the picker.** A date field
+  empties itself between segments; the shift has to survive that.
+- **States:** no changes yet · N cycles moved · an amber band when a moved
+  cycle already has confirmed payments · a red error plus a disabled Save when
+  the dates fall out of order · the database refusing the write.
+- Reachable only by a Google-verified treasurer. A PIN-unlocked member must
+  not see the row — and `PowerFund.openScheduleModal()` from the console must
+  do nothing for them.
 
 ### Sign-in / first-run prompt
 - **Skippable vs not.** `optional` shows **Not now**; `required` must not.

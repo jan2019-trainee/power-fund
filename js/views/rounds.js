@@ -148,7 +148,7 @@ window.PFViews.rounds = function (ctx) {
                   // rejected chip gets the direct cash-record confirmation.
                   const tip = unlocked
                     ? status === 1
-                      ? "Pending review — tap to review"
+                      ? "In review — tap to review"
                       : status === 2
                       ? "Confirmed paid — tap to undo"
                       : status === 3

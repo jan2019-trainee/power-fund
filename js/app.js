@@ -4129,7 +4129,12 @@
 
       const chip =
         st === C.STATUS_PENDING
-          ? `<span class="activity-chip-state pending">Pending review</span>`
+          ? // "In review" everywhere a STATUS is labelled — the desktop
+            // Activity column, the Insights donut, the roster and the Members
+            // accordion all said that while this one said "Pending review".
+            // Six spellings of one state; the colour was consistent and the
+            // words were not.
+            `<span class="activity-chip-state pending">In review</span>`
           : st === C.STATUS_REJECTED
           ? `<span class="activity-chip-state rejected">Rejected</span>`
           : "";
@@ -4378,8 +4383,18 @@
     if (amt == null || amt === 0) return "";
     const settled = st == null || Number(st) === C.STATUS_PAID;
     const abs = C.peso(Math.abs(amt));
-    if (!settled) return `<span class="activity-amt flat">${escapeHtml(abs)}</span>`;
     const out = amt < 0;
+    // A NEGATIVE AMOUNT IS ALWAYS A SIGNED DEBIT, whatever refStatus says.
+    // Unsigned-and-flat is right for a claim that is not money yet (in review,
+    // rejected) — but a reverted confirmation is logged with
+    // refStatus: STATUS_UNPAID and a negative amount, so it fell into that
+    // branch and rendered "₱1,000.00" in plain text while a released payout
+    // rendered "−₱30,000.00". Two events that both take money out of a round,
+    // formatted as an unmistakable debit and as a neutral. In a financial log
+    // the sign is the fastest read, so it cannot be unreliable.
+    if (!settled && !out) {
+      return `<span class="activity-amt flat">${escapeHtml(abs)}</span>`;
+    }
     return `<span class="activity-amt ${out ? "out" : "in"}">${
       out ? "−" : "+"
     }${escapeHtml(abs)}</span>`;
@@ -5163,7 +5178,7 @@
     if (due && status === "collecting") text += `Cycle due: ${C.formatDate(due)}\n`;
     text += `\n`;
     if (paid.length) text += `✅ Paid: ${paid.join(", ")}\n`;
-    if (pending.length) text += `🟣 Pending review: ${pending.join(", ")}\n`;
+    if (pending.length) text += `🟣 In review: ${pending.join(", ")}\n`;
     if (rejected.length) text += `❌ Needs resending: ${rejected.join(", ")}\n`;
     if (overdue.length) text += `🔴 Overdue: ${overdue.join(", ")}\n`;
     if (notDue.length) text += `⏰ Not yet due: ${notDue.join(", ")}\n`;
@@ -5626,10 +5641,19 @@
     let myStatus = null;
     if (myMember) {
       if (allDone) {
+        // THE PERSONAL CARD SAYS THE PERSONAL THING. It used to repeat the
+        // green Fund-complete card's own sentence — "All 5 rounds collected
+        // and paid out" — verbatim, 40px above it and clipped mid-word by the
+        // card's one-line detail, so the terminal state showed the same
+        // message twice and one copy was broken. The fund-level sentence
+        // belongs to the green card (js/views/home.js); this one carries the
+        // viewer's own result, which no other element states.
+        const mine = getPayout(myMember.member_order);
+        const got = mine && mine.amount != null ? mine.amount : C.GOAL_PER_ROUND;
         myStatus = {
           kind: "done",
-          word: "Fund complete",
-          detail: `All ${C.TOTAL_ROUNDS} rounds collected and paid out — thanks!`,
+          word: "All settled",
+          detail: `You received ${C.peso(got)} in Round ${myMember.member_order}.`,
           mark: "party",
           label: `All ${C.TOTAL_ROUNDS} rounds complete — thanks, ${escapeHtml(
             myMember.name

@@ -338,9 +338,6 @@ window.PFViews.home = function (ctx) {
         // on-time only counts contributions that carry a paid_at.
         myMember
           ? (function () {
-              const mine = getPayout(myMember.member_order);
-              const amount =
-                mine && mine.amount != null ? mine.amount : C.GOAL_PER_ROUND;
               const st = C.onTimeStats(state.contributions, state.cycles, myMember.id);
               const paidLine =
                 st.counted === 0
@@ -348,9 +345,12 @@ window.PFViews.home = function (ctx) {
                   : st.onTime === st.counted
                   ? `You made all ${st.counted} of your dated contributions on time.`
                   : `You paid ${st.onTime} of ${st.counted} dated contributions on time.`;
-              return `<p class="fund-complete-personal">You received <b>${C.peso(
-                amount
-              )}</b> in Round ${myMember.member_order}. ${escapeHtml(paidLine)}</p>`;
+              // The RECEIPT half lives on the status card above (app.js's
+              // myStatus, kind "done"), so this carries only the record it
+              // does not — how you paid in. Saying "You received ₱30,000 in
+              // Round 2" in both places is the same duplication that was just
+              // removed, moved down one card.
+              return `<p class="fund-complete-personal">${escapeHtml(paidLine)}</p>`;
             })()
           : ""
       }
@@ -375,6 +375,14 @@ window.PFViews.home = function (ctx) {
       // A payout is sitting there ready to send. "All caught up" immediately
       // under that card would contradict it, so the release card speaks for
       // itself and this panel stays out of the way.
+    } else if (nothingWaiting && nothingYet) {
+      // DAY ONE ALREADY SAID IT, and said it better. all-caught-up-notes is
+      // explicit that the panel is "distinct from Day One's one-time empty
+      // state, since this is mid-fund with an active, partly-funded round" —
+      // and DesktopHomeDayOne is its own artboard. Both rendered together, with
+      // "No payments waiting for review, nothing overdue, and no payout to
+      // release" being technically true and useless on a fund where nothing
+      // has ever happened.
     } else if (nothingWaiting) {
       // Nothing waiting. Say so explicitly — an absent panel is ambiguous
       // (is it clear, or did it fail to load?), and a caught-up queue is
@@ -480,8 +488,15 @@ window.PFViews.home = function (ctx) {
                      busy ? "disabled" : ""
                    }>Start Round ${nextRound}</button>
                  </div>`
-              : `<p class="attention-group-label">▶ Round ${nextRound} is ready to start</p>
-                 <button class="contribute-btn" onclick="PowerFund.askStartNextRound()">Start Round ${nextRound}</button>`
+              : // NOT .contribute-btn. treasurer-funded-notes subordinates this
+                // deliberately — Release Payout leads and Start Next Round is
+                // the quieter line inside it — and css/style.css says so at
+                // .payout-btn. But a later pass gave .contribute-btn a full
+                // gradient primary with a drop shadow, which outweighs
+                // .payout-btn's flat accent: Start Round ended up looking more
+                // urgent than sending somebody their ₱30,000.
+                `<p class="attention-group-label">▶ Round ${nextRound} is ready to start</p>
+                 <button class="start-round-btn" onclick="PowerFund.askStartNextRound()">Start Round ${nextRound}</button>`
           }
         </div>`;
       }
@@ -622,7 +637,11 @@ window.PFViews.home = function (ctx) {
       pendingCount || overdueCount
         ? `<div class="cycle-note">${
             pendingCount
-              ? `<b style="color:var(--accent)">${pendingCount} pending treasurer review</b>`
+              ? // Purple and "in review", like every other surface. This was
+                // the last amber one AND the last different wording: the same
+                // payment read purple/"In review" in Insights and
+                // amber/"pending treasurer review" on the round card.
+                `<b style="color:var(--pending-review)">${pendingCount} in review</b>`
               : ""
           }${pendingCount && overdueCount ? " · " : ""}${
             overdueCount
@@ -869,7 +888,15 @@ window.PFViews.home = function (ctx) {
       // and their own status IS the lead.
       S.dayOne +
       S.rejected +
-      (unlocked ? S.complete + S.release + S.attention + S.myStatus : S.myStatus + S.complete) +
+      (unlocked ? S.release + S.attention : "") +
+      S.myStatus +
+      // S.complete sits AFTER the personal card for both roles. It used to be
+      // pulled to the front for a treasurer by the rule above — but that rule
+      // is about a QUEUE outranking a personal card, and when the fund is
+      // complete there is no queue and no release (both are gated on
+      // !allDone). So the only thing it did was make the terminal screen read
+      // in a different order for the treasurer than for everyone else.
+      S.complete +
       S.payoutNudge +
       S.fundTotal + S.hero + S.cta + S.roster + S.roundsLink + S.prevRounds +
       S.spacer
@@ -1001,11 +1028,9 @@ window.PFViews.home = function (ctx) {
         ${S.fundTotal}${S.hero}${S.roster}${S.roundsLink}${recentPanel}${S.prevRounds}
       </div>
       <aside class="home-rail">
-        ${S.rejected}${
-          unlocked
-            ? `${S.complete}${S.release}${S.attention}${S.myStatus}`
-            : `${S.myStatus}${S.complete}`
-        }${S.payoutNudge}${overview}${quick}
+        ${S.rejected}${unlocked ? `${S.release}${S.attention}` : ""}${
+          S.myStatus
+        }${S.complete}${S.payoutNudge}${overview}${quick}
       </aside>
     </div>` +
     S.cta +

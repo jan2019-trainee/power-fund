@@ -33,8 +33,16 @@ window.PFViews.menu = function (ctx) {
       <span class="menu-row-chevron">›</span>
     </button>`;
 
+  /* ONE ELEMENT PER GROUP. The label and its list used to be two siblings,
+     which is why the desktop 2-column grid could not be used for them: grid
+     auto-placement would have put a heading in one column and its rows in the
+     other. So everything stacked in column 1 and the right column held only
+     the explainer card — leaving Security and the Danger zone far below the
+     fold with half the viewport empty, which is exactly what desktop-notes
+     asks a "full 2-column settings page" to avoid. */
   const group = (label, rows) =>
-    `<p class="section-label">${label}</p><div class="menu-list">${rows.join("")}</div>`;
+    `<section class="menu-group"><p class="section-label">${label}</p>` +
+    `<div class="menu-list">${rows.join("")}</div></section>`;
 
   let html = `<div class="view-head">
     <h2 class="view-title">Menu</h2>

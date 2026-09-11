@@ -895,8 +895,11 @@ async function activityAndInsights(browser, errors) {
   );
   const chips = (await page.locator(".activity-chip-state").allInnerTexts()).join("|");
   check(
+    // "In review", not "Pending review" — one label for one state. The desktop
+    // Activity column, the Insights donut, the roster and the Members
+    // accordion all said "In review" while this chip said "Pending review".
     "p7/status chips shown",
-    /Pending review/i.test(chips) && /Rejected/i.test(chips),
+    /In review/i.test(chips) && /Rejected/i.test(chips),
     chips
   );
   // Rows written before migration 006 have no typed data and must simply show
@@ -3133,6 +3136,126 @@ async function extraTreasurer(browser, errors) {
   await solo.close();
 }
 
+/** The terminal screen must read the same way for everyone. S.complete used to
+ *  be pulled ahead of the personal card for a treasurer by a rule about the
+ *  attention QUEUE outranking it — but when the fund is complete there is no
+ *  queue and no release (both gated on !allDone), so all that rule did was
+ *  give the treasurer a different reading order on the last screen the group
+ *  ever sees. */
+async function fundCompleteOrder(browser, errors) {
+  // Every cycle confirmed for everyone, every payout released.
+  const rows = [];
+  let id = 90000;
+  M.CYCLES.forEach((cy) =>
+    M.MEMBERS.forEach((m) =>
+      rows.push({
+        id: `00000000-0000-0000-0000-${String(id++).padStart(12, "0")}`,
+        cycle_id: cy.id,
+        member_id: m.id,
+        status: 2,
+        amount: C_AMOUNT,
+        proof_url: null,
+        paid_at: new Date(2026, 8, 14).toISOString(),
+      })
+    )
+  );
+  const data = {
+    ...M.TABLE_DATA,
+    contributions: rows,
+    payouts: M.PAYOUTS.map((p, i) => ({
+      ...p,
+      released: true,
+      amount: 30000,
+      released_on: "2027-01-10",
+      recipient_member_id: M.MEMBERS[i].id,
+      recipient_name: M.MEMBERS[i].name,
+      started_at: new Date().toISOString(),
+    })),
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234" },
+  };
+
+  /** Which comes first in the DOM: the personal card or the green panel? */
+  const order = async (page) =>
+    page.evaluate(() => {
+      const mine = document.querySelector(".my-status-card");
+      const done = document.querySelector(".fund-complete-panel");
+      if (!mine || !done) return mine ? "status-only" : done ? "complete-only" : "neither";
+      return mine.compareDocumentPosition(done) & Node.DOCUMENT_POSITION_FOLLOWING
+        ? "status-then-complete"
+        : "complete-then-status";
+    });
+
+  for (const label of ["member", "treasurer"]) {
+    const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+    page.on("pageerror", (e) => errors.push(`complete/${label}: ${e}`));
+    await serve(page, data);
+    await page.addInitScript((id) => {
+      try { localStorage.setItem("pf_my_member_id", id); } catch (e) {}
+    }, M.MEMBERS[1].id);
+    await page.goto(BASE, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(1800);
+    if (label === "treasurer") await unlockTreasurer(page);
+    check(`complete/${label}: the personal card leads`,
+      (await order(page)) === "status-then-complete", await order(page));
+    // And the personal card must not repeat the green panel's own sentence.
+    const mineTxt = await page.locator(".my-status-card").innerText();
+    const doneTxt = await page.locator(".fund-complete-panel").innerText();
+    check(`complete/${label}: no duplicated sentence`,
+      !/rounds collected and paid out/i.test(mineTxt), mineTxt.replace(/\s+/g, " "));
+    check(`complete/${label}: and the receipt is stated once`,
+      /You received/.test(mineTxt) && !/You received/.test(doneTxt),
+      doneTxt.replace(/\s+/g, " "));
+    await page.close();
+  }
+}
+
+/** 641-899px: iPad portrait and a phone in landscape. Three breakpoints used
+ *  to disagree about what device this is — the shell switches at 900px, but the
+ *  sheet treatment and the 44px touch targets both stopped at 640px — so this
+ *  band got the thumb-reach tab bar with mouse-sized hit areas and
+ *  desktop-positioned centre modals. No check had ever run inside it. */
+async function tabletBand(browser, errors) {
+  const page = await browser.newPage({ viewport: { width: 768, height: 1024 } });
+  page.on("pageerror", (e) => errors.push(`tablet: ${e}`));
+  await serve(page, M.TABLE_DATA);
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1800);
+
+  check("tablet/768px gets the MOBILE shell", (await page.locator(".tab-bar").count()) === 1);
+  check("tablet/and no desktop sidebar nav label",
+    (await page.locator(".tab-item", { hasText: "Board Members" }).count()) === 0);
+
+  // The sheet must be bottom-anchored, like the shell it belongs to.
+  await page.evaluate((id) => window.PowerFund.openContributeModal(id, 7), M.MEMBERS[1].id);
+  await page.waitForTimeout(600);
+  const sheet = await page.locator(".modal-overlay.sheet .modal").boundingBox();
+  const vh = await page.evaluate(() => window.innerHeight);
+  check("tablet/the payment sheet is bottom-anchored, not centred",
+    Math.abs(sheet.y + sheet.height - vh) <= 2,
+    `bottom at ${Math.round(sheet.y + sheet.height)} of ${vh}`);
+  check("tablet/and it spans the width",
+    sheet.width >= 760, `${Math.round(sheet.width)}px`);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+
+  // Touch targets: this is still a thumb interface.
+  await page.locator(".tab-item", { hasText: "Rounds" }).click();
+  await page.waitForTimeout(500);
+  // The chips live inside a round's accordion; a collapsed one has no box.
+  if (!(await page.locator(".round.is-open .member-chip").count())) {
+    await page.locator(".round-header").first().click();
+    await page.waitForTimeout(500);
+  }
+  const chipLoc = page.locator(".round.is-open .member-chip").first();
+  const chip = (await chipLoc.count()) ? await chipLoc.boundingBox() : null;
+  check("tablet/cycle chips keep the 44px touch target",
+    !!chip && chip.height >= 44,
+    chip ? `${Math.round(chip.height)}px` : "(no visible chip)");
+  check("tablet/no sideways scroll",
+    (await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)) === true);
+  await page.close();
+}
+
 /** P1-2: treasurer mode says nothing about whether the writes behind it land.
  *  011 keys confirm/reject/revert/record/release off members.is_treasurer, and
  *  the PIN that opens the mode is shared with all five members by design. */
@@ -4904,6 +5027,8 @@ async function bootFailure(browser) {
   await pinDeadEnds(browser, errors);
   await qaFindings(browser, errors);
   await moneyGate(browser, errors);
+  await tabletBand(browser, errors);
+  await fundCompleteOrder(browser, errors);
   await signInPrompt(browser, errors);
   await onboarding(browser, errors);
   console.log("\nBackup round-trip");

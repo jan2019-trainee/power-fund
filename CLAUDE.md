@@ -786,13 +786,64 @@ a disabled button is not the gate.
   second progress bar is gone, because two meters in one scroll read as a
   fault rather than as two questions.
 
+### The P2 pass — all 16 closed
+
+Mostly consistency, but four were real defects wearing a P2 label:
+
+- **P2-1, the chip affordance was INVERTED.** The mark was
+  `unlocked && status !== 0` — on the chips already settled, withheld from the
+  unpaid ones, on both sides of the gate. A member's own payable chip carried
+  only `cursor: pointer`, which does nothing on a phone: the one action they
+  came for was invisible while the four chips they may not tap looked identical
+  to it. It now goes on `clickable`. And it is **no longer `border-style`** —
+  dashed already means "sent and refused", so the old hover flipped dashed to
+  SOLID and turned a rejected chip momentarily into an overdue one (P3-11).
+  An inset ring in the chip's own colour instead.
+- **P2-2, the payment QR had no height bound.** A full phone screenshot of a
+  GCash QR renders 476px tall at 220px wide, pushing the amount, stepper, proof
+  upload and "I've sent this" off a 92vh sheet. `max-height: 220px` +
+  `object-fit: contain`; the lightbox is how you read a dense code.
+- **P2-10, Start Round N outweighed Release Payout.** `css/style.css` carries a
+  comment at `.payout-btn` setting exactly that hierarchy — and a later pass
+  gave `.contribute-btn` a gradient primary with a drop shadow, which outranks
+  `.payout-btn`'s flat accent. So the non-urgent action came to look more urgent
+  than sending somebody their ₱30,000. Its own `.start-round-btn` now.
+- **P2-9, the terminal screen read differently by role.** `S.complete` was
+  pulled ahead of the personal card for a treasurer by the rule about the
+  attention QUEUE outranking it — but when the fund is complete there is no
+  queue and no release (both gated on `!allDone`), so all that rule did was
+  give the treasurer a different reading order on the last screen the group
+  ever sees. The duplicated-and-clipped sentence is gone too: the status card
+  carries the receipt, the green card carries the fund total and your on-time
+  record. Fixing it once moved the duplication down a card rather than removing
+  it, which the screenshot caught.
+
+The rest: the schedule modal's warning and live error moved ABOVE its list with
+sticky actions (they were below a 50vh list, and the error carries
+`role="alert"` so it was announced while invisible) and two columns at ≥900px;
+desktop Menu is the 2-column settings page `desktop-notes` asks for, with the
+danger zone as a full-width band — the groups are one element each now, which
+is what made the grid possible; desktop Members opens populated; exports are
+treasurer-only on all three surfaces that disagreed; roster tag colours
+un-inverted; "In review" is the single label for that state; a negative amount
+in the activity log is always a signed debit (a revert is logged with
+`refStatus: STATUS_UNPAID`, which routed it into the unsigned branch); Day One
+no longer renders beside All-caught-up; and the reset dialog no longer promises
+to keep a PIN the fund does not have.
+
+**P2-15: the 640px breakpoints moved to 899px.** Three breakpoints disagreed
+about what device this is — the shell switches at 900px, but the sheet
+treatment and the 44px touch targets both stopped at 640px. So 641–899px (iPad
+portrait, a phone in landscape) got the thumb-reach tab bar with mouse-sized
+hit areas and desktop-positioned centre modals. No check had ever run in that
+band; `tabletBand` does now, and 768px is captured.
+
 ### Still open
 
-- **The 16 P2s and 16 P3s**, which are a consistency pass rather than a
-  rebuild. The sharpest: the cycle-chip affordance is inverted (the chips a
-  member may NOT tap look tappable; their own does not, on touch); the payment
-  QR has no `max-height`, so a portrait screenshot pushes the submit button off
-  the sheet; the schedule modal's footer and live error fall below the fold.
+- **The 16 P3s** — polish. The three with the most payoff for the least work:
+  the amber default-filter warning on desktop Activity fires on an untouched
+  screen, "N entries loaded" is developer language, and the member Menu's
+  always-expanded explainer duplicates "Replay the intro".
 
 ### The evidence gap the pass exposed
 

@@ -139,7 +139,7 @@ function memberRow(m, ctx, cyclesDueSoFar, isWide) {
     const due = C.dueDateOf(state.cycles, openCycle);
     cycWord =
       st === C.STATUS_PENDING
-        ? "pending review"
+        ? "in review"
         : st === C.STATUS_REJECTED
         ? "rejected"
         : C.isOverdue(state.contributions, state.cycles, m.id, openCycle)
@@ -223,7 +223,7 @@ function roundSummaries(m, ctx) {
         st === C.STATUS_PAID
           ? "paid"
           : st === C.STATUS_PENDING
-          ? "pending review"
+          ? "in review"
           : st === C.STATUS_REJECTED
           ? "rejected"
           : late

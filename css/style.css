@@ -904,8 +904,15 @@ body {
    actions sit near the thumb rather than mid-screen. Only these three: the
    rest of the app's dialogs are centered in the design too, and the desktop
    artboards specify centered modals for all of them, so this is scoped to
-   narrow viewports. */
-@media (max-width: 640px) {
+   narrow viewports.
+
+   899px, NOT 640px — this must track the SHELL. `isWide` switches the shell at
+   900px (a JS branch, not a reflow), so between 641 and 899px — iPad portrait,
+   a phone in landscape — the app drew the thumb-reach mobile tab bar with
+   desktop-positioned, unblurred centre modals. Three breakpoints disagreeing
+   about what device this is gave that band the worst half of each design, and
+   no capture in the QA set fell inside it. 768px is now captured. */
+@media (max-width: 899px) {
   .modal-overlay.sheet {
     align-items: flex-end;
     padding: 0;
@@ -1740,6 +1747,24 @@ body {
   padding: 11px 12px;
 }
 .payout-btn:hover { filter: brightness(1.06); }
+/* Start Round N: outlined, deliberately quieter than .payout-btn. It used
+   .contribute-btn, which a later pass promoted to a gradient primary with a
+   drop shadow — so the non-urgent action ended up outweighing "send somebody
+   their ₱30,000", which is the one stacking question treasurer-funded-notes
+   answers on purpose. */
+.start-round-btn {
+  width: 100%;
+  background: transparent;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-family: 'Inter', sans-serif;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 9px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.start-round-btn:hover { background: var(--accent-soft); }
 .payout-field-label {
   display: block;
   text-align: left;
@@ -2439,8 +2464,11 @@ textarea:focus-visible,
   .battery-hero { padding: 26px 30px; }
 }
 
-/* ---- Larger tap targets on touch / small screens (R6) ---- */
-@media (max-width: 640px) {
+/* ---- Larger tap targets on touch / small screens (R6) ----
+   899px for the same reason as the sheet rule above: the mobile shell is a
+   thumb interface wherever it renders, and it renders up to 899px. This band
+   was getting the tab bar with mouse-sized hit areas. */
+@media (max-width: 899px) {
   .member-chip { min-height: 44px; padding: 10px 12px; }
   .mini-chip { min-height: 44px; }
   .reorder-arrows button { width: 40px; height: 40px; font-size: 14px; }
@@ -2448,7 +2476,8 @@ textarea:focus-visible,
   .reset-btn { min-height: 44px; }
   .reset-row { justify-content: flex-start; }
   .modal-btn-primary, .modal-btn-secondary { padding: 13px; min-height: 46px; }
-  .contribute-btn, .payout-btn, .hero-cta, .share-btn { min-height: 44px; }
+  .contribute-btn, .payout-btn, .hero-cta, .share-btn,
+  .start-round-btn { min-height: 44px; }
   .queue-btn, .queue-thumb { min-height: 44px; }
   .attention-more, .ph-receipt { min-height: 44px; }
   .warn-dismiss { min-width: 44px; min-height: 44px; }
@@ -2479,7 +2508,7 @@ textarea:focus-visible,
 
 /* ---- Tablet: keep the member grid and round rows comfortable between the
    480px mobile rule and the 900px .wrap max-width ---- */
-@media (min-width: 481px) and (max-width: 900px) {
+@media (min-width: 481px) and (max-width: 899px) {
   .member-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
   .modal { max-width: 420px; }
 }
@@ -2558,7 +2587,7 @@ textarea:focus-visible,
 }
 .pf-pwa-x:hover { opacity: 1; }
 
-@media (max-width: 640px) {
+@media (max-width: 899px) {
   .pf-pwa-btn { min-height: 44px; }
   .pf-pwa-x { min-height: 44px; min-width: 44px; }
 }
@@ -3305,8 +3334,17 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
     gap: 22px;
     align-items: start;
   }
-  .view-menu > .view-head { grid-column: 1 / -1; }
-  .view-menu > .footer-note { grid-column: 2; grid-row: 2 / span 20; margin-bottom: 0; }
+  /* The head, the mode card and the danger zone run full width; the groups
+     flow across both columns. The danger zone as a full-width band is the
+     point of the two columns — desktop-notes wants it "visibly separated",
+     and it was the thing being pushed off-screen. */
+  .view-menu > .view-head,
+  .view-menu > .mode-card,
+  .view-menu > .menu-locked-note,
+  .view-menu > .danger-zone { grid-column: 1 / -1; }
+  .view-menu > .menu-group { margin: 0; }
+  .view-menu > .menu-group .menu-list { margin-bottom: 0; }
+  .view-menu > .footer-note { grid-column: 1 / -1; margin: 8px 0 0; }
 }
 
 /* ROUNDS on desktop — master list beside the open round's detail. The list

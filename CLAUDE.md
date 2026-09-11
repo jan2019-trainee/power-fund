@@ -550,6 +550,15 @@ MEASURES BOXES for this (`ctaGeometry`).
   opaque page background laid over `.battery-hero`, which is *lighter*
   (`--bg-card`). Against a card with its own rounded corners that reads as a
   chunk removed from the card, not as a scrim.
+- **The Resubmit button's icon was on its own line.** `.floating-cta .hero-cta`
+  set `display: block`, which outranks `.rejected-cta`'s `display: flex` — so
+  that button's `justify-content` and `gap` were computed but **inert**, its
+  block-level `<svg>` took a line of its own at the left edge, and the label
+  wrapped underneath, centred. The `display` declaration is gone (`.hero-cta`
+  already sets block for the plain variant), and the button went from 55px to
+  44px. The container checks below all passed while this was broken — measuring
+  a box says nothing about what is inside it — so the alignment is asserted
+  directly now.
 - **`.tab-bar` is the desktop sidebar too.** Giving the mobile bar a fixed
   height collapsed the sidebar to a 60px strip, so the desktop media query
   resets `height: auto`. A test asserts the sidebar is still full height —

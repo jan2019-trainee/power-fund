@@ -59,12 +59,14 @@
      ONE value, because these were two hardcoded guesses that disagreed: the
      bar measures 60px and the CTA was pinned at 58px, so the CTA sat 2px
      INSIDE it — and on a phone with a home indicator both gained the safe-area
-     inset and stayed 2px apart. --cta-h is the CTA's own measured height
-     (34px top pad + 55px button + 12px bottom pad = 101px, with a little
-     slack) and is what .cta-spacer must reserve so the last card clears it.
-     If either the button's padding or its font changes, re-measure. */
+     inset and stayed 2px apart. --cta-h is the CTA's own measured height:
+     34px top pad + a ~45px button + 12px bottom pad = 91px, plus slack. It is
+     what .cta-spacer reserves so the last card clears the button. Measured for
+     BOTH variants (the plain "Pay this cycle" and the red "Resubmit payment"),
+     since they differ by a pixel. Re-measure if the button's padding, font or
+     label length changes — a label that wraps makes it taller. */
   --tab-h: 60px;
-  --cta-h: 104px;
+  --cta-h: 96px;
 }
 
 * { box-sizing: border-box; }
@@ -3333,7 +3335,13 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   pointer-events: auto;
   max-width: 728px;
   margin: 0 auto;
-  display: block;
+  /* NO `display` here. It used to say `block`, and because this selector is
+     more specific than `.rejected-cta` it silently overrode that button's
+     `display: flex` — so its justify-content and gap were computed but inert,
+     the icon (which is display:block) took a line of its own at the left
+     edge, and the label wrapped to a second line underneath, centred. That is
+     the "icon isn't aligned" report, and it also made the button 55px tall
+     instead of 41px. `.hero-cta` already sets block for the plain variant. */
 }
 /* Was 84px against a CTA that measures 96px, so the last card was 12px short
    of clearing it — and a button that wrapped to two lines would have been

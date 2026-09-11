@@ -2231,6 +2231,45 @@ async function ctaGeometry(browser, errors) {
       return { top: Math.round(r.top), bottom: Math.round(r.bottom), h: Math.round(r.height) };
     }, sel);
 
+  // THE BUTTON'S OWN CONTENTS. The container checks below passed while the
+  // icon was on a line of its own at the left edge and the label wrapped
+  // underneath — measuring the box said nothing about what was inside it.
+  //
+  // Cause: `.floating-cta .hero-cta { display: block }` outranked
+  // `.rejected-cta { display: flex }`, so justify-content and gap were
+  // computed but inert and the block-level <svg> took its own line.
+  const inner = await page.evaluate(() => {
+    const btn = document.querySelector(".floating-cta .rejected-cta");
+    if (!btn) return null;
+    const svg = btn.querySelector("svg");
+    const span = btn.querySelector("span");
+    if (!svg || !span) return null;
+    const b = btn.getBoundingClientRect();
+    const s = svg.getBoundingClientRect();
+    const t = span.getBoundingClientRect();
+    return {
+      display: getComputedStyle(btn).display,
+      gap: Math.round(t.left - s.right),
+      rowOffset: Math.abs(s.top + s.height / 2 - (t.top + t.height / 2)),
+      pairOffCentre: Math.abs((s.left + t.right) / 2 - (b.left + b.width / 2)),
+    };
+  });
+  check(
+    "cta-geom/the Resubmit button is a flex row, not a block",
+    !!inner && inner.display === "flex",
+    inner && inner.display
+  );
+  check(
+    "cta-geom/its icon and label sit on one line, side by side",
+    !!inner && inner.rowOffset <= 2 && inner.gap >= 4 && inner.gap <= 12,
+    inner && `gap ${inner.gap}px, vertical offset ${Math.round(inner.rowOffset)}px`
+  );
+  check(
+    "cta-geom/and the icon+label pair is centred in the button",
+    !!inner && inner.pairOffCentre <= 3,
+    inner && `${Math.round(inner.pairOffCentre)}px off centre`
+  );
+
   const cta = await box(".floating-cta");
   const bar = await box(".tab-bar");
   const spacer = await box(".cta-spacer");

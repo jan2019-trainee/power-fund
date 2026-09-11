@@ -54,7 +54,7 @@ window.PFViews.menu = function (ctx) {
             // "Unlocked on this device" would misdescribe a permission that
             // actually follows their account across devices.
             isAdmin && identityLocked
-              ? "You're the fund's admin — always on when you're signed in"
+              ? "Open because you're signed in as the fund's treasurer"
               : "Unlocked on this device"
           }</div>
         </div>
@@ -114,7 +114,7 @@ window.PFViews.menu = function (ctx) {
         "Lock treasurer mode",
         "PowerFund.toggleUnlock()",
         isAdmin && identityLocked
-          ? "See the app as a member does. Comes back when you reload"
+          ? "See the app as a member does. Tap Treasurer to come back — no PIN"
           : undefined
       ),
     ]);

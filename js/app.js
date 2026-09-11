@@ -186,11 +186,6 @@
   // different powers, because the master PIN exists precisely so a locked-out
   // group gets full treasurer access back.
   let unlockedViaMaster = false;
-  /* Set only when the flagged treasurer LOCKS treasurer mode by hand. Without
-   * it the auto-unlock below would re-open on the next 30-second poll, so the
-   * admin could never look at the app the way a member sees it. Per session,
-   * deliberately: a reload is a fresh start. */
-  let treasurerLockedByChoice = false;
 
   let payoutModalRound = null;
   let payoutNoteValue = "";
@@ -492,7 +487,6 @@
     try {
       await loadAll();
       await resolveAccount();
-      applyAdminAutoUnlock();
       render();
     } catch (e) {
       showError(e.message);
@@ -867,13 +861,16 @@
     return !anyFlagged && unlocked;
   }
 
-  /** The flagged treasurer should not have to type a PIN they already out-rank:
-   *  a Google login that owns a row carrying `is_treasurer` is strictly
-   *  stronger proof than a four-digit code the whole group shares. Applied
-   *  after every resolve, so it survives a reload and a token refresh.
-   *
-   *  `unlockedViaMaster` is cleared on purpose — this is not the recovery path,
-   *  and leaving it set would put the recovery banner up for no reason. */
+  /** A Google-VERIFIED treasurer: a linked account whose own member row carries
+   *  `is_treasurer`. Deliberately strict — unlike isTreasurerAccount() it has
+   *  NO bootstrap fallback to the PIN, because this is the test that decides
+   *  whether treasurer mode opens WITHOUT one. Falling back here would turn
+   *  "no treasurer on file yet" into "treasurer mode is one tap away". */
+  function verifiedTreasurer() {
+    const mine = editableMember();
+    return !!(mine && mine.is_treasurer);
+  }
+
   /** Should the header offer treasurer mode at all?
    *
    *  Hidden from a member the app can POSITIVELY IDENTIFY as somebody other
@@ -899,15 +896,6 @@
     // has no treasurer account yet and the PIN is still the only authority
     // that exists. Same bootstrap escape hatch as isTreasurerAccount().
     return !((state && state.members) || []).some((m) => m.is_treasurer);
-  }
-
-  function applyAdminAutoUnlock() {
-    if (treasurerLockedByChoice || unlocked) return;
-    const mine = editableMember();
-    if (mine && mine.is_treasurer) {
-      unlocked = true;
-      unlockedViaMaster = false;
-    }
   }
 
   function openProfileModal() {
@@ -1183,7 +1171,6 @@
       // Don't hand the next person a warm treasurer session.
       unlocked = false;
       unlockedViaMaster = false;
-      treasurerLockedByChoice = false;
       // Signing out is a deliberate act. Fronting the app with the sign-in
       // prompt one render later would read as the app refusing to let them.
       lsSet(SIGNIN_SKIPPED_KEY, "1");
@@ -2163,14 +2150,32 @@
     if (unlocked) {
       unlocked = false;
       unlockedViaMaster = false;
-      // Remember the choice, or the next poll's auto-unlock would undo it.
-      treasurerLockedByChoice = true;
       render();
       return;
     }
-    // Unlocking by hand cancels the lock-out, so a later reload auto-unlocks
-    // again rather than making the admin re-enter a PIN it does not need.
-    treasurerLockedByChoice = false;
+
+    // A GOOGLE-VERIFIED TREASURER NEEDS NO PIN. The login already proves more
+    // than the PIN can: the PIN is one code shared with all five members by
+    // design, while `is_treasurer` on a linked row is the very flag migration
+    // 011's policies key off.
+    //
+    // Strictly verifiedTreasurer(), NOT isTreasurerAccount() — the latter
+    // falls back to the PIN when nobody is flagged, and using it here would
+    // turn "no treasurer on file yet" into "treasurer mode is one tap away".
+    //
+    // EVERYONE ELSE WHO CAN STILL SEE THIS BUTTON KEEPS THE PIN, and that is
+    // the point: canUnlockTreasurer() deliberately also shows it to anyone the
+    // app cannot identify (AUTH_MODE "off", signed out, unlinked), because it
+    // is the only route to the master PIN. Dropping the PIN for them would
+    // hand one-tap treasurer mode to any member who simply skips sign-in —
+    // and until 011 is applied, treasurer mode in the UI is real write access
+    // to every table.
+    if (verifiedTreasurer()) {
+      unlocked = true;
+      unlockedViaMaster = false;
+      render();
+      return;
+    }
     pinInputValue = "";
     pinError = null;
     pinNewValue = "";
@@ -3132,7 +3137,6 @@
       // and before it they would work — which is worse, not better.
       unlocked = false;
       unlockedViaMaster = false;
-      treasurerLockedByChoice = false;
 
       // Verify rather than assume. If the second write did not land we are in
       // the two-treasurer state above, and saying "done" would hide it.
@@ -6957,7 +6961,6 @@
       try {
         await loadAll();
         await resolveAccount();
-        applyAdminAutoUnlock();
         // First run on this device. Started here rather than in render() so a
         // later reload never re-opens it mid-session.
         if (!onboardingSeen()) onboardingStep = 0;

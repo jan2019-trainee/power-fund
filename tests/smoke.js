@@ -1897,20 +1897,31 @@ async function signInAdmin(browser, errors) {
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(2500);
 
-  // No PIN is typed anywhere in this test. The flagged treasurer's login
-  // out-ranks the PIN — which the whole group shares — so treasurer mode is
-  // already open.
+  // STARTS LOCKED, even for the flagged treasurer. Signing in no longer opens
+  // treasurer mode on its own — a load is not an intent to act on money.
   check(
-    "signin-admin/the flagged treasurer is unlocked without a PIN",
-    (await page.locator(".unlock-btn").innerText()).length > 0 &&
-      (await page.locator(".modal-overlay").count()) === 0
+    "signin-admin/signing in does NOT open treasurer mode by itself",
+    /unlock/i.test(await page.locator(".unlock-btn").innerText()) &&
+      (await page.locator(".mode-card.on").count()) === 0
+  );
+
+  // ...and opening it costs one tap and NO PIN. The login already proves more
+  // than a code shared with all five members can.
+  await page.locator(".unlock-btn").click();
+  await page.waitForTimeout(500);
+  check(
+    "signin-admin/and one tap opens it with no PIN prompt",
+    (await page.locator(".modal-overlay").count()) === 0 &&
+      /treasurer/i.test(await page.locator(".unlock-btn").innerText())
   );
 
   await page.locator(".tab-item", { hasText: "Menu" }).click();
   await page.waitForTimeout(400);
   check(
     "signin-admin/the mode card says why it is open",
-    /admin/i.test(await page.locator(".mode-card .mode-card-note").innerText())
+    /signed in as the fund's treasurer/i.test(
+      await page.locator(".mode-card .mode-card-note").innerText()
+    )
   );
 
   const menuRow = page.locator(".menu-row", { hasText: "Member sign-in" });
@@ -2056,8 +2067,8 @@ async function signInAdmin(browser, errors) {
   );
   await notAdmin.close();
 
-  // Locking by hand has to stick, or the 30-second poll would re-open it and
-  // the admin could never see the app the way a member does.
+  // Locking must stick across the 30-second poll and the tab-focus reload,
+  // which is how the admin sees the app the way a member does.
   const lock = await browser.newPage({ viewport: { width: 430, height: 950 } });
   lock.on("pageerror", (e) => errors.push(`signin-admin/lock: ${e}`));
   const roster3 = rosterWithEmails();
@@ -2066,17 +2077,47 @@ async function signInAdmin(browser, errors) {
   await withAuthMode(lock, "optional", { signedIn: true, email: "regine@example.com" });
   await lock.goto(BASE, { waitUntil: "domcontentloaded" });
   await lock.waitForTimeout(2500);
-  await lock.evaluate(() => window.PowerFund.toggleUnlock());
-  await lock.waitForTimeout(300);
-  // A real reload, through the same path the 30-second poll and the tab-focus
-  // handler use — reload() is not exported, and faking it would prove nothing.
+  await lock.evaluate(() => window.PowerFund.toggleUnlock()); // open it
+  await lock.waitForTimeout(400);
+  await lock.evaluate(() => window.PowerFund.toggleUnlock()); // and lock it
+  await lock.waitForTimeout(400);
+  // A real reload, through the same path the poll and the tab-focus handler
+  // use — reload() is not exported, and faking it would prove nothing.
   await lock.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
   await lock.waitForTimeout(1500);
   check(
-    "signin-admin/an explicit lock survives a reload cycle",
+    "signin-admin/a lock survives a reload cycle",
     /unlock/i.test(await lock.locator(".unlock-btn").innerText())
   );
   await lock.close();
+
+  // THE BOUNDARY. A PIN-free toggle is for a VERIFIED treasurer only. Anyone
+  // the app cannot identify still sees the button (it is the only route to the
+  // master PIN) and must still be asked for the PIN — otherwise a member who
+  // simply skips sign-in gets one-tap treasurer mode, and before migration 011
+  // that is real write access to every table.
+  const anon = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  anon.on("pageerror", (e) => errors.push(`signin-admin/anon: ${e}`));
+  await serve(anon, {
+    ...M.TABLE_DATA,
+    members: rosterWithEmails(),
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234" },
+  });
+  await withAuthMode(anon, "optional"); // signed OUT
+  await anon.goto(BASE, { waitUntil: "domcontentloaded" });
+  await anon.waitForTimeout(2200);
+  check(
+    "signin-admin/an unidentified visitor still gets the button",
+    (await anon.locator(".unlock-btn").count()) === 1
+  );
+  await anon.locator(".unlock-btn").click();
+  await anon.waitForTimeout(500);
+  check(
+    "signin-admin/but is still asked for the PIN — no free pass",
+    (await anon.locator(".modal-overlay").count()) === 1 &&
+      (await anon.locator(".mode-card.on").count()) === 0
+  );
+  await anon.close();
 }
 
 /** Claim / link on first sign-in (phase 3). */
@@ -2867,6 +2908,10 @@ async function transferRole(browser, errors) {
   await withAuthMode(page, "optional", { signedIn: true, email: "regine@example.com" });
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(2500);
+  // Treasurer mode no longer opens on sign-in, and Security only exists inside
+  // it. One tap, no PIN — that is the point of the verified-treasurer path.
+  await page.locator(".unlock-btn").click();
+  await page.waitForTimeout(500);
   await page.locator(".tab-item", { hasText: "Menu" }).click();
   await page.waitForTimeout(400);
 

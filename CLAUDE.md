@@ -670,12 +670,25 @@ exported handlers — is gated on it, never on `unlocked`.
   panel that sets the addresses — a permanent dead end. It grants nothing new:
   with no treasurer flagged, 011's readiness check refuses the lockdown
   anyway, so the PIN is the only authority that exists yet.
-- **The flagged treasurer is auto-unlocked** (`applyAdminAutoUnlock()`, run
-  after every resolve). A Google login owning an `is_treasurer` row is
-  strictly stronger proof than a four-digit code five people share, so making
-  them type it added nothing. `treasurerLockedByChoice` makes an explicit Lock
-  stick — without it the 30-second poll would re-open treasurer mode and the
-  admin could never see the app as a member does.
+- **Treasurer mode starts LOCKED, and opens with one tap and no PIN** for a
+  Google-verified treasurer. It used to auto-unlock on sign-in; that was
+  reversed deliberately — loading the app is not an intent to act on money,
+  and the owner wanted the mode entered on purpose.
+- **`verifiedTreasurer()` is the strict test that gates the PIN-free path**,
+  and it is NOT `isTreasurerAccount()`. The latter falls back to the PIN when
+  nobody is flagged; using it here would turn "no treasurer on file yet" into
+  "treasurer mode is one tap away".
+- **Everyone else who can still see the button keeps the PIN.** That is the
+  boundary, not an oversight: `canUnlockTreasurer()` deliberately shows the
+  button to anyone the app cannot identify (auth off, signed out, unlinked)
+  because it is the only route to the master PIN. A blanket "no PIN any more"
+  would hand one-tap treasurer mode to any member who simply skips sign-in —
+  and until 011 is applied, treasurer mode in the UI is real write access to
+  every table. A test asserts both halves.
+- **Destructive actions still ask for the PIN** (Reset all data, Restore,
+  Undo release, Transfer role). Left as-is on purpose. Open question worth
+  revisiting: a treasurer who never sets a PIN cannot satisfy them, since the
+  unlock flow is no longer where a PIN gets created.
 - **Consequence to remember:** the "You are / Edit" profile card lives in the
   member branch of the Menu, so an auto-unlocked admin does not see it. Their
   route to their own name and photo is Menu → Account → **Edit my profile**,

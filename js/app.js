@@ -2164,6 +2164,20 @@
     if (!confirmDialog || busy) return;
     const d = confirmDialog;
 
+    // FIRST, before the type-to-confirm check. A PIN that does not exist cannot
+    // be typed. Before the PIN-free unlock this was unreachable — you could
+    // only be in treasurer mode by having typed a PIN, so one existed. A
+    // Google-verified treasurer now unlocks without one, so a fund that never
+    // set a treasurer PIN could reach this dialog and be told "Incorrect PIN"
+    // forever, with nothing saying why. Exported on PowerFund, so the render's
+    // version of this is not the gate — and the order matters, because the
+    // render hides the type-to-confirm field in this state, which would
+    // otherwise fail first with "Type RESET exactly to confirm".
+    if (d.requirePin && !hasTreasurerPin()) {
+      d.error = "No treasurer PIN is set yet — this action needs one.";
+      d.pinValue = "";
+      return render();
+    }
     if (
       d.requireType &&
       d.typeValue.trim().toUpperCase() !== d.requireType.toUpperCase()
@@ -2199,6 +2213,16 @@
     if (kind === "unlink") return doUnlinkMember(ctx.memberId);
     if (kind === "transferRole") return doTransferRole(ctx.toId);
     if (kind === "removeTreasurer") return doRemoveTreasurer(ctx.memberId);
+  }
+
+  /** The way out of the dead end above: leave the destructive action and go
+   *  create the PIN it wants. Deliberately does NOT resume the action
+   *  afterwards — re-confirming a reset or a role transfer on purpose is
+   *  cheap, and resuming one automatically after a detour is not. */
+  function startPinForConfirm() {
+    if (!unlocked) return;
+    confirmDialog = null;
+    openChangePin();
   }
 
   // ===================================================================
@@ -2285,6 +2309,21 @@
     render();
   }
 
+  /** Does the change-PIN flow need its "prove the current one" step?
+   *
+   *  No, in two cases. There is nothing to prove when no PIN exists — and,
+   *  the one that mattered: NOT AFTER A MASTER-PIN UNLOCK. The master PIN is
+   *  the group's way back in when the treasurer PIN has been forgotten, and
+   *  the app says so out loud on the way in ("Set a new treasurer PIN from
+   *  Menu → Change PIN"). Demanding the forgotten PIN on that very screen made
+   *  that instruction impossible to follow and left the master PIN able to
+   *  unlock the session but never to end the lockout — which is the whole
+   *  reason it exists. The master PIN was verified against the database this
+   *  session, so the authority is real, not assumed. */
+  function changeNeedsCurrentPin() {
+    return hasTreasurerPin() && !unlockedViaMaster;
+  }
+
   function openChangePin() {
     pinInputValue = "";
     pinError = null;
@@ -2292,7 +2331,7 @@
     // Changing an existing PIN starts by proving you know it — otherwise
     // anyone who finds an unlocked phone can lock the group out of its own
     // treasurer mode.
-    pinStep = hasTreasurerPin() ? "current" : "new";
+    pinStep = changeNeedsCurrentPin() ? "current" : "new";
     pinModalMode = "change";
     render();
   }
@@ -5692,6 +5731,7 @@
       overdueListOpen, startRoundConfirming, isWide, selectedMemberId,
       undoPaidTarget, markPaidTarget,
       hasMasterPin: hasMasterPin(),
+      hasTreasurerPin: hasTreasurerPin(),
       // Accounts (migration 008). The mode drives whether Menu shows an
       // Account group at all; the email is what "Signed in as ..." prints.
       authMode: AUTH_MODE,
@@ -6121,7 +6161,9 @@
           ? hasMasterPin()
             ? "Choose a new master PIN"
             : "Choose a master PIN"
-          : "Choose a new PIN",
+          : hasTreasurerPin()
+          ? "Choose a new PIN"
+          : "Choose a treasurer PIN",
         confirm: isMasterFlow ? "Confirm the master PIN" : "Confirm the new PIN",
         done: isMasterFlow ? "Master PIN saved" : "PIN changed",
       };
@@ -6202,7 +6244,7 @@
       // Which steps this flow has, so the progress bar counts only real ones:
       // setting a first PIN has no current-PIN step to prove.
       const flowSteps =
-        pinModalMode === "change" && hasTreasurerPin()
+        pinModalMode === "change" && changeNeedsCurrentPin()
           ? ["current", "new", "confirm"]
           : ["new", "confirm"];
       const stepIndex = flowSteps.indexOf(pinStep);
@@ -7325,30 +7367,46 @@
     // Destructive-action confirmation (revert / undo release / reset / restore)
     if (confirmDialog) {
       const d = confirmDialog;
+      // A Google-verified treasurer unlocks with no PIN, so a fund that never
+      // set one can reach a PIN-gated action with nothing to type. Offering an
+      // input that can never be satisfied is the dead end; this offers the way
+      // out instead.
+      const pinMissing = d.requirePin && !hasTreasurerPin();
       html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeConfirm()">
         <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
           <h3 id="dlg-title">${escapeHtml(d.title)}</h3>
           <div class="confirm-body">${d.bodyHtml}</div>
           ${
-            d.requireType
+            d.requireType && !pinMissing
               ? `<input type="text" class="pin-input confirm-type-input" autocomplete="off" autocapitalize="characters" spellcheck="false"
                      placeholder="Type ${escapeHtml(d.requireType)}" value="${escapeHtml(d.typeValue)}"
                      oninput="PowerFund.setConfirmType(this.value)">`
               : ""
           }
           ${
-            d.requirePin
+            d.requirePin && !pinMissing
               ? `<input type="password" inputmode="numeric" autocomplete="off" class="pin-input"
                      placeholder="Treasurer PIN" value="${escapeHtml(d.pinValue)}"
                      oninput="PowerFund.setConfirmPin(this.value)"
                      onkeydown="if(event.key==='Enter') PowerFund.submitConfirm()">`
               : ""
           }
+          ${
+            pinMissing
+              ? `<p class="confirm-no-pin">${icon("alert", 14)}<span>This fund has
+                   <b>no treasurer PIN</b> yet, and this action asks for one. Set
+                   one first, then start this again.</span></p>`
+              : ""
+          }
           ${d.error ? `<p class="pin-error">${escapeHtml(d.error)}</p>` : ""}
           <div class="modal-actions">
-            <button class="modal-btn-primary confirm-yes" onclick="PowerFund.submitConfirm()" ${
-              busy ? "disabled" : ""
-            }>${escapeHtml(d.confirmLabel)}</button>
+            ${
+              pinMissing
+                ? `<button class="modal-btn-primary confirm-set-pin" onclick="PowerFund.startPinForConfirm()">Set a treasurer PIN</button>`
+                : `<button class="modal-btn-primary confirm-yes" onclick="PowerFund.submitConfirm()" ${
+                    busy ? "disabled" : ""
+                  }>${escapeHtml(d.confirmLabel)}</button>`
+            }
             <button class="modal-btn-secondary" onclick="PowerFund.closeConfirm()">Cancel</button>
           </div>
         </div>
@@ -7656,6 +7714,7 @@
     submitConfirm,
     closePinModal,
     openChangePin,
+    startPinForConfirm,
     openMasterPin,
     submitPin,
     pinKey,

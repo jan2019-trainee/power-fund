@@ -165,7 +165,14 @@ async function tabsRender(browser, label, viewport, errors, wide) {
     if (m.type() === "error" && !expected) errors.push(`${label}: ${text}`);
   });
   page.on("pageerror", (e) => errors.push(`${label}: ${e}`));
-  await serve(page, M.TABLE_DATA);
+  // A fund that HAS a treasurer PIN. The Security row names the missing one
+  // when there is none ("Set a treasurer PIN"), and the mock does not persist
+  // the wizard's write — so the default fixture would leave this check reading
+  // a menu that disagrees with the PIN the test just set.
+  await serve(page, {
+    ...M.TABLE_DATA,
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234" },
+  });
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(1500);
 
@@ -3103,6 +3110,128 @@ async function extraTreasurer(browser, errors) {
   await solo.close();
 }
 
+/** The two PIN dead ends, both created by the PIN-free unlock landing on top
+ *  of rules written when treasurer mode could only be entered with a PIN. */
+async function pinDeadEnds(browser, errors) {
+  // 1. A GOOGLE-VERIFIED TREASURER ON A FUND WITH NO TREASURER PIN.
+  //    They unlock with no PIN, so nothing ever mentions that none exists —
+  //    until a destructive action asks for one that cannot be typed.
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`pin-deadend: ${e}`));
+  const members = rosterWithEmails();
+  members[0].auth_user_id = FAKE_USER_ID;
+  await serve(page, {
+    ...M.TABLE_DATA,
+    members,
+    app_settings: { ...M.SETTINGS, treasurer_pin: null, master_pin: null },
+  });
+  await withAuthMode(page, "optional", { signedIn: true, email: "regine@example.com" });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
+  await page.locator(".unlock-btn").click();
+  await page.waitForTimeout(500);
+  check("pin-deadend/a verified treasurer unlocks with no PIN modal",
+    (await page.locator(".modal-overlay").count()) === 0);
+  await page.locator(".tab-item", { hasText: "Menu" }).click();
+  await page.waitForTimeout(400);
+
+  const pinRow = page.locator(".menu-row", { hasText: "treasurer PIN" }).first();
+  const pinRowText = (await pinRow.innerText()).replace(/\s+/g, " ");
+  check("pin-deadend/the menu says no PIN is set",
+    /Set a treasurer PIN/.test(pinRowText), pinRowText);
+  check("pin-deadend/and names what needs it",
+    /Reset all data/.test(await page.locator(".menu-row", { hasText: "Set a treasurer PIN" }).first().innerText()));
+
+  await page.locator(".reset-btn.danger").click();
+  await page.waitForTimeout(450);
+  check("pin-deadend/the confirm says there is no PIN, not 'incorrect'",
+    (await page.locator(".confirm-no-pin").count()) === 1);
+  check("pin-deadend/it offers no PIN field to type into",
+    (await page.locator('.modal input[placeholder="Treasurer PIN"]').count()) === 0);
+  // Hidden too: typing RESET into a dialog that cannot be submitted is busywork.
+  check("pin-deadend/nor the type-to-confirm field",
+    (await page.locator(".confirm-type-input").count()) === 0);
+  check("pin-deadend/and offers the way out instead of Reset",
+    (await page.locator(".confirm-set-pin").count()) === 1 &&
+      (await page.locator(".confirm-yes").count()) === 0);
+
+  // submitConfirm is exported, so the hidden field is not the gate — and the
+  // missing-PIN check must beat the type-to-confirm one, or the message would
+  // be "Type RESET exactly to confirm" for a dialog with no RESET field.
+  await page.evaluate(() => window.PowerFund.submitConfirm());
+  await page.waitForTimeout(400);
+  check("pin-deadend/the handler refuses, and says why",
+    /No treasurer PIN is set/.test(await page.locator(".modal .pin-error").innerText()),
+    await page.locator(".modal .pin-error").innerText());
+
+  await page.locator(".confirm-set-pin").click();
+  await page.waitForTimeout(450);
+  check("pin-deadend/the way out opens PIN creation, not 'change'",
+    /Choose a treasurer PIN/.test(await page.locator(".modal h3").innerText()),
+    await page.locator(".modal h3").innerText());
+  check("pin-deadend/a first PIN has two steps, not three",
+    (await page.locator(".pin-step").count()) === 2);
+  await page.close();
+
+  // 2. THE MASTER-PIN LOCKOUT. Unlocking with the master PIN tells you to set a
+  //    new treasurer PIN from Menu → Change PIN — and that screen used to open
+  //    by demanding the very PIN you just proved you had forgotten.
+  const m = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  m.on("pageerror", (e) => errors.push(`pin-master: ${e}`));
+  await serve(m, {
+    ...M.TABLE_DATA,
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234", master_pin: "9999" },
+  });
+  await m.goto(BASE, { waitUntil: "domcontentloaded" });
+  await m.waitForTimeout(2000);
+  await m.locator(".unlock-btn").click();
+  await m.waitForTimeout(400);
+  await m.keyboard.type("9999");
+  await m.locator(".modal-btn-primary").first().click();
+  await m.waitForTimeout(900);
+  check("pin-master/the master PIN unlocks", (await m.locator(".unlock-btn").innerText()).length > 0);
+  await m.locator(".tab-item", { hasText: "Menu" }).click();
+  await m.waitForTimeout(400);
+  await m.locator(".menu-row", { hasText: "Change PIN" }).first().click();
+  await m.waitForTimeout(450);
+  check(
+    "pin-master/Change PIN does NOT demand the forgotten PIN",
+    /Choose a new PIN/.test(await m.locator(".modal h3").innerText()),
+    await m.locator(".modal h3").innerText()
+  );
+  check("pin-master/and the progress bar counts two steps",
+    (await m.locator(".pin-step").count()) === 2);
+  await m.close();
+
+  // The control: an ordinary unlock still has to prove the current PIN, or
+  // anyone holding an unlocked phone could lock the group out of its own fund.
+  const norm = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  norm.on("pageerror", (e) => errors.push(`pin-normal: ${e}`));
+  await serve(norm, {
+    ...M.TABLE_DATA,
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234", master_pin: "9999" },
+  });
+  await norm.goto(BASE, { waitUntil: "domcontentloaded" });
+  await norm.waitForTimeout(2000);
+  await norm.locator(".unlock-btn").click();
+  await norm.waitForTimeout(400);
+  await norm.keyboard.type("1234");
+  await norm.locator(".modal-btn-primary").first().click();
+  await norm.waitForTimeout(900);
+  await norm.locator(".tab-item", { hasText: "Menu" }).click();
+  await norm.waitForTimeout(400);
+  await norm.locator(".menu-row", { hasText: "Change PIN" }).first().click();
+  await norm.waitForTimeout(450);
+  check(
+    "pin-normal/an ordinary unlock still proves the current PIN",
+    /Enter your current PIN/.test(await norm.locator(".modal h3").innerText()),
+    await norm.locator(".modal h3").innerText()
+  );
+  check("pin-normal/three steps",
+    (await norm.locator(".pin-step").count()) === 3);
+  await norm.close();
+}
+
 /** Payment schedule — the 30 due dates, which until now could only be changed
  *  in SQL. Gated on the ACCOUNT (011's cycles_treasurer keys off
  *  members.is_treasurer), not on the shared PIN. */
@@ -4538,6 +4667,7 @@ async function bootFailure(browser) {
   await extraTreasurer(browser, errors);
   await transferRole(browser, errors);
   await paymentSchedule(browser, errors);
+  await pinDeadEnds(browser, errors);
   await signInPrompt(browser, errors);
   await onboarding(browser, errors);
   console.log("\nBackup round-trip");

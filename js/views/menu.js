@@ -19,6 +19,7 @@ window.PFViews.menu = function (ctx) {
   const {
     members, unlocked, myMember, escapeHtml, icon, memberAvatar, C, hasMasterPin,
     authMode, sessionEmail, identityLocked, signInStatus, isTreasurerAccount,
+    hasTreasurerPin,
     payoutOwner, maskAccount
   } = ctx;
 
@@ -97,7 +98,17 @@ window.PFViews.menu = function (ctx) {
     ]);
 
     html += group("Security", [
-      row("key", "Change PIN", "PowerFund.openChangePin()", "The PIN that unlocks treasurer mode"),
+      // Says when there ISN'T one. A Google-verified treasurer unlocks without
+      // a PIN, so nothing else in the app would ever mention that the fund has
+      // none — until a destructive action asks for it and cannot be satisfied.
+      row(
+        "key",
+        hasTreasurerPin ? "Change PIN" : "Set a treasurer PIN",
+        "PowerFund.openChangePin()",
+        hasTreasurerPin
+          ? "The PIN that unlocks treasurer mode"
+          : "Not set \u2014 Reset all data, Transfer role and Remove treasurer all need it"
+      ),
       // The recovery PIN had no UI at all — it existed only as a one-off SQL
       // statement, so a fund deployed without it had no way back from a
       // forgotten treasurer PIN and nothing anywhere said so.

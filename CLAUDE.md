@@ -688,6 +688,51 @@ The full chip vocabulary: green paid · purple in review · **red solid
 overdue** · **red dashed rejected** (sent and refused, versus never sent) ·
 plain not-due-yet.
 
+## Two PIN dead ends, both made by the PIN-free unlock
+
+Both existed because the PIN rules were written when treasurer mode could only
+be entered BY TYPING A PIN — so a PIN always existed, and you always knew it.
+A Google-verified treasurer now unlocks without one, and neither rule was
+revisited.
+
+**1. A fund with no treasurer PIN at all.** The verified treasurer unlocks,
+nothing anywhere mentions that no PIN exists, and then Reset all data / Transfer
+role / Remove treasurer present a PIN field. Every entry answered **"Incorrect
+PIN"** — perfectly true and completely useless, since the correct PIN was no
+digits at all.
+
+- The confirm dialog now detects it and **offers the way out instead of an
+  input that cannot be satisfied**: an amber `.confirm-no-pin` note and a
+  "Set a treasurer PIN" button (`startPinForConfirm()`) in place of the
+  destructive one.
+- **The missing-PIN check runs BEFORE the type-to-confirm check** in
+  `submitConfirm()`. The render hides the RESET field in this state, so the
+  other order would refuse with "Type RESET exactly to confirm" about a field
+  that is not on screen.
+- The type-to-confirm field is hidden too — typing RESET into a dialog that
+  cannot be submitted is busywork.
+- **It does NOT resume the action afterwards.** Re-confirming a reset on
+  purpose costs one tap; auto-resuming a destructive action after a detour is
+  not a thing to build.
+- Menu → Security now reads **"Set a treasurer PIN"** with a note naming the
+  three actions that need it, mirroring what the master-PIN row already did.
+  Nothing else in the app would ever have mentioned the absence.
+
+**2. The master PIN could unlock the lockout but never END it.** This one was
+worse, because the app *instructed* people into it: unlocking with the master
+PIN shows *"Set a new treasurer PIN from Menu → Change PIN so the group can use
+their own again"* — and `openChangePin()` opened by demanding the current
+treasurer PIN, the very one they had just proved they had forgotten. The master
+PIN exists for exactly this situation and could not finish the job.
+
+`changeNeedsCurrentPin()` is now the single rule, used by the flow AND by the
+progress bar so a two-step flow cannot draw three dots: prove the current PIN
+unless there is none, **or you are in on the master PIN this session**
+(`unlockedViaMaster`, set only after a successful database check). Not a new
+permission — `pf_set_pin` already allows it, and the app already promised it.
+A test asserts the control case: an ordinary PIN unlock still proves the
+current PIN, or anyone holding an unlocked phone could lock the group out.
+
 ## The payment schedule is editable now (Menu → Group → Payment schedule)
 
 Found while auditing what "complete" was hiding. `cycles.due_date` has existed
@@ -915,10 +960,12 @@ exported handlers — is gated on it, never on `unlocked`.
   would hand one-tap treasurer mode to any member who simply skips sign-in —
   and until 011 is applied, treasurer mode in the UI is real write access to
   every table. A test asserts both halves.
-- **Destructive actions still ask for the PIN** (Reset all data, Restore,
-  Undo release, Transfer role). Left as-is on purpose. Open question worth
-  revisiting: a treasurer who never sets a PIN cannot satisfy them, since the
-  unlock flow is no longer where a PIN gets created.
+- **Three actions still ask for the PIN**, and the list matters because an
+  earlier version of this note had it wrong: **Reset all data**, **Transfer
+  treasurer role** and **Remove treasurer**. Restore and Undo release do NOT
+  (Restore asks you to type REPLACE; Undo release asks neither). Grep
+  `requirePin: true` before repeating any list of them.
+  **The dead end this created is now closed** — see "Two PIN dead ends" above.
 - **Consequence to remember:** the "You are / Edit" profile card lives in the
   member branch of the Menu, so an auto-unlocked admin does not see it. Their
   route to their own name and photo is Menu → Account → **Edit my profile**,

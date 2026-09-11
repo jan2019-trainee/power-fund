@@ -1155,6 +1155,25 @@ body {
 .edit-names-modal { text-align: left; }
 .edit-names-modal h3, .edit-names-modal .modal-sub { text-align: center; }
 
+/* The confirm dialog's "there is no PIN to type" notice. Amber rather than
+   red: nothing has gone wrong and nothing has been refused — the action is
+   simply waiting on a credential that was never created. */
+.confirm-no-pin {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  text-align: left;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 10px;
+  padding: 10px 11px;
+  margin: 14px 0 0;
+}
+.confirm-no-pin .icon { flex: none; margin-top: 2px; }
+.confirm-no-pin b { color: var(--accent); }
+
 /* --- Payment schedule (treasurer) ----------------------------------------
    Thirty date fields is a lot of rows, so the list scrolls inside the dialog
    and the cycle number carries the identity — the treasurer arrives knowing

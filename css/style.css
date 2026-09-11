@@ -1408,6 +1408,15 @@ body {
 }
 .payout-nudge-go { color: var(--accent); font-size: 18px; flex-shrink: 0; }
 
+/* "until they sign in" — the treasurer's stand-in button says its own expiry,
+   so it does not read as a permission they keep. */
+.payout-dest-until {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-left: 6px;
+}
+
 .payout-done-tag {
   font-size: 11px;
   font-weight: 600;

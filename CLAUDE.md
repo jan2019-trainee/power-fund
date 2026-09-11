@@ -449,12 +449,19 @@ is unchanged where it matters: Release Payout still shows the recipient's full
 details, and `PayoutReleaseNoQR`'s "Copy reminder message" is how they chase a
 member who has not added one. That was already built.
 
-- **The database still lets the treasurer write these columns, deliberately.**
-  A member who loses their Google account would otherwise have no route to
-  correct where their payout goes, and nor would anyone else — a lockout with
-  money on the far side of it. So the UI hides the button and the DB keeps the
-  recovery path. Do not "finish the job" by tightening the guard without
-  deciding what happens to that member.
+- **The treasurer may still edit a member who has NEVER SIGNED IN**
+  (`payoutEditableMember(memberId)`), and the button on that member's card says
+  *"until they sign in"*. Without this the feature strands exactly the people
+  it is meant to serve: a member with no account cannot set their own details,
+  and if nobody else can either, their payout destination is unreachable from
+  the app and the only route left is SQL — worse than the treasurer-managed
+  world this replaces. **The carve-out closes the moment they link**, and
+  shrinks to nothing once the fund has all signed in. An ordinary member never
+  gets it, linked target or not.
+- **The database still lets the treasurer write these columns unconditionally**,
+  which is the recovery path for a member who loses their Google account. The
+  UI is narrower than the database on purpose. Do not "finish the job" by
+  tightening the guard without deciding what happens to that member.
 - **Account numbers are MASKED in the roster** (`maskAccount()`, last four
   digits). Not secrecy — the treasurer needs the full number and gets it in
   Release Payout, and the owner sees their own in full where they edit it. It

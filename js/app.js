@@ -4290,28 +4290,45 @@
 
   /** The member whose payout details the caller may edit, or null.
    *
-   *  The treasurer is deliberately NOT given anyone else here. The UI hands
-   *  this surface to its owner; the database still lets the treasurer write
-   *  these columns, which is the recovery path for a member who loses their
-   *  Google account — see 011's note. Hiding the button is a UI policy, and
-   *  saying so beats implying an enforcement that is not there. */
-  function payoutEditableMember() {
-    return editableMember();
+   *  Your own row, always — that is the point of the change.
+   *
+   *  PLUS one carve-out: the treasurer may still edit a member who has NEVER
+   *  SIGNED IN. Without it this feature strands exactly the people it is meant
+   *  to serve — a member with no account cannot set their own details, and if
+   *  nobody else can either, their payout destination is unreachable from the
+   *  app entirely and the only route left is SQL. That is a worse place than
+   *  where we started.
+   *
+   *  It closes the moment they link: once `auth_user_id` is set the row is
+   *  theirs alone, and the treasurer's button disappears from it. So the
+   *  carve-out shrinks as the fund signs in, and is gone once everyone has.
+   *
+   *  This is also the honest shape. 011 lets the treasurer write these columns
+   *  regardless — deliberately, as the recovery path for a lost Google
+   *  account. Showing the button exactly where that power is still needed
+   *  beats hiding it everywhere and implying an enforcement that is not there.
+   */
+  function payoutEditableMember(memberId) {
+    const mine = editableMember();
+    // No argument: your own, or nothing.
+    if (memberId == null) return mine;
+    if (mine && String(memberId) === String(mine.id)) return mine;
+    // Somebody else's — treasurer only, and only while they are unlinked.
+    if (!isTreasurerAccount()) return null;
+    const target = (state.members || []).find(
+      (x) => String(x.id) === String(memberId)
+    );
+    if (!target || target.auth_user_id) return null;
+    return target;
   }
 
   function openPayoutQrModal(memberId) {
-    const mine = payoutEditableMember();
     // Exported on PowerFund, so the absence of a button is not the gate.
-    if (!mine) return;
-    // Ignore any id but your own, however the handler was reached.
-    if (memberId != null && String(memberId) !== String(mine.id)) return;
-    const m = state.members.find((x) => x.id === mine.id);
+    // payoutEditableMember() resolves the argument to a row the caller may
+    // actually write, or null — it never takes the id on trust.
+    const m = payoutEditableMember(memberId);
     if (!m) return;
-    // ALWAYS the caller's own id, never the argument. The argument exists only
-    // so an old call site passing an id still works; taking it as the target
-    // would make the guard above the only thing standing between a member and
-    // somebody else's payout destination, and one refactor could remove it.
-    payoutQrMemberId = mine.id;
+    payoutQrMemberId = m.id;
     payoutQrFields = {
       bank: m.payout_bank || "",
       accountName: m.payout_account_name || "",
@@ -4373,13 +4390,15 @@
     render();
   }
   async function savePayoutDetails() {
-    const mine = payoutEditableMember();
-    if (!mine || !payoutQrMemberId || busy) return;
-    // Re-checked against the account at save time, not just at open time: the
-    // session can end while the sheet is open.
-    if (String(payoutQrMemberId) !== String(mine.id)) return;
-    const memberId = payoutQrMemberId;
+    if (!payoutQrMemberId || busy) return;
+    // Re-resolved at save time, not just at open time: the session can end, or
+    // the member can claim their row, while the sheet sits open.
+    const target = payoutEditableMember(payoutQrMemberId);
+    if (!target) return;
+    const memberId = target.id;
     const m = state.members.find((x) => x.id === memberId);
+    const own = editableMember();
+    const mineOwnRow = !!own && String(own.id) === String(memberId);
     busy = true;
     render();
     try {
@@ -4394,19 +4413,31 @@
         fields.payout_qr_url = await window.DB.uploadMemberPayoutQr(payoutQrFile, memberId);
       }
       await window.DB.saveMemberPayoutDetails(memberId, fields);
-      // Says who did it, because it is now the member and not the treasurer —
-      // and the account NUMBER never goes in, for the same reason the member
-      // emails do not: the log is read by all five and lands in the CSV export
-      // and the backup file.
+      // Names who it was FOR, and says when the treasurer did it on their
+      // behalf — a payout destination changed by somebody else is exactly the
+      // entry the group would want to be able to find later.
+      //
+      // The account NUMBER never goes in, for the same reason member emails do
+      // not: the log is read by all five and lands in the CSV export and the
+      // backup file.
+      const onBehalf = !mineOwnRow;
       await logActivity(
-        `${m ? m.name : "A member"} updated their payout details${
-          payoutQrFile ? " and QR code" : ""
-        }`,
+        onBehalf
+          ? `Treasurer set ${m ? m.name : "a member"}'s payout details${
+              payoutQrFile ? " and QR code" : ""
+            } (not signed in yet)`
+          : `${m ? m.name : "A member"} updated their payout details${
+              payoutQrFile ? " and QR code" : ""
+            }`,
         { type: "admin", memberId: memberId }
       );
       closePayoutQrModal();
       await reload();
-      showSuccess("Your payout details are saved.");
+      showSuccess(
+        mineOwnRow
+          ? "Your payout details are saved."
+          : `Payout details saved for ${m ? m.name : "the member"}.`
+      );
     } catch (e) {
       showError(e.message);
     } finally {
@@ -6493,11 +6524,24 @@
       // was a picker, which must not silently become GCash.
       const otherPicked = !!f.bankOther || (!!f.bank && !known);
       const hint = payoutRoundHint(pm);
+      // The treasurer filling in for somebody who has not signed in yet. The
+      // sheet has to say so, or it reads as if they are editing their own.
+      const own = editableMember();
+      const onBehalf = !own || String(own.id) !== String(payoutQrMemberId);
 
       html += `<div class="modal-overlay sheet" onclick="if(event.target===this) PowerFund.closePayoutQrModal()">
         <div class="modal sheet-payout-qr" role="dialog" aria-modal="true" aria-labelledby="pq-title" tabindex="-1">
-          <h3 id="pq-title">My Payout QR Code</h3>
-          <p class="modal-sub">Shown to the treasurer when it's your turn to receive a payout</p>
+          <h3 id="pq-title">${
+            onBehalf
+              ? escapeHtml((pm && pm.name) || "Member") + "'s Payout QR Code"
+              : "My Payout QR Code"
+          }</h3>
+          <p class="modal-sub">${
+            onBehalf
+              ? escapeHtml((pm && pm.name) || "They") +
+                " hasn't signed in yet, so you're adding this for them. Once they sign in it becomes theirs to change."
+              : "Shown to the treasurer when it's your turn to receive a payout"
+          }</p>
 
           <div class="pq-status">
             <div class="pq-status-mark">${icon(currentQr ? "qr" : "upload", 18)}</div>
@@ -6521,8 +6565,16 @@
             </div>
           </div>
 
-          <p class="pq-explainer">This is separate from the treasurer's payment
-            QR — it's where <b>you</b> receive money when your round comes up.</p>
+          <p class="pq-explainer">${
+            onBehalf
+              ? `This is separate from the fund's payment QR — it's where
+                 <b>${escapeHtml(
+                   (pm && pm.name) || "they"
+                 )}</b> receives money when their round comes up. Check it with
+                 them before saving.`
+              : `This is separate from the treasurer's payment QR — it's where
+                 <b>you</b> receive money when your round comes up.`
+          }</p>
 
           ${
             payoutQrPreview
@@ -6588,13 +6640,16 @@
                  )}"
                  value="${escapeHtml(f.accountName)}"
                  oninput="PowerFund.setPayoutQrField('accountName', this.value)">
-          <p class="pq-name-note">The treasurer checks this against your name
-            before sending, so make it the name the account is really under.</p>
+          <p class="pq-name-note">${
+            onBehalf
+              ? "Checked against the person before sending, so make it the name the account is really under."
+              : "The treasurer checks this against your name before sending, so make it the name the account is really under."
+          }</p>
 
           <div class="modal-actions">
             <button class="modal-btn-primary" onclick="PowerFund.savePayoutDetails()" ${
               busy ? "disabled" : ""
-            }>${busy ? "Saving…" : "Save Payout QR"}</button>
+            }>${busy ? "Saving…" : onBehalf ? "Save their details" : "Save Payout QR"}</button>
             <button class="modal-btn-secondary" onclick="PowerFund.closePayoutQrModal()">Cancel</button>
           </div>
         </div>

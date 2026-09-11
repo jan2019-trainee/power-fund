@@ -2374,6 +2374,94 @@ async function myPayoutQr(browser, errors) {
     !treText.includes("091712345678")
   );
   await tre.close();
+
+  // ---- The carve-out: the treasurer covers members who have not signed in --
+  // Without it this feature strands exactly the people it is meant to serve:
+  // a member with no account cannot set their own details, and if nobody else
+  // can either, the destination is unreachable from the app entirely.
+  const cover = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  cover.on("pageerror", (e) => errors.push(`payout-qr/cover: ${e}`));
+  const c = rosterWithEmails();
+  c[0].auth_user_id = FAKE_USER_ID; // Regine, the flagged treasurer
+  c[2].auth_user_id = null;         // Jan has never signed in
+  c[3].auth_user_id = "33333333-3333-3333-3333-333333333333"; // Clara has
+  const cdata = { ...M.TABLE_DATA, members: c };
+  await serve(cover, cdata);
+  const cwrites = [];
+  await cover.route("**/rest/v1/members**", async (route) => {
+    const req = route.request();
+    if (req.method() === "GET") {
+      return route.fulfill({
+        status: 200, contentType: "application/json",
+        body: JSON.stringify(cdata.members),
+      });
+    }
+    let body = {};
+    try { body = JSON.parse(req.postData() || "{}"); } catch (e) {}
+    const target = cdata.members.find((m) => req.url().includes(m.id));
+    cwrites.push({ name: target && target.name, body });
+    Object.assign(target || {}, body);
+    return route.fulfill({
+      status: 200, contentType: "application/json",
+      body: JSON.stringify([target || {}]),
+    });
+  });
+  await withAuthMode(cover, "optional", { signedIn: true, email: "regine@example.com" });
+  await cover.goto(BASE, { waitUntil: "domcontentloaded" });
+  await cover.waitForTimeout(2500);
+
+  // Jan is unlinked -> the treasurer may stand in.
+  await cover.evaluate((id) => window.PowerFund.openPayoutQrModal(id), c[2].id);
+  await cover.waitForTimeout(450);
+  check(
+    "payout-qr/the treasurer may fill in for a member who hasn't signed in",
+    (await cover.locator(".sheet-payout-qr").count()) === 1 &&
+      /Jan's Payout QR Code/i.test(await cover.locator("#pq-title").innerText())
+  );
+  check(
+    "payout-qr/and the sheet says it is on their behalf, not the treasurer's own",
+    /hasn't signed in yet/i.test(await cover.locator(".modal-sub").last().innerText())
+  );
+  await cover.locator("#pq-bank").selectOption("Maya");
+  await cover.locator("#pq-num").fill("09181112222");
+  await cover.locator(".modal-btn-primary", { hasText: /Save their details/i }).click();
+  await cover.waitForTimeout(1200);
+  const cw = cwrites.find((x) => x.body && "payout_bank" in x.body);
+  check(
+    "payout-qr/it writes to THAT member's row",
+    !!cw && cw.name === "Jan" && cw.body.payout_bank === "Maya",
+    JSON.stringify(cw || null)
+  );
+
+  // Clara IS linked -> the carve-out must not apply. This is the half that
+  // keeps the feature meaningful: it shrinks as the fund signs in.
+  await cover.evaluate(() => window.PowerFund.closePayoutQrModal());
+  await cover.waitForTimeout(300);
+  await cover.evaluate((id) => window.PowerFund.openPayoutQrModal(id), c[3].id);
+  await cover.waitForTimeout(450);
+  check(
+    "payout-qr/but NOT for a member who has signed in — it closes on linking",
+    (await cover.locator(".sheet-payout-qr").count()) === 0
+  );
+  await cover.close();
+
+  // A plain member must never get the carve-out, linked target or not.
+  const nosy = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  nosy.on("pageerror", (e) => errors.push(`payout-qr/nosy: ${e}`));
+  const n = rosterWithEmails();
+  n[1].auth_user_id = FAKE_USER_ID; // Sarah, an ordinary member
+  n[2].auth_user_id = null;         // Jan, unlinked
+  await serve(nosy, { ...M.TABLE_DATA, members: n });
+  await withAuthMode(nosy, "optional", { signedIn: true, email: "sarah@example.com" });
+  await nosy.goto(BASE, { waitUntil: "domcontentloaded" });
+  await nosy.waitForTimeout(2500);
+  await nosy.evaluate((id) => window.PowerFund.openPayoutQrModal(id), n[2].id);
+  await nosy.waitForTimeout(450);
+  check(
+    "payout-qr/an ordinary member gets no carve-out over an unlinked member",
+    (await nosy.locator(".sheet-payout-qr").count()) === 0
+  );
+  await nosy.close();
 }
 
 /** The unlock button is hidden from a member the app can identify as somebody

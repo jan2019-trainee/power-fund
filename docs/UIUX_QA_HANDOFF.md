@@ -86,7 +86,9 @@ genuinely different code paths).
 - Not signed in → the row offers **sign in** rather than opening a sheet that
   would be refused. Please check this reads as an explanation, not a blocker.
 - On another member's card there is **no edit button** and the account number
-  is masked.
+  is masked — *unless* that member has never signed in, where the treasurer
+  gets **"Add for them · until they sign in"**. Worth checking that caption
+  reads as temporary rather than as a permission they keep.
 - The **Home nudge** appears only when nothing is on file and the member's
   round is collecting now or next. Worth a look as a judgement call: is it
   prominent enough to work, and does it sit correctly against the personal
@@ -170,7 +172,10 @@ Please check these before filing, they have each been argued out:
 7. **A member with no payout QR does not block Release Payout.** Deliberate,
    and the design says so in `payout-release-no-qr-notes` — the treasurer may
    simply pay another way.
-8. **The treasurer can still edit payout details in the database.** The UI
+8. **The treasurer can edit an unlinked member's payout details.** Deliberate,
+   and it closes when that member signs in. Without it a member with no account
+   has no route to their own destination and nor does anyone else.
+9. **The treasurer can still edit payout details in the database.** The UI
    hides the button; Postgres deliberately keeps the treasurer's write access,
    because a member who loses their Google account would otherwise have no
    route to correct where their payout goes and nor would anyone else. A

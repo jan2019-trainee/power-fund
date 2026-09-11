@@ -186,11 +186,6 @@
   // different powers, because the master PIN exists precisely so a locked-out
   // group gets full treasurer access back.
   let unlockedViaMaster = false;
-  /* Set only when the flagged treasurer LOCKS treasurer mode by hand. Without
-   * it the auto-unlock below would re-open on the next 30-second poll, so the
-   * admin could never look at the app the way a member sees it. Per session,
-   * deliberately: a reload is a fresh start. */
-  let treasurerLockedByChoice = false;
 
   let payoutModalRound = null;
   let payoutNoteValue = "";
@@ -492,7 +487,6 @@
     try {
       await loadAll();
       await resolveAccount();
-      applyAdminAutoUnlock();
       render();
     } catch (e) {
       showError(e.message);
@@ -867,13 +861,16 @@
     return !anyFlagged && unlocked;
   }
 
-  /** The flagged treasurer should not have to type a PIN they already out-rank:
-   *  a Google login that owns a row carrying `is_treasurer` is strictly
-   *  stronger proof than a four-digit code the whole group shares. Applied
-   *  after every resolve, so it survives a reload and a token refresh.
-   *
-   *  `unlockedViaMaster` is cleared on purpose — this is not the recovery path,
-   *  and leaving it set would put the recovery banner up for no reason. */
+  /** A Google-VERIFIED treasurer: a linked account whose own member row carries
+   *  `is_treasurer`. Deliberately strict — unlike isTreasurerAccount() it has
+   *  NO bootstrap fallback to the PIN, because this is the test that decides
+   *  whether treasurer mode opens WITHOUT one. Falling back here would turn
+   *  "no treasurer on file yet" into "treasurer mode is one tap away". */
+  function verifiedTreasurer() {
+    const mine = editableMember();
+    return !!(mine && mine.is_treasurer);
+  }
+
   /** Should the header offer treasurer mode at all?
    *
    *  Hidden from a member the app can POSITIVELY IDENTIFY as somebody other
@@ -901,15 +898,6 @@
     return !((state && state.members) || []).some((m) => m.is_treasurer);
   }
 
-  function applyAdminAutoUnlock() {
-    if (treasurerLockedByChoice || unlocked) return;
-    const mine = editableMember();
-    if (mine && mine.is_treasurer) {
-      unlocked = true;
-      unlockedViaMaster = false;
-    }
-  }
-
   function openProfileModal() {
     const me = editableMember();
     if (!me) {
@@ -929,15 +917,26 @@
     render();
   }
 
+  /** The longest a member's name may be. Enforced in BOTH validators and as
+   *  `maxlength` on both inputs — the attribute is the courtesy that stops the
+   *  keystroke, the validators are the rule, since `maxlength` is trivially
+   *  bypassed by pasting into a devtools-modified field or by calling the
+   *  exported setter directly.
+   *
+   *  Counted in UTF-16 units to match what `maxlength` itself counts, so the
+   *  two can never disagree about whether a given string fits. */
+  const NAME_MAX = 10;
+
   /** The same rule the treasurer's Edit-names modal enforces, scoped to one
-   *  member: non-empty, and unique across everybody else. One rule, two
-   *  screens — a name that Save accepts here must not be one the treasurer's
-   *  screen would reject. */
+   *  member: non-empty, within NAME_MAX, and unique across everybody else. One
+   *  rule, two screens — a name that Save accepts here must not be one the
+   *  treasurer's screen would reject. */
   function profileNameProblem() {
     const me = editableMember();
     if (!me) return "Sign in first.";
     const v = String(profileNameValue || "").trim();
     if (!v) return "Name can't be empty.";
+    if (v.length > NAME_MAX) return `Name must be ${NAME_MAX} characters or fewer.`;
     const clash = state.members.some(
       (m) => m.id !== me.id && String(m.name || "").trim().toLowerCase() === v.toLowerCase()
     );
@@ -1183,7 +1182,6 @@
       // Don't hand the next person a warm treasurer session.
       unlocked = false;
       unlockedViaMaster = false;
-      treasurerLockedByChoice = false;
       // Signing out is a deliberate act. Fronting the app with the sign-in
       // prompt one render later would read as the app refusing to let them.
       lsSet(SIGNIN_SKIPPED_KEY, "1");
@@ -1382,6 +1380,29 @@
       // Rejected behaves like unpaid here: the cycle is still owed, and
       // tapping it is how the member sends a fresh screenshot.
       if (C.isOwed(status)) {
+        // ONLY YOUR OWN. Tapping another member's chip used to open the pay
+        // sheet for THEM — their name only in a small subtitle — so a
+        // mis-tap filed your screenshot as their contribution. Migration 011
+        // refuses it outright (contributions_self keys on pf_member_id()), so
+        // this also stops the app offering a button that is about to fail.
+        //
+        // The chip is already non-clickable in that case; this is the same
+        // rule again because cellClicked is exported on PowerFund.
+        const meId = accountMemberId || myMemberId;
+        if (meId && String(memberId) !== String(meId)) {
+          const them = state.members.find((x) => String(x.id) === String(memberId));
+          return showError(
+            `That's ${
+              them ? them.name + "'s" : "another member's"
+            } cycle — you can only send your own payment.`
+          );
+        }
+        // Nobody identified on this device yet. Ask who they are rather than
+        // taking the chip they happened to tap as the answer: that guess would
+        // file the payment against somebody else.
+        if (!meId) {
+          return openWhoAmIPicker();
+        }
         // With migration 002 active, members can only pay into a round the
         // treasurer has started, so a new round always begins at ₱0. Without it
         // this check is a no-op (currentRound == first unfunded round).
@@ -2140,14 +2161,32 @@
     if (unlocked) {
       unlocked = false;
       unlockedViaMaster = false;
-      // Remember the choice, or the next poll's auto-unlock would undo it.
-      treasurerLockedByChoice = true;
       render();
       return;
     }
-    // Unlocking by hand cancels the lock-out, so a later reload auto-unlocks
-    // again rather than making the admin re-enter a PIN it does not need.
-    treasurerLockedByChoice = false;
+
+    // A GOOGLE-VERIFIED TREASURER NEEDS NO PIN. The login already proves more
+    // than the PIN can: the PIN is one code shared with all five members by
+    // design, while `is_treasurer` on a linked row is the very flag migration
+    // 011's policies key off.
+    //
+    // Strictly verifiedTreasurer(), NOT isTreasurerAccount() — the latter
+    // falls back to the PIN when nobody is flagged, and using it here would
+    // turn "no treasurer on file yet" into "treasurer mode is one tap away".
+    //
+    // EVERYONE ELSE WHO CAN STILL SEE THIS BUTTON KEEPS THE PIN, and that is
+    // the point: canUnlockTreasurer() deliberately also shows it to anyone the
+    // app cannot identify (AUTH_MODE "off", signed out, unlinked), because it
+    // is the only route to the master PIN. Dropping the PIN for them would
+    // hand one-tap treasurer mode to any member who simply skips sign-in —
+    // and until 011 is applied, treasurer mode in the UI is real write access
+    // to every table.
+    if (verifiedTreasurer()) {
+      unlocked = true;
+      unlockedViaMaster = false;
+      render();
+      return;
+    }
     pinInputValue = "";
     pinError = null;
     pinNewValue = "";
@@ -2749,6 +2788,11 @@
     if (!state || !state.members) return null;
     const trimmed = state.members.map((m) => (editNamesValues[m.id] || "").trim());
     if (trimmed.some((v) => !v)) return "All names must be filled in.";
+    // Named rather than counted: "one is too long" makes you hunt five fields.
+    const tooLong = trimmed.find((v) => v.length > NAME_MAX);
+    if (tooLong) {
+      return `"${tooLong}" is too long — names must be ${NAME_MAX} characters or fewer.`;
+    }
     const lower = trimmed.map((n) => n.toLowerCase());
     if (new Set(lower).size !== lower.length) return "Names must be unique.";
     return null;
@@ -2766,15 +2810,19 @@
     }
     const save = document.getElementById("editNamesSave");
     if (save) save.disabled = busy || !!editNamesError;
-    // Flag the duplicates themselves, so "Names must be unique" points somewhere.
+    // Flag the offending fields themselves, so the message points somewhere.
     const seen = {};
     state.members.forEach((m) => {
       const v = (editNamesValues[m.id] || "").trim().toLowerCase();
       seen[v] = (seen[v] || 0) + 1;
     });
     document.querySelectorAll(".edit-names-modal .name-input").forEach((el) => {
-      const v = (el.value || "").trim().toLowerCase();
-      el.classList.toggle("invalid", !v || seen[v] > 1);
+      const raw = (el.value || "").trim();
+      const v = raw.toLowerCase();
+      // Over-length is reachable despite maxlength — a name already on file
+      // from before the limit existed arrives too long, and the field must say
+      // which one rather than just refusing to save.
+      el.classList.toggle("invalid", !raw || seen[v] > 1 || raw.length > NAME_MAX);
     });
   }
 
@@ -3109,7 +3157,6 @@
       // and before it they would work — which is worse, not better.
       unlocked = false;
       unlockedViaMaster = false;
-      treasurerLockedByChoice = false;
 
       // Verify rather than assume. If the second write did not land we are in
       // the two-treasurer state above, and saying "done" would hide it.
@@ -3375,7 +3422,7 @@
   const TAB_VIEWS = [
     { id: "home", label: "Home", icon: "home" },
     { id: "rounds", label: "Rounds", icon: "rounds" },
-    { id: "members", label: "Members", icon: "members" },
+    { id: "members", label: "Board Members", icon: "members" },
     { id: "activity", label: "Activity", icon: "activity" },
     { id: "insights", label: "Insights", icon: "insights" },
     { id: "menu", label: "Menu", icon: "menu" },
@@ -4151,6 +4198,39 @@
   const QR_ALLOWED_TYPES = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
   const QR_MAX_BYTES = 5 * 1024 * 1024;
 
+  /* The bank/e-wallet list, verbatim from MyPayoutQRManage.dc.html's select.
+   * A picker rather than the free-text box this used to be: five people typing
+   * "GCash" / "gcash" / "G-Cash" into a field the treasurer then reads back
+   * under time pressure is a real way to send money to the wrong wallet. */
+  const PAYOUT_BANKS = ["GCash", "Maya", "BPI", "BDO", "Metrobank"];
+
+  /** Last four digits only, for anywhere the number is DISPLAYED rather than
+   *  edited — the design's own "GCash · 09XX XXX XXX3".
+   *
+   *  Not security (the full number is in the row, and the treasurer needs it
+   *  to send). It is that the Members list showed every member's full account
+   *  number to anyone who could open the app, which is more than a roster
+   *  needs to say out loud. The owner still sees their own in full, in the
+   *  sheet where they edit it. */
+  function maskAccount(num) {
+    const s = String(num || "").trim();
+    if (!s) return "";
+    const digits = s.replace(/\D/g, "");
+    if (digits.length <= 4) return s;
+    return "•••• " + digits.slice(-4);
+  }
+
+  /** "add one before Round 3" — the artboard's nudge, with the real round.
+   *  Returns null once their round has already been released, since telling
+   *  somebody to hurry for a payout they have had is nonsense. */
+  function payoutRoundHint(m) {
+    if (!m || !state) return null;
+    const round = m.member_order;
+    const p = getPayout(round);
+    if (p && p.released) return null;
+    return round;
+  }
+
   function clearQrSelection() {
     if (qrNewPreview) URL.revokeObjectURL(qrNewPreview);
     qrNewFile = null;
@@ -4234,19 +4314,68 @@
   }
 
   // ===================================================================
-  // Member payout details (treasurer only)
+  // My payout details — MEMBER-MANAGED
   //
-  // Treasurer-managed rather than member-managed: this app has no per-member
-  // auth, so "members edit their own" would in practice mean anyone can edit
-  // anyone's — and a swapped QR redirects a ₱30,000 payout. Gating it behind
-  // the same treasurer PIN as every other money action is the honest limit of
-  // what this app can enforce. Every change is logged so a swap is visible.
+  // Ported from MyPayoutQRManage.dc.html + its Desktop twin. The design always
+  // had this member-managed ("every member now has their own receiving QR" —
+  // canvas.json, my-payout-qr-notes); the app kept it treasurer-only for one
+  // stated reason, which was that no per-member auth existed, so "members edit
+  // their own" would have meant anyone with the site URL could edit anyone's —
+  // and a swapped QR redirects a ₱30,000 payout. Migration 008 removed that
+  // reason.
+  //
+  // THE GATE IS A LINKED ACCOUNT, NOT THE WHO-AM-I PREFERENCE. Same rule as
+  // Edit Profile, and for a sharper version of the same reason: the preference
+  // is unverified and per-device, so honouring it here would restore exactly
+  // the hole the old comment described. editableMember() is the only thing
+  // that answers "who is this, really".
+  //
+  // Enforced in the database too, not just here: 010's guard lets a member
+  // write their own row and no one else's, and 011 scopes the QR upload to
+  // `payout-qr/<their id>/`. See tests/sql/run.sh.
   // ===================================================================
+
+  /** The member whose payout details the caller may edit, or null.
+   *
+   *  Your own row, always — that is the point of the change.
+   *
+   *  PLUS one carve-out: the treasurer may still edit a member who has NEVER
+   *  SIGNED IN. Without it this feature strands exactly the people it is meant
+   *  to serve — a member with no account cannot set their own details, and if
+   *  nobody else can either, their payout destination is unreachable from the
+   *  app entirely and the only route left is SQL. That is a worse place than
+   *  where we started.
+   *
+   *  It closes the moment they link: once `auth_user_id` is set the row is
+   *  theirs alone, and the treasurer's button disappears from it. So the
+   *  carve-out shrinks as the fund signs in, and is gone once everyone has.
+   *
+   *  This is also the honest shape. 011 lets the treasurer write these columns
+   *  regardless — deliberately, as the recovery path for a lost Google
+   *  account. Showing the button exactly where that power is still needed
+   *  beats hiding it everywhere and implying an enforcement that is not there.
+   */
+  function payoutEditableMember(memberId) {
+    const mine = editableMember();
+    // No argument: your own, or nothing.
+    if (memberId == null) return mine;
+    if (mine && String(memberId) === String(mine.id)) return mine;
+    // Somebody else's — treasurer only, and only while they are unlinked.
+    if (!isTreasurerAccount()) return null;
+    const target = (state.members || []).find(
+      (x) => String(x.id) === String(memberId)
+    );
+    if (!target || target.auth_user_id) return null;
+    return target;
+  }
+
   function openPayoutQrModal(memberId) {
-    if (!unlocked) return;
-    const m = state.members.find((x) => x.id === memberId);
+    // Exported on PowerFund, so the absence of a button is not the gate.
+    // payoutEditableMember() resolves the argument to a row the caller may
+    // actually write, or null — it never takes the id on trust.
+    const m = payoutEditableMember(memberId);
     if (!m) return;
-    payoutQrMemberId = memberId;
+    payoutQrMemberId = m.id;
     payoutQrFields = {
       bank: m.payout_bank || "",
       accountName: m.payout_account_name || "",
@@ -4272,6 +4401,24 @@
     // No re-render: the inputs already hold what was typed, and re-rendering
     // mid-keystroke would move the caret.
   }
+
+  /** The bank picker. This one DOES re-render, unlike the text inputs — it has
+   *  to, because choosing "Other" reveals a field and choosing a named bank
+   *  hides it again. Safe here: a select is not mid-keystroke, so there is no
+   *  caret to lose. */
+  function setPayoutBank(value) {
+    if (!payoutQrFields) return;
+    if (value === "__other") {
+      // Keep whatever free text was already there; only clear a listed bank,
+      // or "Other" would arrive pre-filled with "GCash".
+      if (PAYOUT_BANKS.includes(payoutQrFields.bank)) payoutQrFields.bank = "";
+      payoutQrFields.bankOther = true;
+    } else {
+      payoutQrFields.bank = value;
+      payoutQrFields.bankOther = false;
+    }
+    render();
+  }
   function onPayoutQrFileSelected(input) {
     const file = input.files && input.files[0];
     if (!file) return;
@@ -4290,9 +4437,15 @@
     render();
   }
   async function savePayoutDetails() {
-    if (!unlocked || !payoutQrMemberId || busy) return;
-    const memberId = payoutQrMemberId;
+    if (!payoutQrMemberId || busy) return;
+    // Re-resolved at save time, not just at open time: the session can end, or
+    // the member can claim their row, while the sheet sits open.
+    const target = payoutEditableMember(payoutQrMemberId);
+    if (!target) return;
+    const memberId = target.id;
     const m = state.members.find((x) => x.id === memberId);
+    const own = editableMember();
+    const mineOwnRow = !!own && String(own.id) === String(memberId);
     busy = true;
     render();
     try {
@@ -4307,15 +4460,31 @@
         fields.payout_qr_url = await window.DB.uploadMemberPayoutQr(payoutQrFile, memberId);
       }
       await window.DB.saveMemberPayoutDetails(memberId, fields);
+      // Names who it was FOR, and says when the treasurer did it on their
+      // behalf — a payout destination changed by somebody else is exactly the
+      // entry the group would want to be able to find later.
+      //
+      // The account NUMBER never goes in, for the same reason member emails do
+      // not: the log is read by all five and lands in the CSV export and the
+      // backup file.
+      const onBehalf = !mineOwnRow;
       await logActivity(
-        `Treasurer updated ${m ? m.name : "a member"}'s payout details${
-          payoutQrFile ? " and QR code" : ""
-        }`,
+        onBehalf
+          ? `Treasurer set ${m ? m.name : "a member"}'s payout details${
+              payoutQrFile ? " and QR code" : ""
+            } (not signed in yet)`
+          : `${m ? m.name : "A member"} updated their payout details${
+              payoutQrFile ? " and QR code" : ""
+            }`,
         { type: "admin", memberId: memberId }
       );
       closePayoutQrModal();
       await reload();
-      showSuccess(`Payout details saved for ${m ? m.name : "the member"}.`);
+      showSuccess(
+        mineOwnRow
+          ? "Your payout details are saved."
+          : `Payout details saved for ${m ? m.name : "the member"}.`
+      );
     } catch (e) {
       showError(e.message);
     } finally {
@@ -5154,6 +5323,13 @@
       // The ADMIN gate — a login that owns a row carrying is_treasurer. Not
       // `unlocked`: that is the shared PIN, which every member has.
       isAdmin: isTreasurerAccount(),
+      // Whose payout details the viewer may edit — their own, and only with a
+      // linked account. Null means "offer to sign in", not "hide it".
+      payoutOwner: editableMember(),
+      maskAccount,
+      // Whole pesos for prose. C.peso()'s two decimals are right in a ledger
+      // and wrong in a sentence — the artboards write "₱30,000".
+      pesoWhole,
       payoutQrMemberId,
       // Helpers the views render with.
       //
@@ -5244,11 +5420,27 @@
         modalTarget.cycleNumber + modalCount - 1
       );
       const cycleRound = C.roundOfCycle(modalTarget.cycleNumber);
+      // Recording somebody else's contribution — only reachable in treasurer
+      // mode now, and it has to announce itself. A member tapping the wrong
+      // chip used to land here with nothing but a small "· Clara" to warn them.
+      const meIdNow = accountMemberId || myMemberId;
+      const forSomeoneElse =
+        !!member && !!meIdNow && String(member.id) !== String(meIdNow);
       html += `<div class="modal-overlay sheet" onclick="if(event.target===this) PowerFund.closeModal()">
         <div class="modal sheet-pay" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
           <div class="sheet-head">
             <div class="sheet-head-titles">
-              <h3 id="dlg-title">Pay Cycle ${modalTarget.cycleNumber}</h3>
+              <h3 id="dlg-title">${
+                // WHOSE payment this is belongs in the TITLE, not tucked after
+                // "Round 2 ·" in the subtitle where it was. The sheet's whole
+                // job is attributing money to a person; if that is the one
+                // thing a glance misses, the sheet is wrong.
+                forSomeoneElse
+                  ? `Pay Cycle ${modalTarget.cycleNumber} for ${escapeHtml(
+                      member.name
+                    )}`
+                  : `Pay Cycle ${modalTarget.cycleNumber}`
+              }</h3>
               <p class="modal-sub">${
                 due ? `Due ${C.formatDate(due)} · ` : ""
               }Round ${cycleRound}${
@@ -5260,6 +5452,16 @@
               14
             )}</button>
           </div>
+
+          ${
+            forSomeoneElse
+              ? `<div class="pay-for-warn">${icon("alert", 15)}<span>This
+                   records the payment as <b>${escapeHtml(
+                     member.name
+                   )}</b>'s, not yours. The proof you attach is filed against
+                   their cycle.</span></div>`
+              : ""
+          }
 
           ${
             qrUrl
@@ -6030,10 +6232,12 @@
             }
             <label class="field-label" for="profile-name">Display name</label>
             <input id="profile-name" class="text-input profile-name-input" type="text"
+                   maxlength="${NAME_MAX}"
                    value="${escapeHtml(profileNameValue)}" placeholder="Your name"
                    oninput="PowerFund.setProfileName(this.value)">
             <p class="profile-name-hint${problem ? " is-error" : ""}" id="profileNameHint">${escapeHtml(
-          problem || "Visible to the rest of the group. Must be unique."
+          problem ||
+            `Visible to the rest of the group. Must be unique, up to ${NAME_MAX} characters.`
         )}</p>
             ${
               profileError
@@ -6110,13 +6314,14 @@
       html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeEditNamesModal()">
         <div class="modal edit-names-modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
           <h3 id="dlg-title">Edit member names</h3>
-          <p class="modal-sub">Updates apply everywhere — payment history stays linked to each person.</p>
+          <p class="modal-sub">Updates apply everywhere — payment history stays
+            linked to each person. Up to ${NAME_MAX} characters each.</p>
           ${ordered
             .map(
               (m) => `
-            <input type="text" class="pin-input name-input" data-member="${escapeHtml(
-              m.id
-            )}" value="${escapeHtml(editNamesValues[m.id] || "")}"
+            <input type="text" class="pin-input name-input" maxlength="${NAME_MAX}"
+                   data-member="${escapeHtml(m.id)}"
+                   value="${escapeHtml(editNamesValues[m.id] || "")}"
                    oninput="PowerFund.setEditName('${m.id}', this.value)" placeholder="Name">
           `
             )
@@ -6373,56 +6578,154 @@
       </div>`;
     }
 
-    // "Record a contribution" — pick which member you are
+    // MY PAYOUT QR CODE — ported from MyPayoutQRManage.dc.html and its Desktop
+    // twin. Bottom sheet on the phone, centred modal on desktop, the way the
+    // rest of the app does it.
+    //
+    // Field order follows the artboard: the QR first, then bank, number, name.
+    // The QR is the thing they came to add and the only part the treasurer
+    // actually scans; the typed fields are the verification copy beside it.
     if (payoutQrMemberId) {
       const pm = state.members.find((x) => x.id === payoutQrMemberId);
-      const f = payoutQrFields || { bank: "", accountName: "", accountNumber: "" };
+      const f = payoutQrFields || {
+        bank: "",
+        accountName: "",
+        accountNumber: "",
+        bankOther: "",
+      };
       const currentQr = pm && pm.payout_qr_url;
-      html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closePayoutQrModal()">
-        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pq-title" tabindex="-1">
-          <h3 id="pq-title">Payout details${pm ? " — " + escapeHtml(pm.name) : ""}</h3>
-          <p class="modal-sub">Where this member's ₱${C.GOAL_PER_ROUND.toLocaleString(
-            "en-PH"
-          )} payout gets sent. The account name is what lets you check you're paying the right person.</p>
+      const known = PAYOUT_BANKS.includes(f.bank);
+      // "Other" is selected when something is typed that is not on the list —
+      // including whatever free text a treasurer had already saved before this
+      // was a picker, which must not silently become GCash.
+      const otherPicked = !!f.bankOther || (!!f.bank && !known);
+      const hint = payoutRoundHint(pm);
+      // The treasurer filling in for somebody who has not signed in yet. The
+      // sheet has to say so, or it reads as if they are editing their own.
+      const own = editableMember();
+      const onBehalf = !own || String(own.id) !== String(payoutQrMemberId);
 
-          <label class="field-label" for="pq-bank">Bank or e-wallet</label>
-          <input id="pq-bank" class="text-input" type="text" placeholder="GCash, Maya, BPI…" value="${escapeHtml(
-            f.bank
-          )}" oninput="PowerFund.setPayoutQrField('bank', this.value)">
+      html += `<div class="modal-overlay sheet" onclick="if(event.target===this) PowerFund.closePayoutQrModal()">
+        <div class="modal sheet-payout-qr" role="dialog" aria-modal="true" aria-labelledby="pq-title" tabindex="-1">
+          <h3 id="pq-title">${
+            onBehalf
+              ? escapeHtml((pm && pm.name) || "Member") + "'s Payout QR Code"
+              : "My Payout QR Code"
+          }</h3>
+          <p class="modal-sub">${
+            onBehalf
+              ? escapeHtml((pm && pm.name) || "They") +
+                " hasn't signed in yet, so you're adding this for them. Once they sign in it becomes theirs to change."
+              : "Shown to the treasurer when it's your turn to receive a payout"
+          }</p>
 
-          <label class="field-label" for="pq-name">Account name</label>
-          <input id="pq-name" class="text-input" type="text" placeholder="Name on the account" value="${escapeHtml(
-            f.accountName
-          )}" oninput="PowerFund.setPayoutQrField('accountName', this.value)">
+          <div class="pq-status">
+            <div class="pq-status-mark">${icon(currentQr ? "qr" : "upload", 18)}</div>
+            <div class="pq-status-lines">
+              <div class="pq-status-title">${
+                pm && (pm.payout_bank || pm.payout_account_number)
+                  ? escapeHtml(
+                      [pm.payout_bank, maskAccount(pm.payout_account_number)]
+                        .filter(Boolean)
+                        .join(" · ")
+                    )
+                  : "Nothing on file yet"
+              }</div>
+              <div class="pq-status-note">${
+                currentQr
+                  ? "QR code saved"
+                  : hint
+                  ? `Not added yet — add one before Round ${hint}`
+                  : "No QR code saved"
+              }</div>
+            </div>
+          </div>
 
-          <label class="field-label" for="pq-num">Account or mobile number</label>
-          <input id="pq-num" class="text-input" type="text" inputmode="numeric" placeholder="09XX XXX XXXX" value="${escapeHtml(
-            f.accountNumber
-          )}" oninput="PowerFund.setPayoutQrField('accountNumber', this.value)">
+          <p class="pq-explainer">${
+            onBehalf
+              ? `This is separate from the fund's payment QR — it's where
+                 <b>${escapeHtml(
+                   (pm && pm.name) || "they"
+                 )}</b> receives money when their round comes up. Check it with
+                 them before saving.`
+              : `This is separate from the treasurer's payment QR — it's where
+                 <b>you</b> receive money when your round comes up.`
+          }</p>
 
-          <label class="field-label">Receiving QR code</label>
           ${
             payoutQrPreview
-              ? `<img class="qr-preview" src="${payoutQrPreview}" alt="New payout QR preview">`
+              ? `<img class="qr-preview" src="${payoutQrPreview}" alt="The QR code you just chose">`
               : currentQr
               ? `<img class="qr-preview" src="${escapeHtml(
                   currentQr
-                )}" alt="Current payout QR">`
-              : `<p class="qr-empty">No QR on file yet.</p>`
+                )}" alt="Your payout QR code currently on file">`
+              : ""
           }
-          <input type="file" accept="image/*" class="file-input" onchange="PowerFund.onPayoutQrFileSelected(this)">
-          <label class="proof-upload proof-upload-camera">
-            <span class="proof-upload-label">${icon(
-              "qr",
-              14
-            )}<span>Take a photo of the QR</span></span>
-            <input type="file" accept="image/*" capture="environment" onchange="PowerFund.onPayoutQrFileSelected(this)" hidden>
-          </label>
+
+          <!-- Same grouped card as the Change Photo sheet, and the same two
+               rows in the same order the artboards use. Reused rather than
+               restyled: this IS that interaction, with a different target. -->
+          <div class="photo-options">
+            <label class="photo-row">
+              <span class="photo-row-icon accent">${icon("camera", 17)}</span>
+              <span class="photo-row-label">Take Photo</span>
+              <input type="file" accept="image/*" capture="environment"
+                     onchange="PowerFund.onPayoutQrFileSelected(this)" hidden>
+            </label>
+            <label class="photo-row">
+              <span class="photo-row-icon teal">${icon("photos", 17)}</span>
+              <span class="photo-row-label">Choose from Library</span>
+              <input type="file" accept="image/*"
+                     onchange="PowerFund.onPayoutQrFileSelected(this)" hidden>
+            </label>
+          </div>
+
+          <label class="field-label" for="pq-bank">Bank / E-wallet</label>
+          <select id="pq-bank" class="text-input select-input"
+                  onchange="PowerFund.setPayoutBank(this.value)">
+            <option value=""${!f.bank ? " selected" : ""}>Choose one…</option>
+            ${PAYOUT_BANKS.map(
+              (b) =>
+                `<option value="${escapeHtml(b)}"${
+                  f.bank === b ? " selected" : ""
+                }>${escapeHtml(b)}</option>`
+            ).join("")}
+            <option value="__other"${otherPicked ? " selected" : ""}>Other</option>
+          </select>
+          ${
+            // The artboard offers "Other" and then has nowhere to put it. A
+            // dead option is worse than no option, so it reveals a field.
+            otherPicked
+              ? `<input id="pq-bank-other" class="text-input" type="text"
+                       placeholder="Which bank or e-wallet?"
+                       value="${escapeHtml(known ? "" : f.bank)}"
+                       oninput="PowerFund.setPayoutQrField('bank', this.value)">`
+              : ""
+          }
+
+          <label class="field-label" for="pq-num">Account number</label>
+          <input id="pq-num" class="text-input" type="text" inputmode="numeric"
+                 autocomplete="off" placeholder="09XX XXX XXXX"
+                 value="${escapeHtml(f.accountNumber)}"
+                 oninput="PowerFund.setPayoutQrField('accountNumber', this.value)">
+
+          <label class="field-label" for="pq-name">Account name</label>
+          <input id="pq-name" class="text-input" type="text" autocomplete="off"
+                 placeholder="${escapeHtml(
+                   pm ? "e.g. " + pm.name : "Name on the account"
+                 )}"
+                 value="${escapeHtml(f.accountName)}"
+                 oninput="PowerFund.setPayoutQrField('accountName', this.value)">
+          <p class="pq-name-note">${
+            onBehalf
+              ? "Checked against the person before sending, so make it the name the account is really under."
+              : "The treasurer checks this against your name before sending, so make it the name the account is really under."
+          }</p>
 
           <div class="modal-actions">
             <button class="modal-btn-primary" onclick="PowerFund.savePayoutDetails()" ${
               busy ? "disabled" : ""
-            }>${busy ? "Saving…" : "Save"}</button>
+            }>${busy ? "Saving…" : onBehalf ? "Save their details" : "Save Payout QR"}</button>
             <button class="modal-btn-secondary" onclick="PowerFund.closePayoutQrModal()">Cancel</button>
           </div>
         </div>
@@ -6681,7 +6984,6 @@
       try {
         await loadAll();
         await resolveAccount();
-        applyAdminAutoUnlock();
         // First run on this device. Started here rather than in render() so a
         // later reload never re-opens it mid-session.
         if (!onboardingSeen()) onboardingStep = 0;
@@ -6770,6 +7072,7 @@
     openMemberDetail,
     openPayoutQrModal,
     closePayoutQrModal,
+    setPayoutBank,
     setPayoutQrField,
     onPayoutQrFileSelected,
     savePayoutDetails,

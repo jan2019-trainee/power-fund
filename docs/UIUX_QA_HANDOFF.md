@@ -25,6 +25,7 @@ this document.
 | Onboarding, 5 steps | `OnboardingWelcome/HowItWorks/HowToPay/PayoutOrder/WhoAreYou.dc.html` | Two recorded departures — see §3 |
 | Onboarding, desktop | the `Desktop*` twins of all five | One render path, two frames |
 | Edit Profile | `EditProfile.dc.html` | Bottom sheet; `camera`/`photos` icon paths lifted verbatim |
+| **My Payout QR Code** | `MyPayoutQRManage.dc.html` + `Desktop` twin | Newly member-managed; one addition and one artboard gap filled — see §3 |
 | Change Photo | `ProfilePhotoSheet.dc.html` | Opens over Edit Profile; Esc must close this one first |
 
 ### 1b. NEW DESIGN — there is no mockup to judge these against
@@ -72,6 +73,35 @@ genuinely different code paths).
 - The readiness line: counts, and a green state when all three conditions hold.
 - Caret behaviour: validation patches two DOM nodes by hand rather than
   re-rendering. If typing ever loses the caret, that is a P1.
+
+### My Payout QR Code (its owner only)
+- Reachable from Menu → **My Payout QR Code** (member branch, under General —
+  where the design puts it) and from Menu → Account for a signed-in treasurer,
+  whose branch has no General group.
+- Status strip first: what is on file, or *"Not added yet — add one before
+  Round N"* with the real round.
+- Field order follows the artboard: **QR, then bank, number, name.**
+- The bank picker: choosing **Other** reveals a field; choosing a listed bank
+  hides it again without leaving stale text behind.
+- Not signed in → the row offers **sign in** rather than opening a sheet that
+  would be refused. Please check this reads as an explanation, not a blocker.
+- On another member's card there is **no edit button** and the account number
+  is masked — *unless* that member has never signed in, where the treasurer
+  gets **"Add for them · until they sign in"**. Worth checking that caption
+  reads as temporary rather than as a permission they keep.
+- The **Home nudge** appears only when nothing is on file and the member's
+  round is collecting now or next. Worth a look as a judgement call: is it
+  prominent enough to work, and does it sit correctly against the personal
+  status card on both frames?
+
+### Payment attribution in Rounds
+- A member sees only **their own** cycle chips as tappable; others render as
+  plain status badges.
+- Tapping another member's chip (via the exported handler) refuses **by name**.
+- Not identified on the device → the who-am-I picker, not a guess.
+- The treasurer paying for someone else gets the name in the **title** and an
+  amber warning that the proof is filed against that member's cycle. Worth
+  checking the warning is prominent enough without looking like an error.
 
 ### Transfer treasurer role (admin only)
 - Names the current holder; lists only members who have **signed in**; says
@@ -124,6 +154,10 @@ them — but please read the reason before filing.
 | 8 | Mid-fund member add/remove | Out of scope | The roster is read-only. |
 | 9 | Menu → "Replay the intro" | Addition | The design gives the flow no re-entry point, making it unreachable after one showing. |
 | 10 | `pesoWhole()` for prose figures | Addition | The artboards write "₱1,000", not "₱1,000.00". Ledger figures keep two decimals. |
+| 11 | Payout QR is **member-managed**, and the treasurer's edit button is gone from other members' cards | Intentional — a **reversal** back TO the design | The design always had this member-managed (`my-payout-qr-notes`). The app kept it treasurer-only because no per-member auth existed; migration 008 removed that reason. |
+| 12 | The artboard's **"Other"** bank option reveals a free-text field | Addition | The artboard offers "Other" and gives it nowhere to go. A dead option is worse than none. |
+| 13 | Account numbers are **masked** in the roster | Addition | The artboard masks them in its own summary row ("GCash · 09XX XXX XXX3"). The roster showed every member's full number to all five. Full number still shown to the treasurer in Release Payout, and to the owner when editing. |
+| 14 | A **Home nudge** when a member has no payout details and their round is now or next | Addition | The design built only the treasurer's end of this reminder (`PayoutReleaseNoQR`'s "Copy reminder message"), which is the fallback for a nudge that never happened. |
 
 ---
 
@@ -144,6 +178,20 @@ Please check these before filing, they have each been argued out:
    Members as a Home drill-down; desktop's sidebar carries Members. Two
    navigation models on purpose (`canvas.json`).
 6. **Blank member emails.** Valid state, not a validation gap.
+7. **A member with no payout QR does not block Release Payout.** Deliberate,
+   and the design says so in `payout-release-no-qr-notes` — the treasurer may
+   simply pay another way.
+8. **The treasurer can edit an unlinked member's payout details.** Deliberate,
+   and it closes when that member signs in. Without it a member with no account
+   has no route to their own destination and nor does anyone else.
+9. **A member cannot pay another member's cycle.** Deliberate, and migration
+   011 enforces it in Postgres regardless. The treasurer still can, and that
+   path announces itself.
+10. **The treasurer can still edit payout details in the database.** The UI
+   hides the button; Postgres deliberately keeps the treasurer's write access,
+   because a member who loses their Google account would otherwise have no
+   route to correct where their payout goes and nor would anyone else. A
+   finding that says "close this" is a business-rule change — see §7.
 
 ---
 
@@ -211,5 +259,10 @@ The surfaces in this pass where that is most likely to bite:
   `members.is_treasurer` rather than the shared PIN — because the PIN is shared
   with all five members by design.
 - **The unlock button's visibility rule** (§4.1) — recovery path.
-- **Anything that would put an email address into the activity log, CSV or
-  backup.**
+- **Anything that would put an email address, or a payout account number, into
+  the activity log, CSV or backup.**
+- **Who may set a member's payout destination.** Owner-only in the UI, keyed to
+  a linked account. A finding that would accept the who-am-I preference here
+  reopens a money-redirect path; a finding that would remove the treasurer's
+  database-level access closes the only recovery path. Both are decisions, not
+  UX fixes.

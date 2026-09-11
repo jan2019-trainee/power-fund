@@ -466,7 +466,13 @@ window.DB = (function () {
    */
   async function uploadMemberPayoutQr(file, memberId) {
     const ext = (file.name.split(".").pop() || "png").toLowerCase();
-    const path = `payout-qr/${memberId}-${Date.now()}.${ext}`;
+    // FOLDER per member, not a filename prefix: `payout-qr/<id>/<ts>.<ext>`.
+    // Migration 011's storage policy scopes a member to their own QR with
+    // `(storage.foldername(name))[2] = pf_member_id()::text`, and
+    // storage.foldername() can only see folders — a `<id>-<ts>.ext` filename
+    // is invisible to it, so the old flat path could only ever have been
+    // written by the treasurer.
+    const path = `payout-qr/${memberId}/${Date.now()}.${ext}`;
     const res = await client.storage
       .from(ASSET_BUCKET)
       .upload(path, file, { upsert: false, contentType: file.type || "image/png" });
@@ -479,10 +485,16 @@ window.DB = (function () {
             "supabase/migrations/005_member_payout_details.sql in the Supabase SQL editor."
         );
       }
-      if (/policy|permission|unauthor/i.test(m)) {
+      if (/policy|permission|unauthor|row-level/i.test(m)) {
+        // Two quite different causes, and guessing wrong sends someone after
+        // the wrong fix. After 011 a member may only write their own
+        // `payout-qr/<their id>/` folder, so a refusal here usually means the
+        // signed-in account does not own the member row being edited.
         throw new Error(
-          "Storage rejected the upload — the 'payment-assets' bucket policies " +
-            "are not set. Run supabase/migrations/003_payment_qr.sql."
+          "Storage refused this upload. You can only change your own payout QR " +
+            "— sign in with the account for this member. (If this is a new fund, " +
+            "the 'payment-assets' bucket policies may not be set: run " +
+            "supabase/migrations/003_payment_qr.sql.)"
         );
       }
       throw new Error("Couldn't upload the payout QR. Please try again.");
@@ -501,8 +513,7 @@ window.DB = (function () {
       .from("members")
       .update({ ...fields, payout_updated_at: new Date().toISOString() })
       .eq("id", memberId)
-      .select()
-      .single();
+      .select();
     if (res.error) {
       const m = res.error.message || "";
       if (/column .* does not exist|payout_/i.test(m)) {
@@ -513,7 +524,15 @@ window.DB = (function () {
       }
       throw new Error("Couldn't save the payout details. Please try again.");
     }
-    return res.data;
+    // `.single()` used to be here and could not tell a refusal from a success:
+    // RLS hides the row rather than raising, so the reply is `[]` with no
+    // error. This is where a ₱30,000 destination is written — reporting a
+    // declined write as saved is the worst possible failure mode.
+    return requireRows(
+      res,
+      "Couldn't save the payout details",
+      "you can only change your own payout details — sign in with the account for this member."
+    );
   }
 
   /** A member's own profile photo (migration 009). The caller hands over an

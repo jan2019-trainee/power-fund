@@ -26,6 +26,16 @@ to the treasurer); the app is just the shared ledger.
   and (optionally) a receipt image**; that record stays correct even if members
   are later renamed or reordered. `amount` is a historical record and never
   affects the ₱30,000 funding target. Needs migration `004` (see setup step 2)
+- **Each member sets their own payout destination** — Menu → **My Payout QR
+  Code** — the QR the treasurer scans, plus the bank/e-wallet, account number
+  and account name. Needs a signed-in account (see *Turning on member
+  sign-in*): the who-am-I preference is per-device and unverified, and this
+  decides where ₱30,000 lands. The treasurer no longer edits anyone else's;
+  when a recipient has nothing on file, Release Payout says so and offers a
+  **Copy reminder message** to paste into the group chat. Releasing is never
+  blocked by a missing QR — payment can always be arranged another way.
+  Account numbers are shown masked in the roster (the treasurer sees them in
+  full in Release Payout, and you see your own in full when editing)
 - Tap the payment QR code or any proof/receipt screenshot to view it enlarged
 - A treasurer PIN gates review/confirm/payout actions (a convenience lock, **not**
   security). Destructive actions (revert, undo release, reset, restore) need a

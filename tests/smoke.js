@@ -78,6 +78,28 @@ async function serve(page, data, opts) {
   // intro in "optional" mode, and the onboarding tests are not about it.
   if (opts && opts.freshDevice) await markSignInSkipped(page);
   else await markOnboarded(page);
+
+  // AUTH_MODE is pinned to a NON-GATING default for every page, rather than
+  // inheriting whatever js/config.js currently ships. The shipped value is a
+  // deploy-time decision the treasurer makes; a test that reads it is testing
+  // the deployment, not the code — and the day it became "required" every
+  // check that had not opted in met the sign-in wall instead of the app.
+  //
+  // A test that cares about auth calls withAuthMode() AFTER this and wins:
+  // Playwright matches the most recently registered route first.
+  await page.route("**/js/config.js", async (route) => {
+    const res = await route.fetch();
+    const body = (await res.text()).replace(
+      /AUTH_MODE:\s*"[a-z]*"/,
+      'AUTH_MODE: "off"'
+    );
+    return route.fulfill({
+      status: 200,
+      contentType: "application/javascript",
+      body,
+    });
+  });
+
   await page.route("**/rest/v1/**", (route) => {
     const url = new URL(route.request().url());
     if (url.pathname.includes("/rpc/")) {
@@ -725,6 +747,11 @@ async function membersAndMenu(browser, errors) {
   const mem = await browser.newPage({ viewport: { width: 430, height: 950 } });
   mem.on("pageerror", (e) => errors.push(`menu/member: ${e}`));
   await serve(mem, M.TABLE_DATA);
+  // States its own mode. serve() pins AUTH_MODE to "off", and with accounts
+  // off there is deliberately no "My Payout QR Code" row — nobody can own
+  // payout details, so offering it would be a dead end. This test is about
+  // the member menu WITH accounts on, which is where that row lives.
+  await withAuthMode(mem, "optional");
   await mem.addInitScript((id) => {
     try { localStorage.setItem("pf_my_member_id", id); } catch (e) {}
   }, ME.id);
@@ -739,8 +766,12 @@ async function membersAndMenu(browser, errors) {
     (await mem.locator(".profile-card").count()) === 1 && memText.includes(ME.name)
   );
   check(
-    "menu/member: view-only QR + payout destination",
-    /the treasurer manages this/i.test(memText) && /payout destination/i.test(memText)
+    // "Payout destination" became "My Payout QR Code" when the row stopped
+    // being a read-only link into the member record and became the sheet where
+    // a member sets it themselves. This page is not signed in, so that row
+    // offers sign-in rather than opening a sheet that would be refused.
+    "menu/member: view-only fund QR + a route to their own payout QR",
+    /the treasurer manages this/i.test(memText) && /My Payout QR Code/i.test(memText)
   );
   // Nothing a member cannot act on should be reachable here.
   const forbidden = ["Export CSV", "Backup data", "Restore from backup", "Change PIN",
@@ -1771,6 +1802,30 @@ function supabaseUrl() {
 
 const FAKE_USER_ID = "11111111-1111-1111-1111-111111111111";
 
+/** PAYOUT_BANKS lives in js/app.js; read it rather than hardcoding a number,
+ *  so adding a bank does not fail a test for the wrong reason. +2 for the
+ *  "Choose one…" placeholder and "Other". */
+/** The contribution amount, read from js/calculations.js. */
+const C_AMOUNT = Number(
+  (require("fs")
+    .readFileSync(path.join(__dirname, "..", "js", "calculations.js"), "utf8")
+    .match(/const CONTRIBUTION_AMOUNT = (\d+)/) || [, "1000"])[1]
+);
+
+/** The name length cap, read from js/app.js so the test cannot drift from it. */
+const NAME_MAX = Number(
+  (require("fs")
+    .readFileSync(path.join(__dirname, "..", "js", "app.js"), "utf8")
+    .match(/const NAME_MAX = (\d+)/) || [, "10"])[1]
+);
+
+const PAYOUT_BANK_COUNT =
+  (require("fs")
+    .readFileSync(path.join(__dirname, "..", "js", "app.js"), "utf8")
+    .match(/const PAYOUT_BANKS = \[([^\]]*)\]/) || [, ""])[1]
+    .split(",")
+    .filter((x) => x.trim()).length + 2;
+
 /** The roster with email addresses, as it looks after the treasurer has run
  *  migration 008's one-off. `overrides` patches the member at index 0. */
 function rosterWithEmails(overrides) {
@@ -1876,20 +1931,31 @@ async function signInAdmin(browser, errors) {
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(2500);
 
-  // No PIN is typed anywhere in this test. The flagged treasurer's login
-  // out-ranks the PIN — which the whole group shares — so treasurer mode is
-  // already open.
+  // STARTS LOCKED, even for the flagged treasurer. Signing in no longer opens
+  // treasurer mode on its own — a load is not an intent to act on money.
   check(
-    "signin-admin/the flagged treasurer is unlocked without a PIN",
-    (await page.locator(".unlock-btn").innerText()).length > 0 &&
-      (await page.locator(".modal-overlay").count()) === 0
+    "signin-admin/signing in does NOT open treasurer mode by itself",
+    /unlock/i.test(await page.locator(".unlock-btn").innerText()) &&
+      (await page.locator(".mode-card.on").count()) === 0
+  );
+
+  // ...and opening it costs one tap and NO PIN. The login already proves more
+  // than a code shared with all five members can.
+  await page.locator(".unlock-btn").click();
+  await page.waitForTimeout(500);
+  check(
+    "signin-admin/and one tap opens it with no PIN prompt",
+    (await page.locator(".modal-overlay").count()) === 0 &&
+      /treasurer/i.test(await page.locator(".unlock-btn").innerText())
   );
 
   await page.locator(".tab-item", { hasText: "Menu" }).click();
   await page.waitForTimeout(400);
   check(
     "signin-admin/the mode card says why it is open",
-    /admin/i.test(await page.locator(".mode-card .mode-card-note").innerText())
+    /signed in as the fund's treasurer/i.test(
+      await page.locator(".mode-card .mode-card-note").innerText()
+    )
   );
 
   const menuRow = page.locator(".menu-row", { hasText: "Member sign-in" });
@@ -2035,8 +2101,8 @@ async function signInAdmin(browser, errors) {
   );
   await notAdmin.close();
 
-  // Locking by hand has to stick, or the 30-second poll would re-open it and
-  // the admin could never see the app the way a member does.
+  // Locking must stick across the 30-second poll and the tab-focus reload,
+  // which is how the admin sees the app the way a member does.
   const lock = await browser.newPage({ viewport: { width: 430, height: 950 } });
   lock.on("pageerror", (e) => errors.push(`signin-admin/lock: ${e}`));
   const roster3 = rosterWithEmails();
@@ -2045,17 +2111,47 @@ async function signInAdmin(browser, errors) {
   await withAuthMode(lock, "optional", { signedIn: true, email: "regine@example.com" });
   await lock.goto(BASE, { waitUntil: "domcontentloaded" });
   await lock.waitForTimeout(2500);
-  await lock.evaluate(() => window.PowerFund.toggleUnlock());
-  await lock.waitForTimeout(300);
-  // A real reload, through the same path the 30-second poll and the tab-focus
-  // handler use — reload() is not exported, and faking it would prove nothing.
+  await lock.evaluate(() => window.PowerFund.toggleUnlock()); // open it
+  await lock.waitForTimeout(400);
+  await lock.evaluate(() => window.PowerFund.toggleUnlock()); // and lock it
+  await lock.waitForTimeout(400);
+  // A real reload, through the same path the poll and the tab-focus handler
+  // use — reload() is not exported, and faking it would prove nothing.
   await lock.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
   await lock.waitForTimeout(1500);
   check(
-    "signin-admin/an explicit lock survives a reload cycle",
+    "signin-admin/a lock survives a reload cycle",
     /unlock/i.test(await lock.locator(".unlock-btn").innerText())
   );
   await lock.close();
+
+  // THE BOUNDARY. A PIN-free toggle is for a VERIFIED treasurer only. Anyone
+  // the app cannot identify still sees the button (it is the only route to the
+  // master PIN) and must still be asked for the PIN — otherwise a member who
+  // simply skips sign-in gets one-tap treasurer mode, and before migration 011
+  // that is real write access to every table.
+  const anon = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  anon.on("pageerror", (e) => errors.push(`signin-admin/anon: ${e}`));
+  await serve(anon, {
+    ...M.TABLE_DATA,
+    members: rosterWithEmails(),
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234" },
+  });
+  await withAuthMode(anon, "optional"); // signed OUT
+  await anon.goto(BASE, { waitUntil: "domcontentloaded" });
+  await anon.waitForTimeout(2200);
+  check(
+    "signin-admin/an unidentified visitor still gets the button",
+    (await anon.locator(".unlock-btn").count()) === 1
+  );
+  await anon.locator(".unlock-btn").click();
+  await anon.waitForTimeout(500);
+  check(
+    "signin-admin/but is still asked for the PIN — no free pass",
+    (await anon.locator(".modal-overlay").count()) === 1 &&
+      (await anon.locator(".mode-card.on").count()) === 0
+  );
+  await anon.close();
 }
 
 /** Claim / link on first sign-in (phase 3). */
@@ -2162,6 +2258,569 @@ async function accountLinking(browser, errors) {
       /roster/i.test(await soft.locator(".save-warning-banner").first().innerText())
   );
   await soft.close();
+}
+
+/** The floating CTA's geometry. Reported from a real phone: the "Resubmit
+ *  payment" button cut a hard band across the round card behind it and sat
+ *  2px inside the tab bar.
+ *
+ *  None of the ~370 checks around this one could see it — they assert markup
+ *  and behaviour, and this was three numbers disagreeing. So this one measures
+ *  boxes instead. */
+async function ctaGeometry(browser, errors) {
+  const page = await browser.newPage({ viewport: { width: 393, height: 852 } });
+  page.on("pageerror", (e) => errors.push(`cta-geom: ${e}`));
+  // A rejected member gets the pinned "Resubmit payment" CTA — the exact case
+  // that was reported.
+  const members = rosterWithEmails();
+  const rejected = [
+    {
+      id: "geom-1",
+      member_id: members[0].id,
+      cycle_number: 1,
+      status: 3,
+      rejection_note: "Blurry screenshot",
+      rejected_at: new Date().toISOString(),
+      proof_url: null,
+      amount: C_AMOUNT,
+    },
+  ];
+  await serve(page, { ...M.TABLE_DATA, members, contributions: rejected });
+  await page.addInitScript((id) => {
+    try { localStorage.setItem("pf_my_member_id", id); } catch (e) {}
+  }, members[0].id);
+  await withAuthMode(page, "off");
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2200);
+
+  check(
+    "cta-geom/the rejected member gets a pinned Resubmit action",
+    (await page.locator(".floating-cta .rejected-cta").count()) === 1
+  );
+
+  const box = async (sel) =>
+    page.evaluate((s) => {
+      const el = document.querySelector(s);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { top: Math.round(r.top), bottom: Math.round(r.bottom), h: Math.round(r.height) };
+    }, sel);
+
+  // THE BUTTON'S OWN CONTENTS. The container checks below passed while the
+  // icon was on a line of its own at the left edge and the label wrapped
+  // underneath — measuring the box said nothing about what was inside it.
+  //
+  // Cause: `.floating-cta .hero-cta { display: block }` outranked
+  // `.rejected-cta { display: flex }`, so justify-content and gap were
+  // computed but inert and the block-level <svg> took its own line.
+  const inner = await page.evaluate(() => {
+    const btn = document.querySelector(".floating-cta .rejected-cta");
+    if (!btn) return null;
+    const svg = btn.querySelector("svg");
+    const span = btn.querySelector("span");
+    if (!svg || !span) return null;
+    const b = btn.getBoundingClientRect();
+    const s = svg.getBoundingClientRect();
+    const t = span.getBoundingClientRect();
+    return {
+      display: getComputedStyle(btn).display,
+      gap: Math.round(t.left - s.right),
+      rowOffset: Math.abs(s.top + s.height / 2 - (t.top + t.height / 2)),
+      pairOffCentre: Math.abs((s.left + t.right) / 2 - (b.left + b.width / 2)),
+    };
+  });
+  check(
+    "cta-geom/the Resubmit button is a flex row, not a block",
+    !!inner && inner.display === "flex",
+    inner && inner.display
+  );
+  check(
+    "cta-geom/its icon and label sit on one line, side by side",
+    !!inner && inner.rowOffset <= 2 && inner.gap >= 4 && inner.gap <= 12,
+    inner && `gap ${inner.gap}px, vertical offset ${Math.round(inner.rowOffset)}px`
+  );
+  check(
+    "cta-geom/and the icon+label pair is centred in the button",
+    !!inner && inner.pairOffCentre <= 3,
+    inner && `${Math.round(inner.pairOffCentre)}px off centre`
+  );
+
+  const cta = await box(".floating-cta");
+  const bar = await box(".tab-bar");
+  const spacer = await box(".cta-spacer");
+
+  // It used to be pinned at 58px above a bar that measures 60px.
+  check(
+    "cta-geom/the CTA sits ON the tab bar, not inside it",
+    !!cta && !!bar && cta.bottom <= bar.top,
+    `cta bottom ${cta && cta.bottom} vs tab-bar top ${bar && bar.top}`
+  );
+  // The spacer was 84px against a CTA of 95px, so the last card could never
+  // fully clear it.
+  check(
+    "cta-geom/the spacer reserves at least the CTA's height",
+    !!cta && !!spacer && spacer.h >= cta.h,
+    `spacer ${spacer && spacer.h}px vs CTA ${cta && cta.h}px`
+  );
+
+  // Scrolled to the end, nothing real may still be under the button.
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await page.waitForTimeout(500);
+  const cta2 = await box(".floating-cta");
+  const spacer2 = await box(".cta-spacer");
+  check(
+    "cta-geom/at the end of the page the CTA covers only the spacer",
+    !!cta2 && !!spacer2 && cta2.top >= spacer2.top,
+    `cta top ${cta2 && cta2.top} vs spacer top ${spacer2 && spacer2.top}`
+  );
+  await page.close();
+
+  // Desktop reuses .tab-bar as a full-height sidebar, so the mobile bar's
+  // fixed height must not leak into it.
+  const wide = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  wide.on("pageerror", (e) => errors.push(`cta-geom/desktop: ${e}`));
+  await serve(wide, { ...M.TABLE_DATA, members, contributions: rejected });
+  await withAuthMode(wide, "off");
+  await wide.goto(BASE, { waitUntil: "domcontentloaded" });
+  await wide.waitForTimeout(2200);
+  const side = await wide.evaluate(() => {
+    const el = document.querySelector(".tab-bar");
+    return el ? Math.round(el.getBoundingClientRect().height) : 0;
+  });
+  check(
+    "cta-geom/the desktop sidebar is still full height",
+    side > 400,
+    `${side}px tall`
+  );
+  await wide.close();
+}
+
+/** Whose cycle is this? Tapping another member's chip in Rounds used to open
+ *  the pay sheet for THEM, with their name only in a small subtitle — so a
+ *  mis-tap filed your screenshot as their contribution. Migration 011 refuses
+ *  it outright (contributions_self keys on pf_member_id()), so the UI must not
+ *  offer a button that is about to fail. */
+async function payAttribution(browser, errors) {
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`pay-attr: ${e}`));
+  const members = rosterWithEmails();
+  const me = members[1]; // Sarah
+  me.auth_user_id = FAKE_USER_ID;
+  // Nothing paid, so every cycle-1 chip is genuinely owed and the guard is
+  // actually reached. With the default fixture many are already confirmed and
+  // cellClicked returns early — which passes the refusal checks below for the
+  // wrong reason.
+  await serve(page, { ...M.TABLE_DATA, members, contributions: [] });
+  // Identity seeded DIRECTLY, not left to the sign-in round-trip. WHO THE APP
+  // THINKS YOU ARE is the entire subject of this test, so it must not depend
+  // on the harness happening to link an account — that is exactly how these
+  // checks first passed for the wrong reason: nobody was identified, so every
+  // chip was clickable and the handler took the who-are-you branch instead of
+  // the refusal branch.
+  await page.addInitScript((id) => {
+    try { localStorage.setItem("pf_my_member_id", id); } catch (e) {}
+  }, me.id);
+  await withAuthMode(page, "optional");
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
+  await page.locator(".tab-item", { hasText: "Rounds" }).click();
+  await page.waitForTimeout(500);
+  // Open the current round so the per-cycle chips are on screen.
+  await page.locator(".round-head, .round").first().click().catch(() => {});
+  await page.waitForTimeout(600);
+
+  const owedChips = page.locator(".member-chip.editable");
+  const n = await owedChips.count();
+  // The PREMISE, asserted rather than assumed: only the open round's own
+  // cycles are tappable, all of them Sarah's. If this is wrong, the two checks
+  // after it mean nothing.
+  const allChips = await page.locator(".member-chip").count();
+  // The PREMISE, asserted rather than assumed: the grid draws every cycle of
+  // every round, so "one member's share" — not "one round's worth" — is what
+  // tappable should mean. Getting this wrong is how the refusal checks below
+  // first passed while every chip on screen was still clickable.
+  check(
+    "pay-attr/exactly one member's share of chips is tappable",
+    n > 0 && allChips > 0 && n === allChips / M.MEMBERS.length,
+    `${n} editable of ${allChips} chips, ${M.MEMBERS.length} members`
+  );
+  // Every chip a member can tap must be their own.
+  let foreignClickable = 0;
+  for (let i = 0; i < n; i++) {
+    const label = await owedChips.nth(i).getAttribute("aria-label");
+    if (label && !label.startsWith(me.name + ":")) foreignClickable++;
+  }
+  check(
+    "pay-attr/a member can only tap their OWN chip",
+    foreignClickable === 0,
+    `${foreignClickable} other members' chips were clickable`
+  );
+
+  // The handler is exported, so the disabled button is not the gate.
+  const otherId = members[0].id;
+  await page.evaluate((id) => window.PowerFund.cellClicked(id, 1), otherId);
+  await page.waitForTimeout(500);
+  check(
+    "pay-attr/the handler refuses another member's cycle",
+    (await page.locator(".sheet-pay").count()) === 0
+  );
+  const errText = await page
+    .locator(".save-error-banner")
+    .innerText()
+    .catch(() => "");
+  check(
+    "pay-attr/and says whose cycle it was, rather than failing silently",
+    /can only send your own payment/i.test(errText),
+    errText
+      ? errText.replace(/\s+/g, " ").slice(0, 90)
+      : "no error banner — identified as: " +
+        (await page.evaluate(() => {
+          const el = document.querySelector(".profile-card-name");
+          return el ? el.textContent : "(nobody)";
+        }))
+  );
+  await page.close();
+
+  // Nobody identified: ask who they are rather than guessing from the chip.
+  const anon = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  anon.on("pageerror", (e) => errors.push(`pay-attr/anon: ${e}`));
+  await serve(anon, { ...M.TABLE_DATA, contributions: [] });
+  // Explicitly NOT identified: no linked account and no who-am-I preference.
+  await anon.addInitScript(() => {
+    try { localStorage.removeItem("pf_my_member_id"); } catch (e) {}
+  });
+  await withAuthMode(anon, "off");
+  await anon.goto(BASE, { waitUntil: "domcontentloaded" });
+  await anon.waitForTimeout(2200);
+  const firstId = M.MEMBERS[0].id;
+  await anon.evaluate((id) => window.PowerFund.cellClicked(id, 1), firstId);
+  await anon.waitForTimeout(500);
+  check(
+    "pay-attr/an unidentified device is asked who it is, not guessed at",
+    (await anon.locator(".sheet-pay").count()) === 0 &&
+      (await anon.locator(".modal-overlay").count()) === 1
+  );
+  await anon.close();
+
+  // The treasurer's legitimate path must announce whose payment it is.
+  const tre = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  tre.on("pageerror", (e) => errors.push(`pay-attr/treasurer: ${e}`));
+  const t = rosterWithEmails();
+  t[0].auth_user_id = FAKE_USER_ID;
+  await serve(tre, { ...M.TABLE_DATA, members: t, contributions: [] });
+  await tre.addInitScript((id) => {
+    try { localStorage.setItem("pf_my_member_id", id); } catch (e) {}
+  }, t[0].id);
+  await withAuthMode(tre, "optional");
+  await tre.goto(BASE, { waitUntil: "domcontentloaded" });
+  await tre.waitForTimeout(2500);
+  await tre.evaluate((id) => window.PowerFund.openContributeModal(id, 1), t[1].id);
+  await tre.waitForTimeout(500);
+  check(
+    "pay-attr/paying for someone else names them in the TITLE, not a subtitle",
+    /for Sarah/i.test(await tre.locator("#dlg-title").innerText())
+  );
+  check(
+    "pay-attr/and warns the proof is filed against their cycle",
+    (await tre.locator(".pay-for-warn").count()) === 1
+  );
+  // Your own payment must not carry the warning.
+  await tre.evaluate(() => window.PowerFund.closeModal());
+  await tre.waitForTimeout(300);
+  await tre.evaluate((id) => window.PowerFund.openContributeModal(id, 1), t[0].id);
+  await tre.waitForTimeout(500);
+  check(
+    "pay-attr/your own payment is unchanged — no name, no warning",
+    !/for Regine/i.test(await tre.locator("#dlg-title").innerText()) &&
+      (await tre.locator(".pay-for-warn").count()) === 0
+  );
+  await tre.close();
+}
+
+/** My Payout QR Code — member-managed (MyPayoutQRManage.dc.html). This is
+ *  where a member's ₱30,000 gets sent, so the interesting assertions are the
+ *  refusals: the UI must not offer, and the handlers must not accept, editing
+ *  anybody else's. */
+async function myPayoutQr(browser, errors) {
+  // ---- A linked member editing their OWN -------------------------------
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`payout-qr: ${e}`));
+  const members = rosterWithEmails();
+  const me = members[1]; // Sarah — deliberately NOT the flagged treasurer
+  const other = members[0];
+  me.auth_user_id = FAKE_USER_ID;
+  other.payout_bank = "BPI";
+  other.payout_account_name = "Regine R";
+  other.payout_account_number = "091712345678";
+  const data = { ...M.TABLE_DATA, members };
+
+  await serve(page, data);
+  const writes = [];
+  await page.route("**/rest/v1/members**", async (route) => {
+    const req = route.request();
+    if (req.method() === "GET") {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(data.members),
+      });
+    }
+    let body = {};
+    try {
+      body = JSON.parse(req.postData() || "{}");
+    } catch (e) {}
+    const target = data.members.find((m) => req.url().includes(m.id));
+    writes.push({ name: target && target.name, body });
+    Object.assign(target || {}, body);
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([target || {}]),
+    });
+  });
+  await withAuthMode(page, "optional", { signedIn: true, email: "sarah@example.com" });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
+
+  // Nothing on file and Sarah is member_order 2, so the Home nudge is due.
+  check(
+    "payout-qr/Home nudges a member whose round is near and has nothing on file",
+    (await page.locator(".payout-nudge").count()) === 1 &&
+      /Add your payout QR/i.test(await page.locator(".payout-nudge").innerText())
+  );
+
+  await page.locator(".tab-item", { hasText: "Menu" }).click();
+  await page.waitForTimeout(400);
+  const ownRow = page.locator(".menu-row", { hasText: "My Payout QR Code" });
+  check("payout-qr/the member gets the design's Menu row", (await ownRow.count()) === 1);
+  await ownRow.first().click();
+  await page.waitForTimeout(450);
+  check("payout-qr/the sheet opens", (await page.locator(".sheet-payout-qr").count()) === 1);
+  check(
+    "payout-qr/it says what is on file, and nudges by round",
+    /Nothing on file/i.test(await page.locator(".pq-status").innerText()) &&
+      /before Round 2/i.test(await page.locator(".pq-status").innerText())
+  );
+  check(
+    "payout-qr/the bank is a picker, not a free-text box",
+    (await page.locator("#pq-bank option").count()) === PAYOUT_BANK_COUNT
+  );
+  check(
+    "payout-qr/both camera and library are offered",
+    (await page.locator('.sheet-payout-qr .photo-row input[capture="environment"]').count()) === 1 &&
+      (await page.locator(".sheet-payout-qr .photo-row").count()) === 2
+  );
+
+  // "Other" is a dead option in the artboard; it has to reveal a field.
+  check(
+    "payout-qr/no free-text bank field until Other is chosen",
+    (await page.locator("#pq-bank-other").count()) === 0
+  );
+  await page.locator("#pq-bank").selectOption("__other");
+  await page.waitForTimeout(400);
+  check(
+    "payout-qr/Other reveals a field to type one in",
+    (await page.locator("#pq-bank-other").count()) === 1
+  );
+  // ...and picking a listed bank must not leave the stale Other text behind.
+  await page.locator("#pq-bank").selectOption("GCash");
+  await page.waitForTimeout(400);
+  check(
+    "payout-qr/choosing a listed bank hides it again",
+    (await page.locator("#pq-bank-other").count()) === 0
+  );
+
+  await page.locator("#pq-num").fill("09171234567");
+  await page.locator("#pq-name").fill("Sarah T");
+  await page.locator(".modal-btn-primary", { hasText: /Save Payout QR/i }).click();
+  await page.waitForTimeout(1200);
+  const w = writes.find((x) => x.body && "payout_bank" in x.body);
+  check(
+    "payout-qr/it saves to the signed-in member's OWN row",
+    !!w && w.name === "Sarah" && w.body.payout_bank === "GCash",
+    JSON.stringify(w || null)
+  );
+  check(
+    "payout-qr/and stamps payout_updated_at, so a swap is datable",
+    !!w && !!w.body.payout_updated_at
+  );
+  await page.close();
+
+  // ---- The refusals ----------------------------------------------------
+  const guard = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  guard.on("pageerror", (e) => errors.push(`payout-qr/guard: ${e}`));
+  const g = rosterWithEmails();
+  g[1].auth_user_id = FAKE_USER_ID;
+  await serve(guard, { ...M.TABLE_DATA, members: g });
+  await withAuthMode(guard, "optional", { signedIn: true, email: "sarah@example.com" });
+  await guard.goto(BASE, { waitUntil: "domcontentloaded" });
+  await guard.waitForTimeout(2500);
+
+  // THE ONE THAT MATTERS. openPayoutQrModal is exported on PowerFund, so the
+  // absence of a button is not the gate: passing someone else's id must be
+  // refused outright, not open their sheet.
+  const otherId = g[0].id;
+  await guard.evaluate((id) => window.PowerFund.openPayoutQrModal(id), otherId);
+  await guard.waitForTimeout(450);
+  check(
+    "payout-qr/the handler refuses another member's id",
+    (await guard.locator(".sheet-payout-qr").count()) === 0
+  );
+  // With no argument it must open THEIR OWN, not the first row it finds.
+  await guard.evaluate(() => window.PowerFund.openPayoutQrModal());
+  await guard.waitForTimeout(450);
+  check(
+    "payout-qr/with no argument it opens your own",
+    (await guard.locator(".sheet-payout-qr").count()) === 1 &&
+      /e.g. Sarah/i.test(await guard.locator("#pq-name").getAttribute("placeholder"))
+  );
+  await guard.close();
+
+  // ---- Not signed in: offered, but as sign-in --------------------------
+  const anon = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  anon.on("pageerror", (e) => errors.push(`payout-qr/anon: ${e}`));
+  await serve(anon, { ...M.TABLE_DATA, members: rosterWithEmails() });
+  await withAuthMode(anon, "optional");
+  await anon.goto(BASE, { waitUntil: "domcontentloaded" });
+  await anon.waitForTimeout(2200);
+  await anon.evaluate((id) => {
+    try { localStorage.setItem("pf_my_member_id", id); } catch (e) {}
+  }, rosterWithEmails()[1].id);
+  await anon.reload({ waitUntil: "domcontentloaded" });
+  await anon.waitForTimeout(2200);
+  await anon.locator(".tab-item", { hasText: "Menu" }).click();
+  await anon.waitForTimeout(400);
+  check(
+    // The who-am-I preference is per-device and unverified, so it must not be
+    // enough to change where money goes — the row offers sign-in instead.
+    "payout-qr/the who-am-I preference alone does not unlock it",
+    /Sign in to set where your payout is sent/i.test(
+      await anon.locator(".view-menu").innerText()
+    )
+  );
+  await anon.evaluate(() => window.PowerFund.openPayoutQrModal());
+  await anon.waitForTimeout(400);
+  check(
+    "payout-qr/and the handler refuses without a linked account",
+    (await anon.locator(".sheet-payout-qr").count()) === 0
+  );
+  await anon.close();
+
+  // ---- The treasurer no longer edits anyone else's --------------------
+  const tre = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  tre.on("pageerror", (e) => errors.push(`payout-qr/treasurer: ${e}`));
+  const t = rosterWithEmails();
+  t[0].auth_user_id = FAKE_USER_ID; // Regine, the flagged treasurer
+  t[1].payout_bank = "GCash";
+  t[1].payout_account_number = "091712345678";
+  await serve(tre, { ...M.TABLE_DATA, members: t });
+  await withAuthMode(tre, "optional", { signedIn: true, email: "regine@example.com" });
+  await tre.goto(BASE, { waitUntil: "domcontentloaded" });
+  await tre.waitForTimeout(2500);
+  await tre.locator(".tab-item", { hasText: "Home" }).click();
+  await tre.waitForTimeout(300);
+  await tre.locator(".roster-chip, .roster-item, .member-row").first().click().catch(() => {});
+  await tre.waitForTimeout(500);
+  // Reached however the roster opens, the point is the same: no edit button on
+  // somebody else's payout destination, and the number is masked.
+  const treText = await tre.locator("body").innerText();
+  check(
+    "payout-qr/the treasurer gets no edit button on another member's payout",
+    !/Edit payout details/i.test(treText)
+  );
+  check(
+    "payout-qr/another member's account number is masked in the roster",
+    !treText.includes("091712345678")
+  );
+  await tre.close();
+
+  // ---- The carve-out: the treasurer covers members who have not signed in --
+  // Without it this feature strands exactly the people it is meant to serve:
+  // a member with no account cannot set their own details, and if nobody else
+  // can either, the destination is unreachable from the app entirely.
+  const cover = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  cover.on("pageerror", (e) => errors.push(`payout-qr/cover: ${e}`));
+  const c = rosterWithEmails();
+  c[0].auth_user_id = FAKE_USER_ID; // Regine, the flagged treasurer
+  c[2].auth_user_id = null;         // Jan has never signed in
+  c[3].auth_user_id = "33333333-3333-3333-3333-333333333333"; // Clara has
+  const cdata = { ...M.TABLE_DATA, members: c };
+  await serve(cover, cdata);
+  const cwrites = [];
+  await cover.route("**/rest/v1/members**", async (route) => {
+    const req = route.request();
+    if (req.method() === "GET") {
+      return route.fulfill({
+        status: 200, contentType: "application/json",
+        body: JSON.stringify(cdata.members),
+      });
+    }
+    let body = {};
+    try { body = JSON.parse(req.postData() || "{}"); } catch (e) {}
+    const target = cdata.members.find((m) => req.url().includes(m.id));
+    cwrites.push({ name: target && target.name, body });
+    Object.assign(target || {}, body);
+    return route.fulfill({
+      status: 200, contentType: "application/json",
+      body: JSON.stringify([target || {}]),
+    });
+  });
+  await withAuthMode(cover, "optional", { signedIn: true, email: "regine@example.com" });
+  await cover.goto(BASE, { waitUntil: "domcontentloaded" });
+  await cover.waitForTimeout(2500);
+
+  // Jan is unlinked -> the treasurer may stand in.
+  await cover.evaluate((id) => window.PowerFund.openPayoutQrModal(id), c[2].id);
+  await cover.waitForTimeout(450);
+  check(
+    "payout-qr/the treasurer may fill in for a member who hasn't signed in",
+    (await cover.locator(".sheet-payout-qr").count()) === 1 &&
+      /Jan's Payout QR Code/i.test(await cover.locator("#pq-title").innerText())
+  );
+  check(
+    "payout-qr/and the sheet says it is on their behalf, not the treasurer's own",
+    /hasn't signed in yet/i.test(await cover.locator(".modal-sub").last().innerText())
+  );
+  await cover.locator("#pq-bank").selectOption("Maya");
+  await cover.locator("#pq-num").fill("09181112222");
+  await cover.locator(".modal-btn-primary", { hasText: /Save their details/i }).click();
+  await cover.waitForTimeout(1200);
+  const cw = cwrites.find((x) => x.body && "payout_bank" in x.body);
+  check(
+    "payout-qr/it writes to THAT member's row",
+    !!cw && cw.name === "Jan" && cw.body.payout_bank === "Maya",
+    JSON.stringify(cw || null)
+  );
+
+  // Clara IS linked -> the carve-out must not apply. This is the half that
+  // keeps the feature meaningful: it shrinks as the fund signs in.
+  await cover.evaluate(() => window.PowerFund.closePayoutQrModal());
+  await cover.waitForTimeout(300);
+  await cover.evaluate((id) => window.PowerFund.openPayoutQrModal(id), c[3].id);
+  await cover.waitForTimeout(450);
+  check(
+    "payout-qr/but NOT for a member who has signed in — it closes on linking",
+    (await cover.locator(".sheet-payout-qr").count()) === 0
+  );
+  await cover.close();
+
+  // A plain member must never get the carve-out, linked target or not.
+  const nosy = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  nosy.on("pageerror", (e) => errors.push(`payout-qr/nosy: ${e}`));
+  const n = rosterWithEmails();
+  n[1].auth_user_id = FAKE_USER_ID; // Sarah, an ordinary member
+  n[2].auth_user_id = null;         // Jan, unlinked
+  await serve(nosy, { ...M.TABLE_DATA, members: n });
+  await withAuthMode(nosy, "optional", { signedIn: true, email: "sarah@example.com" });
+  await nosy.goto(BASE, { waitUntil: "domcontentloaded" });
+  await nosy.waitForTimeout(2500);
+  await nosy.evaluate((id) => window.PowerFund.openPayoutQrModal(id), n[2].id);
+  await nosy.waitForTimeout(450);
+  check(
+    "payout-qr/an ordinary member gets no carve-out over an unlinked member",
+    (await nosy.locator(".sheet-payout-qr").count()) === 0
+  );
+  await nosy.close();
 }
 
 /** The unlock button is hidden from a member the app can identify as somebody
@@ -2283,6 +2942,10 @@ async function transferRole(browser, errors) {
   await withAuthMode(page, "optional", { signedIn: true, email: "regine@example.com" });
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(2500);
+  // Treasurer mode no longer opens on sign-in, and Security only exists inside
+  // it. One tap, no PIN — that is the point of the verified-treasurer path.
+  await page.locator(".unlock-btn").click();
+  await page.waitForTimeout(500);
   await page.locator(".tab-item", { hasText: "Menu" }).click();
   await page.waitForTimeout(400);
 
@@ -2832,7 +3495,12 @@ async function pinVault(browser, errors) {
   // ---- Post-010: the digits never reach the browser --------------------
   const vault = await browser.newPage({ viewport: { width: 430, height: 950 } });
   vault.on("pageerror", (e) => errors.push(`vault: ${e}`));
-  await markOnboarded(vault); // routes by hand, so serve() never ran
+  // Routes by hand, so serve() never ran — which means BOTH of serve()'s
+  // defaults have to be set here: the storage flags and the AUTH_MODE pin.
+  // Missing the flags stranded this test on the intro once; missing the pin
+  // stranded it on the sign-in gate the day AUTH_MODE became "required".
+  await markOnboarded(vault);
+  await withAuthMode(vault, "off");
   const rpcCalls = [];
   const bodies = [];
   // app_settings without the PIN columns, exactly as 010 leaves it.
@@ -2926,6 +3594,7 @@ async function pinVault(browser, errors) {
   const broken = await browser.newPage({ viewport: { width: 430, height: 950 } });
   broken.on("pageerror", (e) => errors.push(`vault: ${e}`));
   await markOnboarded(broken); // routes by hand, so serve() never ran
+  await withAuthMode(broken, "off"); // ...so the AUTH_MODE pin is not set either
   await broken.route("**/rest/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const last = url.pathname.split("/").pop();
@@ -3020,6 +3689,24 @@ async function profileEditing(browser, errors) {
   // the row being edited or Save would never re-enable.
   await page.locator("#profile-name").fill(me.name);
   await page.waitForTimeout(200);
+  // The same cap applies on the member's own sheet — one rule, two screens.
+  check(
+    "profile/the display name carries the same maxlength",
+    (await page.locator("#profile-name").getAttribute("maxlength")) === String(NAME_MAX)
+  );
+  await page.evaluate(() => window.PowerFund.setProfileName("Wednesdayyy"));
+  await page.waitForTimeout(250);
+  check(
+    "profile/an over-long display name is refused",
+    /10 characters or fewer/i.test(await page.locator("#profileNameHint").innerText()) &&
+      (await page.locator("#profileSave").isDisabled())
+  );
+  // Put the valid name back — the check below is about the name the member
+  // already has, and leaving the over-long one here would fail it for the
+  // wrong reason.
+  await page.locator("#profile-name").fill(me.name);
+  await page.waitForTimeout(250);
+
   check(
     "profile/your own current name is still valid",
     !(await page.locator("#profileSave").isDisabled()) &&
@@ -3363,6 +4050,35 @@ async function desktopHeaderActions(browser, errors) {
     (await page.locator("#editNamesError").isHidden()) &&
       !(await page.locator("#editNamesSave").isDisabled())
   );
+
+  // A 10-character cap, enforced in the validator and not only by maxlength —
+  // the attribute stops a keystroke, it does not stop a paste into a modified
+  // field, the exported setter, or a name already on file from before the cap.
+  check(
+    "names/the field carries the 10-character maxlength",
+    (await names.nth(1).getAttribute("maxlength")) === String(NAME_MAX)
+  );
+  await page.evaluate(
+    (args) => window.PowerFund.setEditName(args.id, args.v),
+    { id: await names.nth(1).getAttribute("data-member"), v: "Wednesdayyy" }
+  );
+  await page.waitForTimeout(250);
+  check(
+    "names/an over-long name is refused and named",
+    /too long/i.test(await page.locator("#editNamesError").innerText()) &&
+      /Wednesdayyy/.test(await page.locator("#editNamesError").innerText()) &&
+      (await page.locator("#editNamesSave").isDisabled())
+  );
+  await page.evaluate(
+    (args) => window.PowerFund.setEditName(args.id, args.v),
+    { id: await names.nth(1).getAttribute("data-member"), v: "Wednesday" }
+  );
+  await page.waitForTimeout(250);
+  check(
+    "names/exactly 10 characters is allowed",
+    (await page.locator("#editNamesError").isHidden()) &&
+      !(await page.locator("#editNamesSave").isDisabled())
+  );
   await page.close();
 }
 
@@ -3371,6 +4087,10 @@ async function desktopHeaderActions(browser, errors) {
  *  failing to load — so this page's errors are not collected. */
 async function bootFailure(browser) {
   const page = await browser.newPage({ viewport: { width: 430, height: 900 } });
+  // Routes by hand, so serve()'s AUTH_MODE pin never ran. Without this the
+  // shipped "required" fronts a sign-in gate and the boot error — the entire
+  // subject of this test — never renders.
+  await withAuthMode(page, "off");
   await page.route("**/rest/v1/**", (r) => r.abort());
   await page.route("**/realtime/v1/**", (r) => r.abort());
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
@@ -3395,6 +4115,28 @@ async function bootFailure(browser) {
     executablePath: process.env.PF_CHROMIUM || undefined,
     args: ["--no-sandbox"],
   });
+
+  // EVERY PAGE GETS ITS OWN CONTEXT, WITH THE SERVICE WORKER BLOCKED.
+  //
+  // Playwright's page.route() does NOT intercept requests a service worker
+  // makes. sw.js installs on the first load and claims the client, so from the
+  // second navigation onward every mocked route was silently bypassed and the
+  // page fetched the real files instead.
+  //
+  // That was invisible for as long as the shipped js/config.js happened to
+  // match what the tests wanted. The moment AUTH_MODE became "required", a
+  // test that reloaded got the real config and met the sign-in gate — which is
+  // how this was finally noticed. The service worker is not what these tests
+  // are about; the one test that IS about it registers its own.
+  //
+  // A fresh context per page, not one shared context: pages here rely on their
+  // own localStorage (pf_onboarded, pf_my_member_id, the Supabase session), and
+  // sharing one would leak identity between checks.
+  browser.newPage = async (opts) => {
+    const context = await browser.newContext({ ...(opts || {}), serviceWorkers: "block" });
+    return context.newPage();
+  };
+
   const errors = [];
 
   console.log("\nTabs render (mobile shell)");
@@ -3429,6 +4171,9 @@ async function bootFailure(browser) {
   await signInAdmin(browser, errors);
   await accountLinking(browser, errors);
   console.log("\nOnboarding");
+  await ctaGeometry(browser, errors);
+  await payAttribution(browser, errors);
+  await myPayoutQr(browser, errors);
   await unlockVisibility(browser, errors);
   await transferRole(browser, errors);
   await signInPrompt(browser, errors);

@@ -42,5 +42,15 @@ window.APP_CONFIG = {
   // Providers) AND this site's URL is listed under Authentication -> URL
   // Configuration -> Redirect URLs. Turning it to "required" before both are
   // true locks every member out, including the treasurer.
-  AUTH_MODE: "optional",
+  //
+  // NOW "required": all five members have an address on file and have each
+  // signed in once, which is the real precondition — a member with no address
+  // hits the `unknown` dead-end and cannot reach the app at all.
+  //
+  // This does NOT require migration 011. The coupling runs one way only: 011
+  // without "required" shows every member a load error, but "required" without
+  // 011 is simply a gate in front of rules Postgres is not enforcing yet. So
+  // this is the reversible half — flip it back to "optional" and redeploy if
+  // anything goes wrong.
+  AUTH_MODE: "required",
 };

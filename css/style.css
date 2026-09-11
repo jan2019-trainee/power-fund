@@ -54,6 +54,19 @@
   --text-primary: #EDEFF2;
   --text-muted: #93A2B8;
   --border: rgba(255,255,255,0.08);
+
+  /* The mobile tab bar's height, and the floating CTA's clearance above it.
+     ONE value, because these were two hardcoded guesses that disagreed: the
+     bar measures 60px and the CTA was pinned at 58px, so the CTA sat 2px
+     INSIDE it — and on a phone with a home indicator both gained the safe-area
+     inset and stayed 2px apart. --cta-h is the CTA's own measured height:
+     34px top pad + a ~45px button + 12px bottom pad = 91px, plus slack. It is
+     what .cta-spacer reserves so the last card clears the button. Measured for
+     BOTH variants (the plain "Pay this cycle" and the red "Resubmit payment"),
+     since they differ by a pixel. Re-measure if the button's padding, font or
+     label length changes — a label that wraps makes it taller. */
+  --tab-h: 60px;
+  --cta-h: 96px;
 }
 
 * { box-sizing: border-box; }
@@ -1297,6 +1310,146 @@ body {
   padding: 11px;
 }
 
+/* --- My Payout QR Code (member-managed) ---------------------------------
+   Ported from MyPayoutQRManage.dc.html. A bottom sheet on the phone; the
+   .modal-overlay.sheet treatment already draws the grabber via ::before, so
+   nothing here adds another. */
+.sheet-payout-qr { text-align: left; }
+.sheet-payout-qr h3,
+.sheet-payout-qr .modal-sub { text-align: center; }
+.sheet-payout-qr .modal-sub { margin-bottom: 14px; }
+
+/* The status strip: what is on file right now, read at a glance. The artboard
+   leads with it, before the controls, because the first question is always
+   "have I done this yet?". */
+.pq-status {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  padding: 11px 12px;
+  margin-bottom: 10px;
+}
+.pq-status-mark {
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.pq-status-lines { flex: 1; min-width: 0; }
+.pq-status-title {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pq-status-note { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+
+.pq-explainer {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  margin: 0 0 12px;
+}
+.pq-explainer b { color: var(--text-primary); }
+
+.pq-name-note {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 6px 0 4px;
+}
+
+/* The bank picker. Native <select> on purpose: the phone renders its own
+   wheel, which beats any list this could draw, and it is one tap. The arrow is
+   painted in rather than relying on the UA's, which is invisible on this
+   ground in several browsers. */
+.select-input {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 34px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+    linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position: calc(100% - 17px) calc(50% + 1px), calc(100% - 12px) calc(50% + 1px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+/* The options themselves are drawn by the OS, which does not inherit the dark
+   ground — set it explicitly or Chrome on Android shows white-on-white. */
+.select-input option { background: var(--bg-card); color: var(--text-primary); }
+
+/* --- "Add your payout QR" nudge ----------------------------------------
+   Amber, not red: nothing is broken and no payment is late. It is a thing to
+   do before a date, which is what the accent colour means everywhere else in
+   this app. */
+.payout-nudge {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: var(--accent-soft);
+  border: 1px dashed rgba(245, 166, 35, 0.45);
+  border-radius: 14px;
+  padding: 12px 13px;
+  margin-bottom: 12px;
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  cursor: pointer;
+}
+.payout-nudge:hover { border-color: var(--accent); }
+.payout-nudge-mark { color: var(--accent); flex-shrink: 0; margin-top: 1px; }
+.payout-nudge-lines { flex: 1; min-width: 0; }
+.payout-nudge-title { font-size: 13px; font-weight: 600; }
+.payout-nudge-note {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-top: 2px;
+}
+.payout-nudge-go { color: var(--accent); font-size: 18px; flex-shrink: 0; }
+
+/* "until they sign in" — the treasurer's stand-in button says its own expiry,
+   so it does not read as a permission they keep. */
+.payout-dest-until {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-left: 6px;
+}
+
+/* "This records the payment as X's, not yours." Amber, not red: it is a
+   correct and intended action for a treasurer, just one that must not happen
+   by accident. Matches .payout-dest-warn, which says the same kind of thing on
+   the release side. */
+.pay-for-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  background: var(--accent-soft);
+  border: 1px solid rgba(245, 166, 35, 0.35);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+.pay-for-warn svg { color: var(--accent); flex-shrink: 0; margin-top: 1px; }
+.pay-for-warn b { color: var(--text-primary); }
+
 .payout-done-tag {
   font-size: 11px;
   font-weight: 600;
@@ -2196,6 +2349,10 @@ body { padding-top: calc(28px + var(--pf-bar-h, 0px)); }
   background: var(--bg-card);
   border-top: 1px solid var(--border);
   padding: 6px 4px calc(6px + env(safe-area-inset-bottom, 0px));
+  /* Stated rather than left to the content, so .floating-cta can sit exactly
+     on top of it instead of guessing. box-sizing is border-box globally, and
+     60px is what the icon + label + padding already measured. */
+  height: calc(var(--tab-h) + env(safe-area-inset-bottom, 0px));
 }
 .tab-item {
   flex: 1;
@@ -2245,6 +2402,10 @@ body { padding-top: calc(28px + var(--pf-bar-h, 0px)); }
     top: 0;
     right: auto;
     width: 232px;
+    /* Undo the mobile bar's fixed height — here the same element is a
+       full-height sidebar (top:0 and the base rule's bottom:0), and leaving
+       60px on it would collapse it to a strip across the top. */
+    height: auto;
     flex-direction: column;
     justify-content: flex-start;
     align-items: stretch;
@@ -3152,19 +3313,40 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   position: fixed;
   left: 0;
   right: 0;
-  bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(var(--tab-h) + env(safe-area-inset-bottom, 0px));
   z-index: 15;
-  padding: 28px 16px 12px;
-  background: linear-gradient(to top, var(--bg-primary) 55%, transparent);
+  padding: 34px 16px 12px;
+  /* The scrim has to separate the button from whatever scrolls under it
+     WITHOUT looking like the card behind has been chopped. The old
+     `--bg-primary 55%, transparent` put 52px of fully opaque page background
+     over a lighter card, and against .battery-hero that read as a straight cut
+     through the card rather than a fade. Opaque only where the button
+     actually is, then a long fade out. */
+  background: linear-gradient(
+    to top,
+    var(--bg-primary) 0%,
+    var(--bg-primary) 38%,
+    rgba(13, 27, 42, 0.72) 62%,
+    rgba(13, 27, 42, 0) 100%
+  );
   pointer-events: none;
 }
 .floating-cta .hero-cta {
   pointer-events: auto;
   max-width: 728px;
   margin: 0 auto;
-  display: block;
+  /* NO `display` here. It used to say `block`, and because this selector is
+     more specific than `.rejected-cta` it silently overrode that button's
+     `display: flex` — so its justify-content and gap were computed but inert,
+     the icon (which is display:block) took a line of its own at the left
+     edge, and the label wrapped to a second line underneath, centred. That is
+     the "icon isn't aligned" report, and it also made the button 55px tall
+     instead of 41px. `.hero-cta` already sets block for the plain variant. */
 }
-.cta-spacer { height: 84px; }
+/* Was 84px against a CTA that measures 96px, so the last card was 12px short
+   of clearing it — and a button that wrapped to two lines would have been
+   covered outright. Tied to the same variable now. */
+.cta-spacer { height: var(--cta-h); }
 
 @media (min-width: 900px) {
   /* With a sidebar there is no thumb zone to hug — the action returns to the

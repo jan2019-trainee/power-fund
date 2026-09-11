@@ -345,8 +345,10 @@ conclusions are not discoverable from artboard markup. See `design/README.md`.
   (The design removes them entirely; this project overrode that.)
 - **Mid-fund member add/remove** — out of scope. The roster is read-only.
 - **Fund Setup wizard** — deferred; the designer marked it lowest priority.
-- **Payout QR / renaming** — treasurer-managed. No per-member auth exists, so a
-  member-only gate would be decorative.
+- **Payout QR / renaming** — ~~treasurer-managed. No per-member auth exists, so
+  a member-only gate would be decorative.~~ **REVERSED once auth landed** —
+  members now manage their own payout QR and bank details, which is what the
+  design said all along. See "My payout details" below.
 - **Forgot PIN** — solved with a master PIN (`app_settings.master_pin`), not the
   design's destructive reset. Non-destructive; every use is logged.
 - **Profile photos** — now built (migration 009). **Onboarding** — now built,
@@ -424,6 +426,163 @@ Phase 9, from the independent coverage audit — all closed:
 - **Status 3 (rejected)** is not money and still owes the cycle. `isOwed()` keeps
   unpaid and rejected together.
 
+## My payout details (member-managed)
+
+A **port**, not new design: `MyPayoutQRManage.dc.html` + its `Desktop` twin,
+and `canvas.json`'s `my-payout-qr-notes` ("every member now has their own
+receiving QR… added as a row in Menu — Member") plus
+`payout-release-no-qr-notes` ("a real scenario now that members self-manage
+their own payout QR"). The app was the deviation, for one stated reason — no
+per-member auth — which migration 008 removed.
+
+**The gate is `editableMember()`, a LINKED ACCOUNT — never
+`localStorage.pf_my_member_id`.** That preference is unverified and
+per-device, so honouring it would restore exactly the hole the old code
+comment described: anyone with the site URL could pick any member and change
+where their ₱30,000 is sent. `openPayoutQrModal()` also **ignores its
+argument** and always targets the caller's own row; the argument survives only
+so an old call site does not break, and taking it as the target would leave one
+guard between a member and somebody else's destination.
+
+**The treasurer's edit button is gone from everyone else's card.** Their route
+is unchanged where it matters: Release Payout still shows the recipient's full
+details, and `PayoutReleaseNoQR`'s "Copy reminder message" is how they chase a
+member who has not added one. That was already built.
+
+- **The treasurer may still edit a member who has NEVER SIGNED IN**
+  (`payoutEditableMember(memberId)`), and the button on that member's card says
+  *"until they sign in"*. Without this the feature strands exactly the people
+  it is meant to serve: a member with no account cannot set their own details,
+  and if nobody else can either, their payout destination is unreachable from
+  the app and the only route left is SQL — worse than the treasurer-managed
+  world this replaces. **The carve-out closes the moment they link**, and
+  shrinks to nothing once the fund has all signed in. An ordinary member never
+  gets it, linked target or not.
+- **The database still lets the treasurer write these columns unconditionally**,
+  which is the recovery path for a member who loses their Google account. The
+  UI is narrower than the database on purpose. Do not "finish the job" by
+  tightening the guard without deciding what happens to that member.
+- **Account numbers are MASKED in the roster** (`maskAccount()`, last four
+  digits). Not secrecy — the treasurer needs the full number and gets it in
+  Release Payout, and the owner sees their own in full where they edit it. It
+  is that a roster read by all five does not need to recite everyone's account
+  number to say a destination exists.
+- **The bank is a picker now**, from `PAYOUT_BANKS`, per the artboard's own
+  `<select>`. Five people typing "GCash" / "gcash" / "G-Cash" into a free-text
+  box the treasurer reads back under time pressure is a real way to send money
+  to the wrong wallet. The artboard offers **"Other"** and gives it nowhere to
+  go; it reveals a field here, because a dead option is worse than none. Free
+  text saved before this was a picker selects "Other" rather than silently
+  becoming GCash.
+- **The activity entry names the member, not the number** — same rule as the
+  member emails: the log is read by all five and lands in the CSV export and
+  the backup file.
+- **One addition the design does not have:** a Home nudge when a member has
+  nothing on file and their round is the one collecting now or next. The design
+  built only the treasurer's end of this reminder (the "Copy reminder message"
+  above), which is the fallback for a nudge that never happened. Deliberately
+  narrow — any earlier it is noise for four rounds, any later the payout is
+  already out.
+
+### The storage path had to change
+
+`uploadMemberPayoutQr()` now writes **`payout-qr/<memberId>/<ts>.<ext>`**, not
+the flat `payout-qr/<memberId>-<ts>.<ext>`. `storage.foldername()` sees folders
+and never a filename prefix, so the old path could not be scoped to a member
+at all — only to the whole bucket, which is why it was treasurer-only. Same
+shape as `member-avatars`.
+
+**Migration 011 was amended** (it is not applied yet, so no 012 was needed):
+`payment_assets_write/update/delete` now allow `pf_is_treasurer()` **or** a
+member's own `payout-qr/<their id>/` folder. Everything else in the bucket —
+the fund's payment QR, the payout receipts — stays treasurer-only.
+
+### `.single()` bit again, on the worst possible write
+
+`saveMemberPayoutDetails()` used `.single()` and so **could not tell a refusal
+from a success**: RLS hides the row rather than raising, and the reply is `[]`
+with no error. It now uses `requireRows()`. This was a ninth instance of the
+bug the "all eight money writes" note below describes — missed because payout
+details were not in that audit. `tests/sql/run.sh` asserts the refusal returns
+0 rows and no error, which is what makes the guard necessary rather than
+decorative.
+
+## Whose cycle is this? (payment attribution)
+
+Reported from use: tapping another member's chip in Rounds opened the pay
+sheet **for them**, with their name only in a small subtitle after "Round 2 ·".
+Submitting filed your screenshot as *their* contribution. Easy to do by
+accident, hard to notice afterwards.
+
+- **A member may now only tap their OWN chip.** `cellClicked()` refuses another
+  member's cycle by name ("That's Regine's cycle — you can only send your own
+  payment"), and `rounds.js` no longer marks those chips clickable. The guard
+  is in both places because `cellClicked` is exported on `PowerFund`.
+- **Migration 011 settles it anyway**: `contributions_self` checks
+  `member_id = pf_member_id()`, so paying for somebody else is about to be
+  refused by Postgres. The UI was offering a button that is going to fail.
+- **Not identified on this device → ask.** `openWhoAmIPicker()`, rather than
+  taking the chip they happened to tap as the answer. That guess is what filed
+  the payment against somebody else.
+- **The treasurer's path is unchanged** and is the legitimate one, but it now
+  announces itself: the member's name moves into the sheet TITLE ("Pay Cycle 7
+  for Sarah") and an amber `.pay-for-warn` says the proof is filed against
+  their cycle. Your own payment looks exactly as it did.
+
+## The floating CTA's geometry
+
+Reported from a real phone: the pinned "Resubmit payment" button cut a hard
+band across the round card behind it. Three numbers disagreed, and none of the
+~370 behavioural checks could see any of them — so `tests/smoke.js` now
+MEASURES BOXES for this (`ctaGeometry`).
+
+- **`--tab-h` and `--cta-h` on `:root` are the single source.** The tab bar's
+  height and the CTA's clearance above it were two hardcoded guesses: the bar
+  measures 60px, the CTA was pinned at `bottom: 58px`, so it sat **2px inside
+  the bar** — and both gained `env(safe-area-inset-bottom)` independently, so
+  they stayed 2px apart on a phone with a home indicator.
+- **`.cta-spacer` was 84px against a CTA that measures 101px.** The last card
+  could never fully clear it, and a button wrapping to two lines would have
+  been covered outright. If the button's padding or font changes, re-measure
+  and update `--cta-h`.
+- **The scrim now fades instead of cutting.** It was
+  `linear-gradient(to top, var(--bg-primary) 55%, transparent)` — 52px of fully
+  opaque page background laid over `.battery-hero`, which is *lighter*
+  (`--bg-card`). Against a card with its own rounded corners that reads as a
+  chunk removed from the card, not as a scrim.
+- **The Resubmit button's icon was on its own line.** `.floating-cta .hero-cta`
+  set `display: block`, which outranks `.rejected-cta`'s `display: flex` — so
+  that button's `justify-content` and `gap` were computed but **inert**, its
+  block-level `<svg>` took a line of its own at the left edge, and the label
+  wrapped underneath, centred. The `display` declaration is gone (`.hero-cta`
+  already sets block for the plain variant), and the button went from 55px to
+  44px. The container checks below all passed while this was broken — measuring
+  a box says nothing about what is inside it — so the alignment is asserted
+  directly now.
+- **`.tab-bar` is the desktop sidebar too.** Giving the mobile bar a fixed
+  height collapsed the sidebar to a 60px strip, so the desktop media query
+  resets `height: auto`. A test asserts the sidebar is still full height —
+  that regression was introduced and caught inside one edit.
+
+## Member names: "Board Members", capped at 10 characters
+
+- The roster heading on Home, the Members screen's own title, and the desktop
+  sidebar's nav label all read **"Board Members"**. The mobile tab bar has no
+  Members item at all (it is a Home drill-down), so that label only ever
+  appears in the 232px sidebar, where it fits at the same row height as the
+  others — measured, not assumed.
+- **`NAME_MAX = 10`** is enforced in BOTH validators (`profileNameProblem()`
+  and `editNamesProblem()`) and as `maxlength` on both inputs. The attribute is
+  the courtesy that stops the keystroke; the validators are the rule, because
+  `maxlength` does not survive a paste into a modified field or a direct call
+  to the exported setter.
+- Counted in UTF-16 units to match what `maxlength` itself counts, so the two
+  can never disagree about whether a given string fits.
+- The treasurer's modal **names the offending value** ("\"Wednesdayyy\" is too
+  long") rather than saying one of five is — and flags that field, since a name
+  already on file from before the cap arrives over-length and Save would
+  otherwise refuse with nothing to point at.
+
 ## Migrations
 
 Run in the Supabase SQL editor, in order. `006` also needs a one-off
@@ -449,9 +608,20 @@ off `members.auth_user_id`, so an unlinked member is denied everything.
 Overridable with `select set_config('pf.allow_unready','yes',false);` but
 don't.
 
-**011 and `AUTH_MODE = "required"` must ship together.** 011 revokes `anon`
-entirely, so the migration without the deploy shows every member a load error,
-and the deploy without the migration is a gate in front of nothing.
+**011 needs `AUTH_MODE = "required"`, but NOT the other way round.** The
+coupling runs one direction only, and an earlier version of this note had it
+as a mutual dependency, which is wrong and would have held up a safe step:
+
+- **011 without `required`** shows every member a load error — it revokes
+  `anon` entirely, so an unauthenticated browser can read nothing.
+- **`required` without 011** is merely a gate in front of rules Postgres is not
+  yet enforcing. Harmless, reversible, and worth shipping first: it shakes out
+  any sign-in problem while a bad outcome is still one redeploy away.
+
+What `required` actually needs is **every member linked** — an address on file
+and one sign-in each. Without that, a member hits the `unknown` dead-end with
+no way into the app at all. `AUTH_MODE` is now `"required"`; all five are
+linked.
 
 Every migration from 010 on is wrapped in `begin; … commit;`. Not decoration:
 without it a `raise` in 011's preflight aborted one statement and psql
@@ -530,12 +700,25 @@ exported handlers — is gated on it, never on `unlocked`.
   panel that sets the addresses — a permanent dead end. It grants nothing new:
   with no treasurer flagged, 011's readiness check refuses the lockdown
   anyway, so the PIN is the only authority that exists yet.
-- **The flagged treasurer is auto-unlocked** (`applyAdminAutoUnlock()`, run
-  after every resolve). A Google login owning an `is_treasurer` row is
-  strictly stronger proof than a four-digit code five people share, so making
-  them type it added nothing. `treasurerLockedByChoice` makes an explicit Lock
-  stick — without it the 30-second poll would re-open treasurer mode and the
-  admin could never see the app as a member does.
+- **Treasurer mode starts LOCKED, and opens with one tap and no PIN** for a
+  Google-verified treasurer. It used to auto-unlock on sign-in; that was
+  reversed deliberately — loading the app is not an intent to act on money,
+  and the owner wanted the mode entered on purpose.
+- **`verifiedTreasurer()` is the strict test that gates the PIN-free path**,
+  and it is NOT `isTreasurerAccount()`. The latter falls back to the PIN when
+  nobody is flagged; using it here would turn "no treasurer on file yet" into
+  "treasurer mode is one tap away".
+- **Everyone else who can still see the button keeps the PIN.** That is the
+  boundary, not an oversight: `canUnlockTreasurer()` deliberately shows the
+  button to anyone the app cannot identify (auth off, signed out, unlinked)
+  because it is the only route to the master PIN. A blanket "no PIN any more"
+  would hand one-tap treasurer mode to any member who simply skips sign-in —
+  and until 011 is applied, treasurer mode in the UI is real write access to
+  every table. A test asserts both halves.
+- **Destructive actions still ask for the PIN** (Reset all data, Restore,
+  Undo release, Transfer role). Left as-is on purpose. Open question worth
+  revisiting: a treasurer who never sets a PIN cannot satisfy them, since the
+  unlock flow is no longer where a PIN gets created.
 - **Consequence to remember:** the "You are / Edit" profile card lives in the
   member branch of the Menu, so an auto-unlocked admin does not see it. Their
   route to their own name and photo is Menu → Account → **Edit my profile**,
@@ -773,6 +956,25 @@ showing; and `pesoWhole()` for the prose figures, since `C.peso()`'s two
 decimals are right for a ledger and wrong in a sentence — the artboards write
 "₱1,000", not "₱1,000.00".
 
+**Two harness defaults, both learned the hard way.**
+
+- **`serve()` pins `AUTH_MODE` to `"off"` for every page**, rather than
+  inheriting whatever `js/config.js` ships. The shipped value is a deploy-time
+  decision; a test that reads it is testing the deployment. The day it became
+  `"required"`, every check that had not opted in met the sign-in wall. A test
+  that cares calls `withAuthMode()` after, and wins — Playwright matches the
+  most recently registered route first.
+- **Every page gets its own context with `serviceWorkers: "block"`.**
+  `page.route()` does NOT intercept requests a service worker makes, and
+  `sw.js` claims the client on the first load — so from the second navigation
+  onward every mocked route was silently bypassed and the page fetched the real
+  files. That was invisible while the shipped config happened to match what the
+  tests wanted. A fresh context per page, not one shared: these tests rely on
+  their own `localStorage`, and sharing would leak identity between checks.
+- **A test that routes by hand instead of calling `serve()` gets NEITHER
+  default** and must set both itself. `pinVault`, `bootFailure` and the
+  unreadable-vault check each had to be fixed for exactly this.
+
 **`tests/smoke.js`'s `serve()` now marks onboarding seen by default**, or it
 would front all ~290 checks. Pass `{ freshDevice: true }` for a first-run
 browser. A test that routes by hand instead of calling `serve()` must call
@@ -822,9 +1024,26 @@ confirmation names everything it replaces.
 ```bash
 node tests/views.test.js      # static: view scope. no browser
 node tests/calc.test.js       # money rules. no browser
+bash tests/sql/run.sh         # RLS on a real Postgres 16. no browser
 python3 -m http.server 8791 & # then:
 PF_CHROMIUM=/opt/pw-browsers/chromium-1194/chrome-linux/chrome node tests/smoke.js
 ```
+
+`tests/sql/run.sh` is the only suite that can see an RLS policy at all — the
+smoke harness mocks the network. It stands up a throwaway PostgreSQL 16
+cluster, stubs Supabase's `auth.uid()` and `storage.foldername()` to their real
+definitions, and applies the policy text **extracted from
+`supabase/migrations/`** rather than a copy. Two things it taught, both of
+which would have read as migration bugs:
+
+- **`UPDATE … WHERE` applies SELECT policies too**, so the harness needs
+  `payment_assets_read` from `schema.sql` — which 011 deliberately leaves
+  alone. Without it, "a member may replace their own QR" fails against a
+  policy that is correct.
+- **`authenticated` needs `USAGE` on the `auth` and `storage` schemas**, which
+  real Supabase grants. Without it every policy denies for the wrong reason —
+  and that is a false PASS on every DENY assertion, which is the dangerous
+  direction.
 
 Bump `CACHE` in `sw.js` on every deploy that changes the shell.
 

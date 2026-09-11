@@ -41,7 +41,7 @@ window.PFViews.members = function (ctx) {
 
   html += `<div class="view-head${isWide ? " view-head-row" : ""}">
     <div class="view-head-text">
-      <h2 class="view-title">Members</h2>
+      <h2 class="view-title">Board Members</h2>
       <p class="view-sub">${members.length} members · sorted by payout order</p>
     </div>
     ${
@@ -262,12 +262,27 @@ function getPayoutReleased(rounds, r) {
 }
 
 /**
- * Where this member's payout goes. Shown to everyone so a member can check
- * their own details are right, but only editable in treasurer mode — the app
- * has no per-member authentication, so a member-only gate would be decorative.
+ * Where this member's payout goes. Readable by everyone — this fund is
+ * transparent by design and a member should be able to check their own details
+ * are right — but the account number is MASKED unless it is yours.
+ *
+ * EDITABLE BY ITS OWNER ONLY, which reverses the old rule. The comment that
+ * used to sit here said a member-only gate would be decorative because the app
+ * had no per-member authentication. Migration 008 gave it one, so the gate is
+ * real now, and the design had it member-managed all along (canvas.json,
+ * my-payout-qr-notes). Enforced in Postgres too — see tests/sql/run.sh.
  */
 function payoutDest(m, ctx) {
-  const { escapeHtml, icon, unlocked } = ctx;
+  const { escapeHtml, icon, payoutOwner, maskAccount, isAdmin, inlineArgSafe } = ctx;
+  // A LINKED account, never the who-am-I preference: that is unverified and
+  // per-device, so trusting it would let anyone with the site URL change where
+  // somebody's 30,000 is sent.
+  const isMe = !!payoutOwner && String(payoutOwner.id) === String(m.id);
+  // The treasurer covers only members who have NEVER SIGNED IN — otherwise a
+  // member with no account has no way to set their own destination and nobody
+  // else does either, which is worse than the treasurer-managed world this
+  // replaces. It closes by itself as people sign in.
+  const coverFor = !isMe && isAdmin && !m.auth_user_id;
   const has =
     m.payout_qr_url || m.payout_bank || m.payout_account_name || m.payout_account_number;
 
@@ -298,22 +313,50 @@ function payoutDest(m, ctx) {
                      : ""
                  }
                  ${
+                   // MASKED here. The roster is read by all five members, and
+                   // it does not need to read out everyone's full account
+                   // number to say a payout destination exists. The treasurer
+                   // gets the number in full where they actually need it — the
+                   // Release Payout sheet — and the owner sees their own in
+                   // full in the sheet where they edit it.
                    m.payout_account_number
-                     ? `<div class="payout-dest-num">${escapeHtml(m.payout_account_number)}</div>`
+                     ? `<div class="payout-dest-num">${escapeHtml(
+                         maskAccount(m.payout_account_number)
+                       )}</div>`
                      : ""
                  }
                  ${m.payout_qr_url ? "" : `<div class="payout-dest-num">No QR on file</div>`}
                </div>
              </div>`
-          : `<p class="payout-dest-empty">Nothing on file yet — the treasurer records where this payout should be sent.</p>`
+          : `<p class="payout-dest-empty">Nothing on file yet — ${
+              isMe
+                ? "add yours so the treasurer knows where to send it."
+                : m.auth_user_id
+                ? escapeHtml(m.name) + " adds this themselves."
+                : escapeHtml(m.name) +
+                  " hasn't signed in yet, so they can't add it themselves."
+            }</p>`
       }
       ${
-        unlocked
+        // MEMBER-MANAGED NOW. The treasurer's "Edit payout details" button is
+        // gone from every other member's card: this is where somebody's
+        // ₱30,000 is sent, and the person receiving it is the one who should
+        // say where. Your own card keeps the button.
+        //
+        // The treasurer is not left without a route — they see the full
+        // details in Release Payout, and PayoutReleaseNoQR's "Copy reminder
+        // message" is how they chase a member who has not added one.
+        isMe
+          ? `<button type="button" class="payout-dest-edit" onclick="PowerFund.openPayoutQrModal()">${icon(
+              has ? "qr" : "upload",
+              14
+            )}<span>${has ? "Edit my payout details" : "Add my payout details"}</span></button>`
+          : coverFor
           ? `<button type="button" class="payout-dest-edit" onclick="PowerFund.openPayoutQrModal('${inlineArgSafe(
               m.id
             )}')">${icon(has ? "qr" : "upload", 14)}<span>${
-              has ? "Edit payout details" : "Add payout details"
-            }</span></button>`
+              has ? "Edit for them" : "Add for them"
+            }</span><span class="payout-dest-until">until they sign in</span></button>`
           : ""
       }
     </div>

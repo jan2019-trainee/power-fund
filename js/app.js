@@ -1478,6 +1478,14 @@
       // Reverting a confirmed contribution destroys a financial record — never
       // do it on the first tap.
       const due = C.dueDateOf(state.cycles, cycleNumber);
+      const broken = revertBreaksReleasedRound(memberId, cycleNumber);
+      if (broken) {
+        return showError(
+          `Round ${broken} has already been paid out. Undo that release first ` +
+            `— otherwise the round keeps a ${C.peso(C.GOAL_PER_ROUND)} payout ` +
+            `on record while holding less than that in confirmed payments.`
+        );
+      }
       // Undoing a confirmed payment removes money from a round, so it is never
       // a single tap — but it stays in the grid, next to the pill that was
       // tapped, instead of throwing a dialog over the whole screen.
@@ -1542,8 +1550,36 @@
   }
 
   /** The actual revert, after the confirmation dialog. */
+  /** Would reverting this cycle leave its round paid out but under-funded?
+   *
+   *  markPayoutReleased() hard-gates release on isRoundFunded(), so the app
+   *  asserts funded-implies-released in one direction — and let the other one
+   *  be broken silently. Two taps produced a round badged Completed at
+   *  ₱28,000 / ₱30,000 with a ₱30,000 payout on record against it, with no
+   *  warning at the moment of the change and no marker afterwards.
+   *
+   *  Refused rather than double-confirmed: the correct order already exists
+   *  and every step of it is built — Undo Release, revert, release again. */
+  function revertBreaksReleasedRound(memberId, cycleNumber) {
+    const round = C.roundOfCycle(cycleNumber);
+    if (!getPayout(round).released) return null;
+    const row = C.contributionFor(state.contributions, memberId, cycleNumber);
+    if (!row || row.status !== C.STATUS_PAID) return null;
+    return round;
+  }
+
   async function doRevertContribution(memberId, cycleNumber) {
     if (busy) return;
+    // Checked here as well as where the panel opens: confirmUndoPaid is
+    // exported on PowerFund, so the absent panel is not the gate.
+    const broken = revertBreaksReleasedRound(memberId, cycleNumber);
+    if (broken) {
+      return showError(
+        `Round ${broken} has already been paid out. Undo that release first — ` +
+          `otherwise the round keeps a ${C.peso(C.GOAL_PER_ROUND)} payout on ` +
+          `record while holding less than that in confirmed payments.`
+      );
+    }
     busy = true;
     render();
     try {
@@ -2153,11 +2189,44 @@
     confirmDialog = null;
     render();
   }
+  /** Patch the button by hand rather than calling render(): render() reassigns
+   *  innerHTML, which would destroy the field being typed into and lose the
+   *  caret — the same reason refreshEditNamesValidity() exists. */
+  function refreshConfirmGate() {
+    const btn = document.querySelector(".modal .confirm-yes");
+    if (btn) btn.disabled = busy || confirmGateUnmet(confirmDialog);
+  }
   function setConfirmType(v) {
     if (confirmDialog) confirmDialog.typeValue = v;
+    refreshConfirmGate();
   }
   function setConfirmPin(v) {
     if (confirmDialog) confirmDialog.pinValue = v;
+    refreshConfirmGate();
+  }
+
+  /** Is the confirm dialog's gate unsatisfied? The design is explicit about
+   *  this one (canvas.json, menu-pin-notes): "type RESET (case-insensitive)
+   *  AND enter the PIN before 'Reset everything' enables — the button is
+   *  genuinely disabled/enabled live based on both fields. No destructive
+   *  action is ever one tap away."
+   *
+   *  It was disabled only while `busy`, so "Reset everything" rendered as a
+   *  saturated red primary on an empty dialog. submitConfirm() validated, so
+   *  nothing was destroyed — but the gate was invisible until after the press,
+   *  which teaches the treasurer to press first and read second on the screen
+   *  that wipes every contribution. The PIN is checked for PRESENCE here and
+   *  for correctness in submitConfirm(): the button must not become the gate. */
+  function confirmGateUnmet(d) {
+    if (!d) return true;
+    if (
+      d.requireType &&
+      String(d.typeValue || "").trim().toUpperCase() !==
+        d.requireType.toUpperCase()
+    ) {
+      return true;
+    }
+    return !!(d.requirePin && !String(d.pinValue || "").trim());
   }
 
   async function submitConfirm() {
@@ -7404,7 +7473,7 @@
               pinMissing
                 ? `<button class="modal-btn-primary confirm-set-pin" onclick="PowerFund.startPinForConfirm()">Set a treasurer PIN</button>`
                 : `<button class="modal-btn-primary confirm-yes" onclick="PowerFund.submitConfirm()" ${
-                    busy ? "disabled" : ""
+                    busy || confirmGateUnmet(d) ? "disabled" : ""
                   }>${escapeHtml(d.confirmLabel)}</button>`
             }
             <button class="modal-btn-secondary" onclick="PowerFund.closeConfirm()">Cancel</button>

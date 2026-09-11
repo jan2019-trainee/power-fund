@@ -3110,6 +3110,118 @@ async function extraTreasurer(browser, errors) {
   await solo.close();
 }
 
+/** The findings from the independent UI/UX QA pass that were implementation
+ *  gaps rather than product decisions. Every one of these passed the suite
+ *  before the fix, because nothing asserted the behaviour at all. */
+async function qaFindings(browser, errors) {
+  // ---- P0: reverting a confirmed payment inside a RELEASED round ----------
+  // markPayoutReleased() gates release on isRoundFunded(), so the app asserted
+  // funded-implies-released one way and let the other be broken silently: two
+  // taps produced a round badged Completed at ₱28,000 / ₱30,000 with a ₱30,000
+  // payout on record. The fixtures are already in that state (Verdz is short
+  // on cycles 5-6 of round 1, which is released), which is what makes the
+  // shortfall marker testable.
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`qa-p0: ${e}`));
+  await serve(page, {
+    ...M.TABLE_DATA,
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234" },
+  });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2000);
+  await unlockTreasurer(page);
+
+  // Premise: round 1 really is released, and Regine really is confirmed on
+  // cycle 1 — without both, a refusal proves nothing.
+  const premise = await page.evaluate(() => {
+    const p = window.PowerFund;
+    return { hasRevert: typeof p.confirmUndoPaid === "function" };
+  });
+  check("qa-p0/premise: the revert handler is exported", premise.hasRevert === true);
+  check(
+    "qa-p0/premise: round 1 is released in the fixtures",
+    M.PAYOUTS[0].released === true
+  );
+
+  await page.locator(".tab-item", { hasText: "Rounds" }).click();
+  await page.waitForTimeout(500);
+  await page.locator(".round-header").first().click();
+  await page.waitForTimeout(500);
+
+  // An already-broken fund must SAY so rather than merely be wrong.
+  // Read the count FIRST and only then the text: innerText() on a zero-count
+  // locator throws, which aborts the whole run instead of reporting one FAIL —
+  // and a check that cannot fail cleanly is no use when verifying the fix.
+  const shortfalls = await page.locator(".payout-shortfall").count();
+  const shortfallText = shortfalls
+    ? await page.locator(".payout-shortfall").first().innerText()
+    : "(none rendered)";
+  check("qa-p0/a released-but-unfunded round is flagged", shortfalls === 1, shortfallText);
+  check("qa-p0/and names the shortfall", /short/.test(shortfallText), shortfallText);
+  check(
+    "qa-p2/the release reversal says what it reverses",
+    /Undo Release/.test(await page.locator(".payout-status-box").first().innerText()),
+    await page.locator(".payout-status-box").first().innerText()
+  );
+
+  // Tapping a confirmed chip in a released round must not open the undo panel.
+  const paidChip = page.locator(".member-chip.paid").first();
+  await paidChip.click();
+  await page.waitForTimeout(500);
+  check("qa-p0/the undo panel does not open on a released round",
+    (await page.locator(".undo-paid-panel").count()) === 0);
+  const banner = (await page.locator(".save-error-banner").count())
+    ? await page.locator(".save-error-banner").first().innerText()
+    : "(no error banner)";
+  check("qa-p0/and it says to undo the release first",
+    /already been paid out/.test(banner), banner);
+
+  // cellClicked is exported, so the chip not being tappable is not the gate.
+  // A REAL member id, or this calls a no-op and passes either way.
+  const before = await page.locator(".member-chip.paid").count();
+  await page.evaluate((id) => window.PowerFund.cellClicked(id, 1), M.MEMBERS[0].id);
+  await page.waitForTimeout(400);
+  check("qa-p0/the exported handler refuses it too",
+    (await page.locator(".undo-paid-panel").count()) === 0);
+  const after = await page.locator(".member-chip.paid").count();
+  check("qa-p0/no confirmed payment was removed", after === before, `${before} → ${after}`);
+  await page.close();
+
+  // ---- P1: the destructive confirm button was never disabled --------------
+  // canvas.json's menu-pin-notes names this property explicitly: "type RESET
+  // AND enter the PIN before 'Reset everything' enables — genuinely
+  // disabled/enabled live based on both fields".
+  const d = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  d.on("pageerror", (e) => errors.push(`qa-p1: ${e}`));
+  await serve(d, {
+    ...M.TABLE_DATA,
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234" },
+  });
+  await d.goto(BASE, { waitUntil: "domcontentloaded" });
+  await d.waitForTimeout(2000);
+  await unlockTreasurer(d);
+  await d.evaluate(() => window.PowerFund.resetData());
+  await d.waitForTimeout(500);
+
+  const yes = d.locator(".modal .confirm-yes");
+  check("qa-p1/Reset is disabled on an empty dialog",
+    (await yes.isDisabled()) === true);
+  await d.locator(".confirm-type-input").fill("RESET");
+  await d.waitForTimeout(250);
+  check("qa-p1/still disabled with RESET typed but no PIN",
+    (await yes.isDisabled()) === true);
+  await d.locator('.modal input[placeholder="Treasurer PIN"]').fill("1234");
+  await d.waitForTimeout(250);
+  check("qa-p1/enabled once both fields are filled",
+    (await yes.isDisabled()) === false);
+  // Live in both directions — the design says "disabled/enabled live".
+  await d.locator(".confirm-type-input").fill("RESE");
+  await d.waitForTimeout(250);
+  check("qa-p1/and disables again when the word is broken",
+    (await yes.isDisabled()) === true);
+  await d.close();
+}
+
 /** The two PIN dead ends, both created by the PIN-free unlock landing on top
  *  of rules written when treasurer mode could only be entered with a PIN. */
 async function pinDeadEnds(browser, errors) {
@@ -4668,6 +4780,7 @@ async function bootFailure(browser) {
   await transferRole(browser, errors);
   await paymentSchedule(browser, errors);
   await pinDeadEnds(browser, errors);
+  await qaFindings(browser, errors);
   await signInPrompt(browser, errors);
   await onboarding(browser, errors);
   console.log("\nBackup round-trip");

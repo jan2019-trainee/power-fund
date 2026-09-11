@@ -267,8 +267,23 @@ window.PFViews.rounds = function (ctx) {
                   : ""
               }</div>
                  ${
+                   // A round that is released but no longer funded is a fund
+                   // whose own books contradict each other. Releasing is gated
+                   // on isRoundFunded(), so this is only reachable through a
+                   // revert in the wrong order — now refused, but a fund that
+                   // already got here must SAY so rather than merely be wrong.
+                   C.isRoundFunded(state.contributions, r)
+                     ? ""
+                     : `<p class="payout-shortfall">${icon("alert", 13)}<span>Paid
+                          out in full, but this round now holds only
+                          ${C.peso(C.roundCollected(state.contributions, r))} in
+                          confirmed payments — ${C.peso(
+                            C.GOAL_PER_ROUND - C.roundCollected(state.contributions, r)
+                          )} short.</span></p>`
+                 }
+                 ${
                    unlocked
-                     ? `<button class="reset-btn" onclick="PowerFund.unmarkPayoutReleased(${r})">Undo</button>`
+                     ? `<button class="reset-btn" onclick="PowerFund.unmarkPayoutReleased(${r})">Undo Release</button>`
                      : ""
                  }
                </div>`

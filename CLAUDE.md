@@ -688,6 +688,102 @@ The full chip vocabulary: green paid · purple in review · **red solid
 overdue** · **red dashed rejected** (sent and refused, versus never sent) ·
 plain not-due-yet.
 
+## The first independent UI/UX QA pass, and what it found
+
+Run per the QA Gate, by a separate reviewer working from `UX_QA_AGENT.md`,
+against `design/`, the source, and 115 real captures. Verdict: **NEEDS
+REVISION** — 1 P0, 5 P1, 16 P2, 16 P3. Every finding below was verified
+against the code before acting on it. **Closed so far:**
+
+**P0 — a confirmed payment could be reverted inside a round already paid out.**
+`markPayoutReleased()` gates release on `isRoundFunded()`, so the app asserted
+funded-implies-released in ONE direction and let the other be broken silently.
+Two taps produced a round badged *Completed* at ₱28,000 / ₱30,000 with a
+₱30,000 payout on record against it — no warning at the moment of the change,
+no marker afterwards, and the contribution only recoverable from `activity_log`.
+`tests/mock-data.js` is already in that state (Verdz is short on cycles 5–6 of
+round 1, which is released), which is what made the marker testable.
+
+- `revertBreaksReleasedRound()` **refuses** rather than double-confirming: the
+  correct order already exists and every step of it is built — Undo Release,
+  revert, release again.
+- Checked where the panel opens AND in `doRevertContribution()`. `cellClicked`
+  is exported on `PowerFund`, so an untappable chip is not the gate.
+- **A fund that already got there now SAYS so** — `.payout-shortfall` names the
+  gap on any round that is `released && !isRoundFunded()`. Being wrong quietly
+  was the worse half of this.
+
+**P1 — the destructive confirm button was never disabled.** `menu-pin-notes`
+names this property explicitly: *"type RESET AND enter the PIN before 'Reset
+everything' enables — genuinely disabled/enabled live based on both fields."*
+It was disabled only while `busy`, so "Reset everything" rendered as a
+saturated red primary on an empty dialog. `submitConfirm()` did validate, so
+nothing was destroyed — but an invisible gate teaches the treasurer to press
+first and read second, on the screen that wipes every contribution.
+`confirmGateUnmet()` now drives the attribute, patched by hand on input rather
+than via `render()` (which would eat the caret). The PIN is checked for
+PRESENCE there and for CORRECTNESS in `submitConfirm()`: the button must not
+become the gate.
+
+**P1 — the round-lifecycle palette disagreed three ways.** Collecting was green
+on Rounds and amber on the desktop Home strip; Completed was green in both, so
+Collecting and Completed — the two most opposed states — shared a colour and
+were told apart only by their word; and the strip painted Payout Pending in
+`--pending-review`, which is exactly the claim the `.member-chip` note refuses
+to make. **One palette now**: amber for the two in-flight states (a real
+progression), an inset outline separating pending from collecting, green only
+for done. The payment vocabulary is untouched — that work was correct.
+
+Also closed: **"Undo" → "Undo Release"** on the round accordion (P2-14), which
+sat on the same screen as "Undo confirmation" with no way to tell the scope of
+the tap apart.
+
+**Every one of these passed the suite before the fix, because nothing asserted
+the behaviour at all.** The 12 new checks were run against the unfixed code
+first: 7 failed. Two initially passed in BOTH directions and were rewritten —
+one was a false pass (`/short/` matched the sentinel string "(no
+.payout-shortfall rendered)"), the other called `cellClicked(null, …)`, a
+no-op. A check that cannot fail is not a check.
+
+### Still open, and why
+
+- **P1 — money actions are gated on `unlocked`, not `isTreasurerAccount()`.**
+  011 keys every money write off `members.is_treasurer`; only the five ADMIN
+  surfaces were moved. Confirm, reject, revert, record-as-paid and release
+  still check the shared PIN, so four of five members are invited into a mode
+  where Postgres refuses every write. The project's own reasoning, written for
+  the Payment schedule, applies verbatim. `requireRows()` reports it honestly,
+  so this is presentation, not a hole — but the Release path uploads the
+  receipt BEFORE the `payouts` write it may be refused, orphaning a file.
+- **P1 — the Release Payout amount is fixed at `GOAL_PER_ROUND`**, where
+  `payout-release-notes` says it stays editable as a historical record. A
+  deliberate change (there is a comment saying so at `js/app.js:2606`) that was
+  never recorded and contradicts a published annotation. **A product decision:
+  it is what `payouts.amount` MEANS** — what was sent, or a restatement of the
+  goal. Put to the owner. Dead doc-comment at `js/app.js:2560` to delete either
+  way.
+- **P1 — Home's hierarchy.** An undesigned "WHOLE FUND · ALL 5 ROUNDS /
+  ₱150,000" block sits above the designed round hero on every Home variant, in
+  both shells, carrying the largest type on the screen. Verified: zero hits for
+  `150,000` / `whole fund` / `all 5 rounds` across `Main`, `MainMember`,
+  `DesktopHomeTreasurer`, `DesktopHomeMember`. `rounds-notes` states the intent
+  — *"split out of Home so the dashboard stays glanceable."* **A design
+  decision, put to the owner**: demote it, or record the override.
+- **The 16 P2s and 16 P3s**, which are a consistency pass rather than a
+  rebuild. The sharpest: the cycle-chip affordance is inverted (the chips a
+  member may NOT tap look tappable; their own does not, on touch); the payment
+  QR has no `max-height`, so a portrait screenshot pushes the submit button off
+  the sheet; the schedule modal's footer and live error fall below the fold.
+
+### The evidence gap the pass exposed
+
+The reviewer could not judge **My payout details** or **Onboarding** — both
+declared ports — because neither appears in the 115 captures, along with Edit
+Profile, Change Photo, Share, Toasts, the restore states, the lightbox and the
+account dead-ends. `tests/qa-capture.js` pins `AUTH_MODE` to `off`, and those
+surfaces need a linked account. Anything marked **J** in the report is
+unreviewed, not approved.
+
 ## Two PIN dead ends, both made by the PIN-free unlock
 
 Both existed because the PIN rules were written when treasurer mode could only

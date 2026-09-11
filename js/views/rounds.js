@@ -41,7 +41,13 @@ window.PFViews.rounds = function (ctx) {
     const rStatus = C.roundStatus(state.contributions, rounds, r); // not_started|collecting|payout_pending|completed
     const endDue = C.dueDateOf(state.cycles, endCycle);
 
-    const headerHtml = `<div class="round ${isOpen ? "is-open" : ""}">
+    // ONE badge. The lifecycle pill and a separate amber "active" tag were two
+    // badges for one header — Rounds.dc.html carries a single "Current". The
+    // pill now says which round is live, so nothing is lost by dropping the
+    // tag; .is-current also marks the card itself.
+    const headerHtml = `<div class="round ${isOpen ? "is-open" : ""}${
+      r === curRound && !allDone ? " is-current" : ""
+    }">
       <div class="round-header" role="button" tabindex="0" aria-expanded="${
         isOpen ? "true" : "false"
       }" onclick="PowerFund.toggleRound(${r})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();PowerFund.toggleRound(${r})}">
@@ -49,7 +55,7 @@ window.PFViews.rounds = function (ctx) {
           isOpen ? "open" : ""
         }">▸</span> Round ${r} — ${recipient ? escapeHtml(recipient.name) : "—"} ${
       ROUND_PILL[rStatus]
-    }${r === curRound && !allDone ? ' <span class="round-active-tag">active</span>' : ""}</div>
+    }</div>
         <div class="round-status">${C.peso(roundCollected)} / ${C.peso(C.GOAL_PER_ROUND)}${
       fullyFunded ? "" : ` · ${Math.round(C.progressPercentRound(state.contributions, r))}%`
     }${roundPending ? ` · ${roundPending} pending` : ""}${

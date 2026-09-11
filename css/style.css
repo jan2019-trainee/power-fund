@@ -203,6 +203,13 @@ body {
 }
 .my-status-cta:hover { background: #ffb733; }
 
+.my-status-since {
+  display: block;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+.my-status-head { margin: 0 0 8px; }
 .my-status-paid, .my-status-done { border-left-color: var(--success); }
 .my-status-pending { border-left-color: var(--pending-review); }
 .my-status-due { border-left-color: var(--accent); }
@@ -743,6 +750,28 @@ body {
   line-height: 1.6;
 }
 .footer-note b { color: var(--text-primary); }
+/* The disclosure, styled so it does not read as a bare browser triangle. */
+.footer-note > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-primary);
+}
+.footer-note > summary::-webkit-details-marker { display: none; }
+.footer-note > summary::after {
+  content: "▸";
+  color: var(--text-muted);
+  font-size: 12px;
+  transition: transform 0.18s ease;
+}
+.footer-note[open] > summary::after { transform: rotate(90deg); }
+.footer-note[open] > summary { margin-bottom: 10px; }
+@media (prefers-reduced-motion: reduce) {
+  .footer-note > summary::after { transition: none; }
+}
 
 .activity-section { margin-bottom: 12px; }
 .activity-list { max-height: 320px; overflow-y: auto; }
@@ -1151,6 +1180,11 @@ body {
   box-sizing: border-box;
 }
 .pin-input:focus { border-color: var(--accent); }
+/* The 4px tracking is right for the DIGITS and unreadable as a hint —
+   "T r e a s u r e r   P I N" and "T Y P E   R E S E T" read as a rendering
+   fault rather than as placeholder text. The typed value keeps its spacing. */
+.pin-input::placeholder,
+.confirm-type-input::placeholder { letter-spacing: normal; }
 .pin-error { color: #E15353; font-size: 12px; margin: 0 0 12px; text-align: center; }
 
 .name-input {
@@ -1314,12 +1348,25 @@ body {
 }
 /* Above the list, like the warning. Below it, the sticky footer covered it on
    desktop — and it is the only thing that says how much one edit changed. */
-.schedule-count {
-  font-size: 12px;
-  color: var(--text-muted);
-  text-align: right;
+.schedule-countline {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 10px;
   margin: 0 2px 7px;
 }
+.schedule-count { font-size: 12px; color: var(--text-muted); }
+.schedule-reset {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+}
+.schedule-reset:hover { text-decoration: underline; }
 
 @media (max-width: 480px) {
   .schedule-date { width: 138px; }
@@ -1396,7 +1443,11 @@ body {
   margin-top: 2px;
 }
 .acct-pill.ok   { color: var(--success); }
-.acct-pill.wait { color: var(--pending-review); }
+/* Amber, NOT --pending-review. Purple means "a payment awaiting the
+   treasurer" everywhere else in the app, and a second unrelated meaning for a
+   load-bearing hue dilutes the one that matters. "Hasn't signed in yet" is a
+   rollout item to chase, which is what amber says here. */
+.acct-pill.wait { color: var(--accent); }
 .acct-pill.none { color: var(--text-muted); font-weight: 500; }
 .acct-unlink {
   flex-shrink: 0;
@@ -2009,18 +2060,11 @@ body {
 .round-state.completed { background: var(--success-soft); color: var(--success); }
 .round-state.not-started { background: rgba(255,255,255,0.06); color: var(--text-muted); }
 
-.round-active-tag {
-  display: inline-block;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--accent);
-  border: 1px solid var(--accent);
-  padding: 1px 6px;
-  border-radius: 20px;
-  vertical-align: middle;
-}
+/* The current round, marked on the CARD rather than with a second badge
+   beside the lifecycle pill. "Collecting" already implies current (only one
+   round collects), but "Payout Pending" does not — so the marker has to live
+   somewhere, and a left accent edge is the idiom .my-status-* already uses. */
+.round.is-current { border-left: 3px solid var(--accent); }
 
 .prev-round {
   background: var(--bg-card);
@@ -4144,9 +4188,12 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
 
 /* A fund that exists but hasn't started. Without this the screen is 0%
    everywhere with nothing saying why, which reads as a fault. */
+/* Neutral, not the amber attention treatment. "Your fund just started" is a
+   milestone, and the amber card + warning-family framing read as something
+   needing action on a screen where nothing does. The party icon stays. */
 .dayone-card {
-  background: var(--accent-soft);
-  border: 1px solid rgba(245, 166, 35, 0.28);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
   border-radius: 12px;
   padding: 13px 16px;
   margin-bottom: 14px;
@@ -4299,6 +4346,15 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   /* Amber, NOT --pending-review: see the round-lifecycle palette above. The
      full fill is what distinguishes this from a collecting round. */
   .home-round-cell.payout_pending .home-round-fill { background: var(--accent); }
+  /* WHICH round, not just how much. The strip is five identical cells on day
+     one, and nothing in it said "you are here". */
+  .home-round-cell.is-now .home-round-label {
+    color: var(--accent);
+    font-weight: 700;
+  }
+  .home-round-cell.is-now .home-round-bar {
+    box-shadow: 0 0 0 1px var(--accent);
+  }
   .home-round-label { font-size: 11px; color: var(--text-muted); font-family: 'Space Grotesk', sans-serif; }
 
   .home-quick { display: flex; flex-direction: column; gap: 8px; }
@@ -4974,6 +5030,11 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   color: var(--text-muted);
 }
 .activity-unattributed .icon { color: var(--accent); flex-shrink: 0; margin-top: 2px; }
+/* Same sentence, no alarm: the filters are still where the app put them. */
+.activity-unattributed.quiet {
+  border-left-color: var(--border);
+  padding-left: 12px;
+}
 .activity-unattributed b { color: var(--text-primary); font-weight: 600; }
 
 /* Visible to screen readers only — the dropdowns show their current value as
@@ -5697,6 +5758,24 @@ body.auth-gate {
   text-align: center;
   animation: pfFadeUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
+/* Desktop: the composition this screen says it borrows.
+   DesktopOnboardingWelcome.dc.html is a 520px centred column with two large
+   radial glows in OPPOSITE corners — top-left amber, bottom-right teal — and
+   no card chrome. The gate was rendering the 320px mobile column with one
+   top-centre glow on a 1440px canvas, which is why it read as unstyled text on
+   a page rather than as a front door. The app's own onboarding already does
+   520px here (see .ob-body below); this makes the two agree. */
+@media (min-width: 900px) {
+  .signin-card { max-width: 520px; }
+  .signin-title { font-size: 30px; }
+  .signin-card .signin-sub { font-size: 15px; max-width: 440px; margin-inline: auto; }
+  /* NO extra glows here. The artboard's two corner washes already exist
+     app-wide as body::before / body::after (position: fixed, z-index: -1), and
+     adding a second pair inside .signin — which is overflow: hidden — clipped
+     each blurred circle into a hard rectangular seam across the page. Only the
+     column width and type scale belong in this query. */
+}
+
 .signin-emblem {
   width: 104px;
   height: 104px;

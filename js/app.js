@@ -3139,6 +3139,21 @@
     scheduleShift = !!on;
   }
 
+  /** Put every date back to what is on file. With the shift on, one edit
+   *  rewrites up to 29 rows, and Cancel-then-reopen was the only way back —
+   *  which throws away the other edits too. */
+  function resetScheduleDraft() {
+    if (!scheduleModalOpen) return;
+    scheduleValues = {};
+    scheduleLastValid = {};
+    orderedCycles().forEach((c) => {
+      scheduleValues[c.id] = c.due_date;
+      scheduleLastValid[c.id] = c.due_date;
+    });
+    scheduleError = null;
+    render();
+  }
+
   /**
    * Move one cycle, and — with the shift on — everything after it by the same
    * number of days. The delta is measured against the DRAFT value, not the
@@ -3231,6 +3246,15 @@
       // mid-entry is how a date input eats a half-typed year.
       if (el !== document.activeElement && v != null && el.value !== v) el.value = v;
       el.classList.toggle("invalid", !validIso(v));
+      // The dimming was computed once at render, so a cycle shifted OUT of the
+      // past stayed greyed — on the screen whose whole job is moving dates.
+      const row = el.closest(".schedule-row");
+      if (row) {
+        row.classList.toggle(
+          "past",
+          validIso(v) && isoToDate(v) < C.startOfDay(new Date())
+        );
+      }
     });
 
     const moved = orderedCycles().filter(
@@ -3244,6 +3268,8 @@
           : moved + " cycles moved"
         : "No changes yet";
     }
+    const reset = document.getElementById("scheduleReset");
+    if (reset) reset.hidden = !moved;
     const warn = document.getElementById("scheduleSettled");
     if (warn) {
       const settled = scheduleSettledMoves();
@@ -4151,17 +4177,28 @@
       </div>`;
     };
 
+    // "Untouched": type=all, member=all, and the round filter still unset (null
+    // means "use the current round", which is what hides rows on arrival).
+    const filtersAtDefault =
+      activityFilter === "all" &&
+      activityMemberFilter === "all" &&
+      activityRoundFilter === null;
+
     // Title and filter chips are shared; the body below differs per shell.
     const head = `<div class="view-head${isWide ? " view-head-row" : ""}">
       <div class="view-head-text">
       <h2 class="view-title">Activity</h2>
-      <p class="view-sub">${"Every contribution, payout &amp; admin action"} · ${
+      <p class="view-sub">${"Every contribution, payout &amp; admin action"}${
         // Don't print a total the table isn't showing: with the round filter
-        // defaulting to the current round, "8 entries loaded" above 3 rows
-        // reads as a fault.
-        visible.length === log.length
-          ? `${log.length} ${log.length === 1 ? "entry" : "entries"} loaded`
-          : `showing ${visible.length} of ${log.length} loaded`
+        // defaulting to the current round, "8 entries" above 3 rows reads as a
+        // fault. And not "loaded" — that is how a developer describes a fetch,
+        // not how the log describes itself; the suffix is dropped entirely
+        // when nothing is filtered out.
+        log.length === 0
+          ? ""
+          : visible.length === log.length
+          ? ` · ${log.length} ${log.length === 1 ? "entry" : "entries"}`
+          : ` · showing ${visible.length} of ${log.length}`
       }</p>
       </div>
       ${
@@ -4174,12 +4211,15 @@
         // surfaces disagreed and the desktop header was the outlier: it handed
         // a member the export the Menu had just told them they could not have.
         // Gated rather than granted, so this promises nothing new.
-        isWide && unlocked
+        // ...and not over an EMPTY log: filtering and exporting nothing are
+        // controls that cannot do anything, on the one screen whose whole
+        // message is that there is nothing here yet.
+        isWide && unlocked && log.length > 0
           ? `<button type="button" class="head-action" onclick="PowerFund.exportCsv()">Export CSV</button>`
           : ""
       }
     </div>
-    <div class="activity-chips">${Object.entries(filterLabels)
+    ${log.length === 0 ? "" : `<div class="activity-chips">${Object.entries(filterLabels)
       .map(
         ([type, label]) => `
       <button type="button" class="activity-chip ${
@@ -4225,7 +4265,7 @@
             </label>
           </span>`
         : ""
-    }</div>`;
+    }</div>`}`;
 
     const listHtml = `${
       log.length === 0
@@ -4351,7 +4391,14 @@
       // untagged ones — a partial view of financial history must never look
       // whole.
       hiddenTotal > 0
-        ? `<p class="activity-unattributed">${icon("alert", 13)}<span><b>${hiddenTotal} ${
+        ? `<p class="activity-unattributed${
+            // desktop-activity-filters-live-notes has the round filter DEFAULT
+            // to the current round, so this fired on arrival — the first thing
+            // a treasurer saw on the screen was a warning about a state they
+            // had not created. The sentence is good and stays; only the alarm
+            // goes, until they narrow it themselves.
+            filtersAtDefault ? " quiet" : ""
+          }">${filtersAtDefault ? "" : icon("alert", 13)}<span><b>${hiddenTotal} ${
             hiddenTotal === 1 ? "entry is" : "entries are"
           } hidden by the current filters.</b>${
             unattributed > 0
@@ -4535,12 +4582,10 @@
       <h2 class="view-title">Insights</h2>
       <p class="view-sub">How the fund is tracking, from confirmed payments only</p>
     </div>`;
-    // On-time rate, with the change since the previous round. A trend needs two
-    // rounds with dated payments in them; before that it just states the rate.
+    // On-time rate, with the change between the two most recent rounds that
+    // have one. A trend needs two rounds with dated payments in them; before
+    // that it just states the rate. See trendHtml below.
     const curRound = C.currentRound(state.payouts, contributions);
-    const thisRound = C.onTimeRateForRound(contributions, state.cycles, curRound);
-    const prevRound =
-      curRound > 1 ? C.onTimeRateForRound(contributions, state.cycles, curRound - 1) : null;
     const overallOnTime = (() => {
       let on = 0;
       let n = 0;
@@ -4551,14 +4596,29 @@
       }
       return n ? (on / n) * 100 : null;
     })();
+    // THE TWO MOST RECENT ROUNDS THAT ACTUALLY HAVE A RATE, not strictly
+    // (curRound, curRound - 1). A round that has just started has no dated
+    // payments, so its rate is null and the delta vanished for most of every
+    // round's life — which is why neither QA capture showed one.
+    //
+    // It also NAMES BOTH ROUNDS. The tile's value is the LIFETIME rate, so a
+    // bare "↑4pts" beside it reads as "the lifetime figure went up 4 points",
+    // which is not what is being measured.
     let trendHtml = "";
-    if (thisRound.rate !== null && prevRound && prevRound.rate !== null) {
-      const delta = Math.round(thisRound.rate - prevRound.rate);
+    (function () {
+      const rated = [];
+      for (let r = curRound; r >= 1 && rated.length < 2; r--) {
+        const x = C.onTimeRateForRound(contributions, state.cycles, r);
+        if (x.rate !== null) rated.push({ round: r, rate: x.rate });
+      }
+      if (rated.length < 2) return;
+      const [now, before] = rated;
+      const delta = Math.round(now.rate - before.rate);
       trendHtml =
         delta === 0
-          ? `level with Round ${curRound - 1}`
-          : `${delta > 0 ? "↑" : "↓"} ${Math.abs(delta)}pts vs Round ${curRound - 1}`;
-    }
+          ? `R${now.round} level with R${before.round}`
+          : `R${now.round} ${delta > 0 ? "↑" : "↓"}${Math.abs(delta)}pts vs R${before.round}`;
+    })();
 
     // Name who is behind rather than only counting: "1 · Dan · Round 2".
     const missed = C.missedContributions(contributions, state.cycles, members);
@@ -5654,7 +5714,11 @@
           kind: "done",
           word: "All settled",
           detail: `You received ${C.peso(got)} in Round ${myMember.member_order}.`,
-          mark: "party",
+          // "check", not "party" — Menu's "Replay the intro" row already uses
+          // the party glyph, and a terminal state sharing an icon with a
+          // how-to-use-the-app link teaches nothing. The green card beside it
+          // uses check for the same concept.
+          mark: "check",
           label: `All ${C.TOTAL_ROUNDS} rounds complete — thanks, ${escapeHtml(
             myMember.name
           )}!`,
@@ -5692,10 +5756,20 @@
             actionCycle: canAct ? payCycle : null,
           };
         } else if (myCycleStatus === C.STATUS_PENDING) {
+          // HOW LONG the treasurer has had it. DesktopHomeMember.dc.html carries
+          // "Submitted 2 hours ago" under this line, and it is the one thing on
+          // the card the member cannot work out for themselves — without it
+          // there is no way to tell a claim sent an hour ago from one sitting
+          // unreviewed for a week. Read from the row, so it is absent rather
+          // than invented when created_at is missing (rows written before it
+          // was recorded).
+          const pendRow = C.contributionFor(state.contributions, myMember.id, payCycle);
+          const sentAt = pendRow && pendRow.created_at;
           myStatus = {
             kind: "pending",
             word: "Submitted",
             detail: "Awaiting treasurer verification",
+            since: sentAt ? `Submitted ${activityTimeLabel(sentAt)}` : null,
             mark: "clock",
             label: "Submitted — awaiting treasurer verification",
             actionCycle: null,
@@ -7030,13 +7104,22 @@
             scheduleError ? "" : " hidden"
           }>${escapeHtml(scheduleError || "")}</p>
 
-          <p class="schedule-count" id="scheduleCount">${
-            movedCount
-              ? movedCount === 1
-                ? "1 cycle moved"
-                : movedCount + " cycles moved"
-              : "No changes yet"
-          }</p>
+          <p class="schedule-countline">
+            ${/* A SIBLING, not markup inside #scheduleCount:
+                  refreshScheduleValidity() sets that node with textContent on
+                  every keystroke, which would delete a button nested in it. */ ""}
+            <span class="schedule-count" id="scheduleCount">${
+              movedCount
+                ? movedCount === 1
+                  ? "1 cycle moved"
+                  : movedCount + " cycles moved"
+                : "No changes yet"
+            }</span>
+            <button type="button" class="schedule-reset" id="scheduleReset"
+                    onclick="PowerFund.resetScheduleDraft()"${
+                      movedCount ? "" : " hidden"
+                    }>Reset changes</button>
+          </p>
           <div class="schedule-list">${rows}</div>
 
           <div class="modal-actions">
@@ -7963,6 +8046,7 @@
     closeScheduleModal,
     setScheduleShift,
     setScheduleDate,
+    resetScheduleDraft,
     saveSchedule,
   };
 

@@ -168,7 +168,13 @@ window.PFViews.home = function (ctx) {
       // which made the most common state (nothing to do) the tallest thing on
       // the screen.
       const optional = myStatus.kind === "paid";
-      return `<div class="my-status-card my-status-${myStatus.kind}">
+      // DesktopHomeMember.dc.html titles this card "Your status this cycle".
+      // On the phone it sits directly under the header with nothing to be
+      // confused with, and the artboards there carry no heading — so this is
+      // the wide shell only, as with everything else in the right rail.
+      return `${
+        isWide ? '<p class="home-panel-title my-status-head">Your status this cycle</p>' : ""
+      }<div class="my-status-card my-status-${myStatus.kind}">
         <div class="my-status-row">
           ${
             myStatus.mark
@@ -182,6 +188,10 @@ window.PFViews.home = function (ctx) {
             ${
               myStatus.detail
                 ? `<span class="my-status-detail">${escapeHtml(myStatus.detail)}</span>`
+                : ""
+            }${
+              myStatus.since
+                ? `<span class="my-status-since">${escapeHtml(myStatus.since)}</span>`
                 : ""
             }
           </span>
@@ -990,9 +1000,12 @@ window.PFViews.home = function (ctx) {
         const amt = C.roundCollected(state.contributions, r);
         const p = Math.min(100, (amt / C.GOAL_PER_ROUND) * 100);
         const recip = members.find((m) => m.member_order === r);
-        return `<div class="home-round-cell ${st}" title="Round ${r}${
+        const isNow = !allDone && r === curRound;
+        return `<div class="home-round-cell ${st}${isNow ? " is-now" : ""}" title="Round ${r}${
           recip ? " — " + escapeHtml(recip.name) : ""
-        }: ${C.peso(amt)} of ${C.peso(C.GOAL_PER_ROUND)}">
+        }: ${C.peso(amt)} of ${C.peso(C.GOAL_PER_ROUND)}${
+          isNow ? " — collecting now" : ""
+        }">
           <div class="home-round-bar"><div class="home-round-fill" style="height:${p}%"></div></div>
           <span class="home-round-label">R${r}</span>
         </div>`;
@@ -1017,6 +1030,21 @@ window.PFViews.home = function (ctx) {
         "share",
         15
       )}<span>Share fund status</span></button>
+      ${
+        // DesktopHomeMember.dc.html's second quick action is "View payment QR
+        // code". That is NOT built here, deliberately: openQrModal() is the
+        // treasurer's MANAGE screen, the QR a member actually needs is already
+        // in the contribute sheet at the moment they need it, and a read-only
+        // twin of a treasurer screen is more surface than the gap deserves.
+        // A member's own payout destination is the useful second action and is
+        // already built. Recorded as a substitution, not as the artboard's row.
+        !unlocked && payoutOwner
+          ? `<button type="button" class="home-quick-btn" onclick="PowerFund.openPayoutQrModal()">${icon(
+              "qr",
+              15
+            )}<span>My payout details</span></button>`
+          : ""
+      }
     </div>
   </div>`;
 

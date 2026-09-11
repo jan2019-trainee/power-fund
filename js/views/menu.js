@@ -19,7 +19,7 @@ window.PFViews.menu = function (ctx) {
   const {
     members, unlocked, myMember, escapeHtml, icon, memberAvatar, C, hasMasterPin,
     authMode, sessionEmail, identityLocked, signInStatus, isTreasurerAccount,
-    hasTreasurerPin,
+    hasTreasurerPin, isWide,
     payoutOwner, maskAccount
   } = ctx;
 
@@ -325,8 +325,14 @@ window.PFViews.menu = function (ctx) {
     ),
   ]);
 
-  html += `<div class="footer-note">
-    <b>How this works</b>
+  /* COLLAPSED BY DEFAULT ON THE PHONE. This is a wall of reference text sitting
+     directly under a "Replay the intro" row that leads to the same material,
+     and on mobile it was the longest thing on the screen — Menu became a
+     document. A <details> keeps it one tap away without making everyone scroll
+     past it; the desktop grid gives it a column of its own, where it reads as
+     the reference card it is, so it stays open there (CSS). */
+  html += `<details class="footer-note" ${isWide ? "open" : ""}>
+    <summary><b>How this works</b></summary>
     <ul class="how-it-works-list">
       <li><b>The fund:</b> ${members.length} members × ${C.peso(
     C.CONTRIBUTION_AMOUNT
@@ -342,7 +348,7 @@ window.PFViews.menu = function (ctx) {
         C.GOAL_PER_ROUND
       )} — Collecting → Payout Pending → Completed. "Release payout" and "Start next round" are separate steps, so a previous round can stay Payout Pending while a new one collects</li>
     </ul>
-  </div>`;
+  </details>`;
 
   return html;
 };

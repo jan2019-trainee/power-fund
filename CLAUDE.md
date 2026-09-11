@@ -838,12 +838,63 @@ portrait, a phone in landscape) got the thumb-reach tab bar with mouse-sized
 hit areas and desktop-positioned centre modals. No check had ever run in that
 band; `tabletBand` does now, and 768px is captured.
 
-### Still open
+### The P3 pass — closed, with two findings corrected
 
-- **The 16 P3s** — polish. The three with the most payoff for the least work:
-  the amber default-filter warning on desktop Activity fires on an untouched
-  screen, "N entries loaded" is developer language, and the member Menu's
-  always-expanded explainer duplicates "Replay the intro".
+Polish, mostly. Three were not:
+
+- **P3-14 was reported as "the trend delta is missing" and the fixtures blamed.
+  The fixtures were fine.** `trendHtml` required the CURRENT round to have
+  dated payments, and a round that has just started never does — so the delta
+  was invisible for most of every round's life, which is why neither capture
+  showed one. It now compares **the two most recent rounds that actually have a
+  rate**. It also NAMES both ("R3 ↑4pts vs R2"): the tile's value is the
+  LIFETIME rate, so a bare "↑4pts" beside it read as a delta on that figure,
+  which is not what was being measured.
+- **P3-6's colour half is NOT a defect and was left alone.** The report called
+  the gold 100% battery a vocabulary clash. `HomeFundComplete.dc.html` uses
+  `#F5A623` nineteen times and `#4CAF83` once — the artboard's fund-complete
+  screen is amber by design. What WAS real is the icon: the status card used
+  `party`, the same glyph as Menu's "Replay the intro", so a terminal state
+  shared an icon with a how-to-use-the-app link. It is `check` now, matching
+  the green card beside it.
+- **P3-8's "not vertically centred" is wrong** — `.signin` is
+  `min-height: 100vh` with `align-items: center`, and the block measures
+  centred. The real gap was the composition: a 320px mobile column on a 1440px
+  canvas, where `DesktopOnboardingWelcome.dc.html` — which this screen says it
+  borrows — is a **520px** centred column, and the app's own onboarding already
+  does 520px here. **Adding the artboard's two corner glows was a mistake and
+  was reverted**: they already exist app-wide as `body::before` / `body::after`
+  (`position: fixed`), and a second pair inside `.signin` (which is
+  `overflow: hidden`) clipped each blurred circle into a hard rectangular seam
+  across the page. Caught in the screenshot, not the tests.
+
+The rest: the Activity sub-line drops "loaded" (a developer's word for a fetch)
+and the count entirely when nothing is filtered; an empty log offers no filter
+chips and no export of nothing; the hidden-rows note arrives **quiet** and only
+becomes an alert once the viewer narrows the filters themselves — it fired on
+arrival because the round filter defaults to the current round; Rounds carries
+ONE badge per header with the current round marked on the card instead
+(`.round-active-tag` is deleted, not orphaned); the desktop Rounds strip marks
+which round is collecting; `.acct-pill.wait` is amber, not the payment-review
+purple; the Day One card is neutral rather than an attention treatment; the
+`.pin-input` 4px tracking no longer applies to PLACEHOLDERS ("T r e a s u r e r
+P I N" read as a rendering fault); the member Menu's explainer is a `<details>`
+on the phone and stays open in the desktop column; and the schedule modal has
+**Reset changes** plus `past` dimming that refreshes — it was computed once at
+render, so a cycle shifted out of the past stayed greyed on the screen whose
+job is moving dates.
+
+**One substitution worth knowing.** `DesktopHomeMember.dc.html`'s second quick
+action is "View payment QR code". That is NOT built: `openQrModal()` is the
+treasurer's MANAGE screen, the QR a member needs is already in the contribute
+sheet at the moment they need it, and a read-only twin of a treasurer screen is
+more surface than the gap deserves. **My payout details** is there instead —
+member-facing, already built, and gated on a linked account. Recorded as a
+substitution, not as the artboard's row.
+
+The status card also gained the artboard's **"Submitted N ago"**, which is the
+one thing on it a member cannot work out for themselves: without it there is no
+telling a claim sent an hour ago from one sitting unreviewed for a week.
 
 ### The evidence gap the pass exposed
 

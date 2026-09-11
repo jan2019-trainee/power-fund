@@ -3136,6 +3136,113 @@ async function extraTreasurer(browser, errors) {
   await solo.close();
 }
 
+/** The P3 items with behaviour rather than colour: each was invisible to the
+ *  suite, and two turned out to be defects rather than polish. */
+async function polishPass(browser, errors) {
+  // ---- Activity: an empty log offers no controls, and no "loaded" ----------
+  const empty = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  empty.on("pageerror", (e) => errors.push(`p3/empty: ${e}`));
+  await serve(empty, { ...M.TABLE_DATA, activity_log: [] });
+  await empty.goto(BASE, { waitUntil: "domcontentloaded" });
+  await empty.waitForTimeout(1600);
+  await empty.evaluate(() => window.PowerFund.setView("activity"));
+  await empty.waitForTimeout(500);
+  check("p3/an empty log offers no filter chips",
+    (await empty.locator(".activity-chip").count()) === 0);
+  check("p3/nor an export of nothing",
+    (await empty.locator(".head-action", { hasText: "Export CSV" }).count()) === 0);
+  const emptySub = await empty.locator(".view-sub").innerText();
+  check("p3/and does not say 'loaded'", !/loaded/i.test(emptySub), emptySub);
+  await empty.close();
+
+  // ---- Activity: the hidden-rows note is quiet at the DEFAULT filters ------
+  // desktop-activity-filters-live-notes defaults the round filter to the
+  // current round, so this fired on arrival: the first thing a treasurer saw
+  // was a warning about a state they had not created.
+  const act = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  act.on("pageerror", (e) => errors.push(`p3/activity: ${e}`));
+  await serve(act, M.TABLE_DATA);
+  await act.goto(BASE, { waitUntil: "domcontentloaded" });
+  await act.waitForTimeout(1600);
+  await act.evaluate(() => window.PowerFund.setView("activity"));
+  await act.waitForTimeout(500);
+  const note = act.locator(".activity-unattributed");
+  if (await note.count()) {
+    check("p3/the hidden-rows note arrives quiet, not as an alert",
+      (await note.getAttribute("class")).includes("quiet"),
+      await note.getAttribute("class"));
+    check("p3/and carries no alert icon at the default",
+      (await note.locator(".icon").count()) === 0);
+    // Narrow it by hand and it becomes an alert again.
+    await act.evaluate(() => window.PowerFund.setActivityFilter("payout"));
+    await act.waitForTimeout(400);
+    const n2 = act.locator(".activity-unattributed");
+    if (await n2.count()) {
+      check("p3/but alerts once the viewer narrows it themselves",
+        !(await n2.getAttribute("class")).includes("quiet"),
+        await n2.getAttribute("class"));
+    }
+  }
+  await act.close();
+
+  // ---- Rounds: ONE badge, and the current round still identifiable --------
+  const rounds = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  rounds.on("pageerror", (e) => errors.push(`p3/rounds: ${e}`));
+  await serve(rounds, M.TABLE_DATA);
+  await rounds.goto(BASE, { waitUntil: "domcontentloaded" });
+  await rounds.waitForTimeout(1600);
+  await rounds.locator(".tab-item", { hasText: "Rounds" }).click();
+  await rounds.waitForTimeout(500);
+  check("p3/the second 'active' badge is gone",
+    (await rounds.locator(".round-active-tag").count()) === 0);
+  check("p3/each round header carries exactly one state badge",
+    (await rounds.locator(".round-header .round-state").count()) ===
+      (await rounds.locator(".round-header").count()),
+    `${await rounds.locator(".round-header .round-state").count()} badges / ${await rounds.locator(".round-header").count()} headers`);
+  check("p3/and the current round is still marked on the card",
+    (await rounds.locator(".round.is-current").count()) === 1);
+  await rounds.close();
+
+  // ---- The schedule draft can be put back -------------------------------
+  const sch = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  sch.on("pageerror", (e) => errors.push(`p3/schedule: ${e}`));
+  const members = rosterWithEmails();
+  members[0].auth_user_id = FAKE_USER_ID;
+  await serve(sch, { ...M.TABLE_DATA, members });
+  await withAuthMode(sch, "optional", { signedIn: true, email: "regine@example.com" });
+  await sch.goto(BASE, { waitUntil: "domcontentloaded" });
+  await sch.waitForTimeout(2400);
+  await sch.locator(".unlock-btn").click();
+  await sch.waitForTimeout(500);
+  await sch.evaluate(() => window.PowerFund.openScheduleModal());
+  await sch.waitForTimeout(500);
+  const dates = sch.locator(".schedule-date");
+  const before = await dates.evaluateAll((els) => els.map((e) => e.value));
+  check("p3/Reset changes is hidden while nothing has moved",
+    (await sch.locator("#scheduleReset").isVisible()) === false);
+  const d = new Date(before[2] + "T00:00:00");
+  d.setDate(d.getDate() + 14);
+  const pad = (n) => String(n).padStart(2, "0");
+  await dates.nth(2).fill(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
+  await sch.waitForTimeout(400);
+  check("p3/and appears once something has",
+    (await sch.locator("#scheduleReset").isVisible()) === true);
+  // The count is patched with textContent on every keystroke — a button nested
+  // inside it would have been deleted by the first edit.
+  check("p3/the count still reads correctly beside it",
+    /28 cycles moved/.test(await sch.locator("#scheduleCount").innerText()),
+    await sch.locator("#scheduleCount").innerText());
+  await sch.locator("#scheduleReset").click();
+  await sch.waitForTimeout(400);
+  const after = await dates.evaluateAll((els) => els.map((e) => e.value));
+  check("p3/Reset changes puts every date back",
+    JSON.stringify(after) === JSON.stringify(before),
+    `${after[2]} vs ${before[2]}`);
+  check("p3/and the button hides itself again",
+    (await sch.locator("#scheduleReset").isVisible()) === false);
+  await sch.close();
+}
+
 /** The terminal screen must read the same way for everyone. S.complete used to
  *  be pulled ahead of the personal card for a treasurer by a rule about the
  *  attention QUEUE outranking it — but when the fund is complete there is no
@@ -5029,6 +5136,7 @@ async function bootFailure(browser) {
   await moneyGate(browser, errors);
   await tabletBand(browser, errors);
   await fundCompleteOrder(browser, errors);
+  await polishPass(browser, errors);
   await signInPrompt(browser, errors);
   await onboarding(browser, errors);
   console.log("\nBackup round-trip");

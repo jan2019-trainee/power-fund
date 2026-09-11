@@ -165,14 +165,20 @@ window.PFViews.rounds = function (ctx) {
                     : overdue
                     ? "Overdue — tap to contribute"
                     : "Tap to contribute";
-                  // Treasurer mode makes every chip clickable, including
-                  // paid/pending ones that would otherwise look like plain
-                  // status badges — a dashed border marks those as also
-                  // being buttons (tap to revert / review), not just info.
-                  // Home marks a rejected chip as tappable for a treasurer
-                  // (home.js), so this must too — the same chip carried the
-                  // affordance on one screen and not the other.
-                  const treasurerTap = unlocked && status !== 0;
+                  // THE AFFORDANCE GOES ON WHAT THIS VIEWER CAN ACT ON, which
+                  // is `clickable` — nothing else. It used to be
+                  // `unlocked && status !== 0`, which marked the chips that
+                  // were already settled and withheld the mark from the
+                  // unpaid ones, on both sides of the gate:
+                  //
+                  //   * a member's OWN payable chip carried only
+                  //     `cursor: pointer` — mouse-only, and this is a phone
+                  //     app, so the one action they came for was invisible
+                  //     while the four chips they are forbidden to tap looked
+                  //     identical to it;
+                  //   * a treasurer's unpaid chips (tap to record cash) had no
+                  //     mark either, while paid and pending ones did.
+                  const actionable = clickable;
                   // A real <button>, not a <span onclick>. Every per-cycle
                   // money action on this screen — confirm, revert, record,
                   // resubmit — is driven from these chips, and as spans they
@@ -182,7 +188,7 @@ window.PFViews.rounds = function (ctx) {
                   // buttons; this makes the two agree.
                   return `<button type="button" class="member-chip ${cls} ${
                     clickable ? "editable" : ""
-                  } ${treasurerTap ? "treasurer-tap" : ""}" ${
+                  } ${actionable ? "actionable" : ""}" ${
                     clickable ? "" : "disabled"
                   } onclick="PowerFund.cellClicked('${inlineArg(
                     m.id
@@ -325,7 +331,14 @@ window.PFViews.rounds = function (ctx) {
               recipient ? escapeHtml(recipient.name) : "—"
             } · ${C.peso(roundCollected)} / ${C.peso(C.GOAL_PER_ROUND)} raised</p>
           </div>
-          <button type="button" class="head-action" onclick="PowerFund.exportRoundCsv(${r})">Export round CSV</button>
+          ${
+            // Treasurer mode only, like Activity's Export CSV — the member
+            // Menu says exports are treasurer-only and the mobile shell gives
+            // a member none, so a desktop member getting one was the outlier.
+            unlocked
+              ? `<button type="button" class="head-action" onclick="PowerFund.exportRoundCsv(${r})">Export round CSV</button>`
+              : ""
+          }
         </div>`;
         detailHtml += bodyHtml;
       }

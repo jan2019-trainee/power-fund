@@ -1913,7 +1913,11 @@
         `This permanently clears <b>every contribution</b>, the <b>activity log</b>, ` +
         `and <b>all payout status</b> (including released payouts). Uploaded payment ` +
         `screenshots are removed too.<br><br>` +
-        `Members, their names, the payout order, cycle dates and the treasurer PIN ` +
+        `Members, their names, the payout order${
+          // Don't promise to keep a PIN the fund does not have — the same
+          // dialog's amber note says there is none, 120px away.
+          hasTreasurerPin() ? ", cycle dates and the treasurer PIN" : " and cycle dates"
+        } ` +
         `are kept.<br><br>This cannot be undone.`,
       confirmLabel: "Reset everything",
       requireType: "RESET",
@@ -3968,11 +3972,42 @@
   const NAV_DESKTOP = ["home", "rounds", "members", "activity", "insights"];
   const navItems = (ids) =>
     ids.map((id) => TAB_VIEWS.find((t) => t.id === id)).filter(Boolean);
+  /** The desktop Members pane opened EMPTY — ~750x780px of "Pick a member to
+   *  see their cycle history" on arrival, where the artboard ships with a
+   *  member selected and populated, and where this screen's own sibling
+   *  (Rounds) already auto-opens.
+   *
+   *  DESKTOP ONLY: on the phone `selectedMemberId` drives the accordion, so
+   *  pre-selecting would open somebody's row unasked.
+   *
+   *  Called on ENTERING the view, not on every render with nothing selected —
+   *  clicking the open row again deselects it on desktop, and the latter would
+   *  re-select it instantly and make that action look broken. */
+  function autoSelectMember() {
+    if (!isWide || selectedMemberId != null || !state || !state.members) return;
+    const id = accountMemberId || myMemberId;
+    const mine = id
+      ? state.members.find((m) => String(m.id) === String(id))
+      : null;
+    // (rounds, contributions) — that is the signature, and reversing it made
+    // this silently pick the wrong recipient rather than throw.
+    const round = C.currentRound(state.payouts, state.contributions);
+    const recipient = state.members.find(
+      (m) => Number(m.member_order) === Number(round)
+    );
+    const pick = mine || recipient || sortedMembers()[0];
+    if (pick) selectedMemberId = pick.id;
+  }
+
   function setView(view) {
     if (currentView === view) return;
     // Leaving Members drops the drill-down, so coming back lands on the
     // roster rather than whoever was open several taps ago.
     if (currentView === "members") selectedMemberId = null;
+    if (view === "members") {
+      selectedMemberId = null;
+      autoSelectMember();
+    }
     undoPaidTarget = null;
     markPaidTarget = null;
     currentView = view;
@@ -4127,7 +4162,14 @@
       ${
         // The design puts Export CSV in the desktop header; the phone shell
         // keeps it in Menu, where there is room for it.
-        isWide
+        //
+        // TREASURER MODE ONLY — because the member Menu already says "Payment
+        // tools, exports and fund settings are only available in treasurer
+        // mode", and the mobile shell gives a member no export at all. Three
+        // surfaces disagreed and the desktop header was the outlier: it handed
+        // a member the export the Menu had just told them they could not have.
+        // Gated rather than granted, so this promises nothing new.
+        isWide && unlocked
           ? `<button type="button" class="head-action" onclick="PowerFund.exportCsv()">Export CSV</button>`
           : ""
       }
@@ -5714,6 +5756,13 @@
 
     if (!hasAutoOpened) {
       openRound = curRound;
+      // The desktop Members pane opened EMPTY — ~750x780px of "Pick a member
+      // to see their cycle history" on arrival, where the artboard ships with
+      // a member selected and its detail populated, and where this screen's
+      // own sibling (Rounds, one line above) already auto-opens. Preference
+      // order: your own row if the app knows who you are, otherwise the round
+      // currently collecting's recipient, otherwise payout position 1.
+      if (currentView === "members") autoSelectMember();
       hasAutoOpened = true;
     }
 
@@ -6934,15 +6983,12 @@
             </span>
           </label>
 
-          <div class="schedule-list">${rows}</div>
-          <p class="schedule-count" id="scheduleCount">${
-            movedCount
-              ? movedCount === 1
-                ? "1 cycle moved"
-                : movedCount + " cycles moved"
-              : "No changes yet"
-          }</p>
-
+          ${/* ABOVE the list, not below it. With the list at 50vh both of
+                these sat under it, so the settled-cycle warning and the live
+                validation error — the two things this screen exists to say —
+                were off the bottom of the viewport at the exact moment they
+                appeared. The error carries role="alert", so it was being
+                announced to a screen reader while invisible on screen. */ ""}
           <p class="schedule-settled" id="scheduleSettled" role="status"${
             settled.length ? "" : " hidden"
           }>${
@@ -6959,6 +7005,15 @@
           <p class="pin-error" id="scheduleError" role="alert"${
             scheduleError ? "" : " hidden"
           }>${escapeHtml(scheduleError || "")}</p>
+
+          <p class="schedule-count" id="scheduleCount">${
+            movedCount
+              ? movedCount === 1
+                ? "1 cycle moved"
+                : movedCount + " cycles moved"
+              : "No changes yet"
+          }</p>
+          <div class="schedule-list">${rows}</div>
 
           <div class="modal-actions">
             <button class="modal-btn-primary" id="scheduleSave" onclick="PowerFund.saveSchedule()" ${

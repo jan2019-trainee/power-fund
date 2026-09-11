@@ -685,19 +685,24 @@ body {
   border-style: dashed;
 }
 
-/* Treasurer mode makes every paid/pending chip clickable (revert / review),
-   not just unpaid ones — a dashed border marks those as also being buttons,
-   so a green/orange pill doesn't read as purely informational. */
-.member-chip.treasurer-tap,
-.mini-chip.treasurer-tap {
-  border-style: dashed;
+/* "This chip is a button FOR YOU." Applied to whatever this viewer can
+   actually act on — a member's own owed cycle, every cycle for the treasurer.
+
+   NOT border-style. Dashed already means "sent and refused" on .rejected, so
+   overloading it made a rejected chip and a merely-tappable one look the same,
+   and the old hover flipped dashed to SOLID to signal hover — which turned a
+   rejected chip momentarily into an overdue one, collapsing the exact
+   distinction the dash carries. An inset ring in the chip's own colour reads
+   as a raised control at every status, works on touch (where :hover never
+   fires), and leaves the border alone. */
+.member-chip.actionable {
+  box-shadow: inset 0 0 0 1px currentColor;
 }
-.member-chip.treasurer-tap:hover,
-.member-chip.treasurer-tap:focus-visible,
-.mini-chip.treasurer-tap:hover,
-.mini-chip.treasurer-tap:focus-visible {
-  border-style: solid;
+.member-chip.actionable:hover,
+.member-chip.actionable:focus-visible {
+  filter: brightness(1.18);
 }
+.mini-chip.actionable { box-shadow: inset 0 0 0 1px currentColor; }
 .today-tag {
   display: inline-block;
   background: var(--accent);
@@ -1287,17 +1292,51 @@ body {
   background: var(--accent-soft);
   border-radius: 9px;
   padding: 9px 11px;
-  margin: 12px 0 0;
+  margin: 0 0 10px;
 }
+.schedule-modal #scheduleError { margin: 0 0 10px; }
+/* Save stays reachable however long the list is. The modal is the scroller
+   (max-height: 90vh), so sticking the actions to its bottom edge means the
+   footer never depends on where the inner list happens to be scrolled to. */
+.schedule-modal .modal-actions {
+  position: sticky;
+  bottom: -24px;
+  background: var(--bg-card);
+  padding-bottom: 4px;
+  margin-bottom: 0;
+}
+/* Above the list, like the warning. Below it, the sticky footer covered it on
+   desktop — and it is the only thing that says how much one edit changed. */
 .schedule-count {
   font-size: 12px;
   color: var(--text-muted);
-  text-align: center;
-  margin: 9px 0 0;
+  text-align: right;
+  margin: 0 2px 7px;
 }
 
 @media (max-width: 480px) {
   .schedule-date { width: 138px; }
+  /* The warning and the validation error are the whole point of this screen,
+     and with the list at 50vh they were pushed off the bottom together with
+     Save — on the one phone size most likely to be used. */
+  .schedule-list { max-height: 38vh; }
+}
+
+/* Desktop: 30 rows in a 360px column on a 1440px screen was the narrowest
+   presentation of the app's longest list on its widest viewport. desktop-notes
+   asks these modals to use the room. Two columns fit a whole round-pair
+   without scrolling. */
+@media (min-width: 900px) {
+  .schedule-modal { max-width: 640px; }
+  .schedule-list {
+    max-height: 58vh;
+    column-count: 2;
+    column-gap: 26px;
+  }
+  /* A round heading must not be orphaned at the foot of a column. */
+  .schedule-round { break-after: avoid; break-inside: avoid; }
+  .schedule-row { break-inside: avoid; }
+  .schedule-date { width: 150px; }
 }
 
 /* --- Member sign-in (treasurer) ------------------------------------------
@@ -4316,8 +4355,13 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   border-radius: 20px;
   white-space: nowrap;
 }
-.member-tag.paid-out { background: var(--accent-soft); color: var(--accent); }
-.member-tag.this-round { background: var(--success-soft); color: var(--success); }
+/* Amber = money moving / needs attention, green = settled — the vocabulary
+   .round-state uses and the rest of the app teaches. These were the other way
+   round: the member already paid out (nothing to do) was amber and the one
+   currently receiving (the live event) was green, which reads backwards on a
+   roster people scan. */
+.member-tag.paid-out { background: var(--success-soft); color: var(--success); }
+.member-tag.this-round { background: var(--accent-soft); color: var(--accent); }
 .member-tag.overdue, .member-tag.rejected { background: var(--danger-soft); color: var(--danger); }
 .member-tag.pending { background: var(--pending-review-soft); color: var(--pending-review); }
 .member-tag.upcoming { background: rgba(255, 255, 255, 0.06); color: var(--text-muted); }
@@ -5030,7 +5074,20 @@ body.modal-open .lightbox-overlay { touch-action: auto; }
   padding: 0;
   cursor: zoom-in;
 }
-.qr-card-img img { display: block; width: 100%; height: auto; border-radius: 6px; }
+/* BOUNDED IN BOTH AXES. `width: 100%; height: auto` alone let the sheet's
+   height be decided by whatever aspect ratio the treasurer uploaded: a full
+   phone screenshot of a GCash QR (390x844, the commonest way people capture
+   one) renders 476px tall at 220px wide, pushing the amount, the stepper, the
+   proof upload and "I've sent this" below the fold of a 92vh sheet. The
+   tap-to-enlarge lightbox is how you read a dense code, so the inline
+   rendering does not need to be tall. */
+.qr-card-img img {
+  display: block;
+  width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+  border-radius: 6px;
+}
 .qr-card-expand {
   position: absolute;
   right: -6px;

@@ -742,16 +742,39 @@ async function membersAndMenu(browser, errors) {
   await wide.waitForTimeout(350);
 
   check("members/desktop: split layout", (await wide.locator(".members-split").count()) === 1);
+  // POPULATED ON ARRIVAL. It used to open empty — ~750x780px of "Pick a
+  // member" where the artboard ships with a member selected, and where this
+  // screen's own sibling (Rounds) already auto-opens. With nobody identified
+  // the pick is the collecting round's recipient.
   check(
-    "members/desktop: empty pane explains itself",
-    (await wide.locator(".members-detail-empty").count()) === 1
+    "members/desktop: the pane is populated on arrival",
+    (await wide.locator(".members-detail .detail-name").count()) === 1 &&
+      (await wide.locator(".members-detail-empty").count()) === 0,
+    await wide.locator(".members-detail").innerText().catch(() => "")
   );
-  await wide.locator(".member-row").nth(1).click();
+  check(
+    "members/desktop: and it picks the current round's recipient",
+    /Sarah/.test(await wide.locator(".members-detail .detail-name").innerText()),
+    await wide.locator(".members-detail .detail-name").innerText()
+  );
+  // A DIFFERENT row, deliberately: nth(1) is the auto-selected one, and
+  // clicking the open row toggles it shut — which is how the auto-select
+  // first broke this check.
+  await wide.locator(".member-row").nth(3).click();
   await wide.waitForTimeout(300);
   check(
     "members/desktop: picking fills the pane",
     (await wide.locator(".members-detail .detail-name").count()) === 1 &&
       (await wide.locator(".members-detail .round-line").count()) > 0
+  );
+  // The empty state is still reachable, and must still explain itself — the
+  // auto-select must not be re-applied on the render after a deselect, or
+  // clicking the open row would look like a dead button.
+  await wide.locator(".member-row").nth(3).click();
+  await wide.waitForTimeout(300);
+  check(
+    "members/desktop: deselecting empties the pane and it explains itself",
+    (await wide.locator(".members-detail-empty").count()) === 1
   );
   check(
     "members/desktop: history not duplicated inline",
@@ -4662,11 +4685,14 @@ async function desktopHeaderActions(browser, errors) {
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(1500);
 
+  // Export is TREASURER-ONLY, both directions — the member Menu says exports
+  // are only available in treasurer mode and the mobile shell gives a member
+  // none, so a desktop member getting one made three surfaces disagree.
   await page.locator(".tab-bar .tab-item", { hasText: "Activity" }).click();
   await page.waitForTimeout(300);
   check(
-    "head/Activity carries Export CSV",
-    (await page.locator(".view-head .head-action", { hasText: "Export CSV" }).count()) === 1
+    "head/Activity hides Export CSV while locked",
+    (await page.locator(".view-head .head-action", { hasText: "Export CSV" }).count()) === 0
   );
 
   await page.locator(".tab-bar .tab-item", { hasText: "Members" }).click();
@@ -4676,6 +4702,12 @@ async function desktopHeaderActions(browser, errors) {
     (await page.locator(".view-head .head-action").count()) === 0
   );
   await unlockTreasurer(page);
+  await page.locator(".tab-bar .tab-item", { hasText: "Activity" }).click();
+  await page.waitForTimeout(300);
+  check(
+    "head/Activity carries Export CSV for the treasurer",
+    (await page.locator(".view-head .head-action", { hasText: "Export CSV" }).count()) === 1
+  );
   await page.locator(".tab-bar .tab-item", { hasText: "Members" }).click();
   await page.waitForTimeout(300);
   check(

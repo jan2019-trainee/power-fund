@@ -599,14 +599,22 @@ finally gave `members.avatar_url` (reserved back in 006) somewhere to point ·
 claim RPC and the members guard trigger. **Changes no table policy, so it
 cannot lock anyone out.** Ships with `010_rollback.sql`.
 
-**`011` is written and validated but NOT APPLIED.** Three files:
+**`011` IS APPLIED** (all four preflight rows `ok`, with `AUTH_MODE =
+"required"` already deployed). Three files:
 `011_preflight.sql` (read-only readiness report, run it first),
 `011_rls_lockdown.sql` (the policies), `011_rollback.sql`. The lockdown calls
 the readiness check and **refuses to run** while any member lacks an email, a
 treasurer is not flagged, or anybody has not signed in once — its policies key
 off `members.auth_user_id`, so an unlinked member is denied everything.
 Overridable with `select set_config('pf.allow_unready','yes',false);` but
-don't.
+don't — it caught a real problem on this fund's own rollout. The preflight
+reported **two treasurers**, because "exactly one" is what it demands; the
+owner cleared the second flag rather than overriding, and that is the right
+move. See "Two treasurers" below.
+
+**RLS is now enforcing.** The notes further down that say "until 011 is
+applied" describe the world before this, and are kept because they explain why
+each guard exists — not because the guard is still the only thing holding.
 
 **011 needs `AUTH_MODE = "required"`, but NOT the other way round.** The
 coupling runs one direction only, and an earlier version of this note had it
@@ -627,6 +635,41 @@ Every migration from 010 on is wrapped in `begin; … commit;`. Not decoration:
 without it a `raise` in 011's preflight aborted one statement and psql
 cheerfully ran the rest, dropping `open_all` and locking the fund out — the
 exact outcome the check exists to prevent.
+
+## Two treasurers, and the word "admin"
+
+Both came out of the same rollout, and both were real gaps rather than
+confusion on the owner's part.
+
+**There is ONE role flag: `members.is_treasurer`.** No `is_admin`, no
+hierarchy, no deputy. The code used to put `isAdmin` on ctx for it, which
+invented a distinction the app does not have — the owner reasonably asked
+where "admin" fell relative to "treasurer", and the honest answer was "they
+are the same seat". Renamed to `isTreasurerAccount` throughout. The word
+"admin" survives only as an **activity-log category** (admin actions vs
+payments vs payouts), which is a different and legitimate meaning.
+
+**The app could CREATE a two-treasurer state and not fix one.** Transfer
+treasurer role grants first and resigns second — deliberately, so a failure
+between the two network calls leaves two treasurers rather than none. But
+nothing could then clear the extra flag: Transfer moves the role *away from
+you*, and no surface touched anyone else's. So the recoverable half-state was
+recoverable only in SQL, which is what that screen exists to avoid.
+
+`removeTreasurer()` closes it, surfaced in the Transfer screen itself because
+that is the screen about the role:
+
+- **It refuses to remove the last one.** Zero treasurers is the unrecoverable
+  direction — nobody can confirm a payment, and nobody can set the flag back,
+  because setting it requires already being the treasurer. Checked again at
+  write time, not just when the button was drawn: the roster reloads every 30
+  seconds and the other treasurer may have resigned meanwhile.
+- **Your own flag is not removable here.** Stepping down is Transfer treasurer
+  role, which hands the role on in the same action rather than leaving the fund
+  one mistake from having none.
+- **It writes `is_treasurer: false` and nothing else** — a test asserts the
+  payload carries exactly that one key — and reports what is actually true
+  afterwards ("N treasurers remain") rather than "done".
 
 ## Member accounts (in progress)
 

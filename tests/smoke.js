@@ -2898,6 +2898,111 @@ async function unlockVisibility(browser, errors) {
   await boot.close();
 }
 
+/** More than one treasurer — the state a half-completed transfer leaves, which
+ *  the app could create and not fix. 011's preflight refuses to lock a fund
+ *  down while it holds, so the only route back was SQL. */
+async function extraTreasurer(browser, errors) {
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`extra-treasurer: ${e}`));
+  const members = rosterWithEmails();
+  members[0].auth_user_id = FAKE_USER_ID; // Regine, flagged and signed in
+  members[4].is_treasurer = true;         // Verdz, also flagged
+  members[4].auth_user_id = "44444444-4444-4444-4444-444444444444";
+  const data = {
+    ...M.TABLE_DATA,
+    members,
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234" },
+  };
+  await serve(page, data);
+  const writes = [];
+  await page.route("**/rest/v1/members**", async (route) => {
+    const req = route.request();
+    if (req.method() === "GET") {
+      return route.fulfill({
+        status: 200, contentType: "application/json",
+        body: JSON.stringify(data.members),
+      });
+    }
+    let body = {};
+    try { body = JSON.parse(req.postData() || "{}"); } catch (e) {}
+    const target = data.members.find((m) => req.url().includes(m.id));
+    writes.push({ name: target && target.name, body });
+    Object.assign(target || {}, body);
+    return route.fulfill({
+      status: 200, contentType: "application/json",
+      body: JSON.stringify([target || {}]),
+    });
+  });
+  await withAuthMode(page, "optional", { signedIn: true, email: "regine@example.com" });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
+  await page.locator(".unlock-btn").click();
+  await page.waitForTimeout(500);
+  await page.locator(".tab-item", { hasText: "Menu" }).click();
+  await page.waitForTimeout(400);
+  await page.locator(".menu-row", { hasText: "Transfer treasurer role" }).first().click();
+  await page.waitForTimeout(450);
+
+  check(
+    "extra-treasurer/the second flagged treasurer is surfaced",
+    (await page.locator(".transfer-extra").count()) === 1 &&
+      /Verdz/.test(await page.locator(".transfer-extra").innerText())
+  );
+  check(
+    "extra-treasurer/and it says 011 will refuse while it holds",
+    /011/.test(await page.locator(".transfer-extra-note").innerText())
+  );
+  // You are not listed as your own extra — stepping down is Transfer, which
+  // hands the role on rather than risking zero.
+  check(
+    "extra-treasurer/you are not offered as removable",
+    !/Regine/.test(await page.locator(".transfer-extra").innerText())
+  );
+
+  await page.locator(".transfer-extra-remove").first().click();
+  await page.waitForTimeout(450);
+  check(
+    "extra-treasurer/removal confirms, and says what they lose",
+    /release payouts/i.test(await page.locator(".modal[role=dialog]").last().innerText())
+  );
+  await page.locator('.modal input[placeholder="Treasurer PIN"]').fill("1234");
+  await page.waitForTimeout(200);
+  await page.locator(".confirm-yes").click();
+  await page.waitForTimeout(1400);
+  const w = writes.find((x) => x.body && "is_treasurer" in x.body);
+  check(
+    "extra-treasurer/it clears ONLY that member's flag",
+    !!w && w.name === "Verdz" && w.body.is_treasurer === false &&
+      Object.keys(w.body).length === 1,
+    JSON.stringify(w || null)
+  );
+  await page.close();
+
+  // THE GUARD THAT MATTERS: the last treasurer is not removable. Zero is the
+  // unrecoverable direction — nobody could set the flag back, because setting
+  // it requires already being the treasurer.
+  const solo = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  solo.on("pageerror", (e) => errors.push(`extra-treasurer/solo: ${e}`));
+  const one = rosterWithEmails();
+  one[0].auth_user_id = FAKE_USER_ID;
+  await serve(solo, { ...M.TABLE_DATA, members: one });
+  await withAuthMode(solo, "optional", { signedIn: true, email: "regine@example.com" });
+  await solo.goto(BASE, { waitUntil: "domcontentloaded" });
+  await solo.waitForTimeout(2500);
+  check(
+    "extra-treasurer/a sole treasurer sees no warning at all",
+    (await solo.locator(".transfer-extra").count()) === 0
+  );
+  // Exported handler, so the absent button is not the gate.
+  await solo.evaluate((id) => window.PowerFund.removeTreasurer(id), one[0].id);
+  await solo.waitForTimeout(500);
+  check(
+    "extra-treasurer/and the handler refuses to remove the last one",
+    /only treasurer/i.test(await solo.locator(".save-error-banner").innerText())
+  );
+  await solo.close();
+}
+
 /** Transfer treasurer role — moving `members.is_treasurer`, the flag Postgres
  *  checks. The PIN cannot express this, which is the whole point. */
 async function transferRole(browser, errors) {
@@ -4175,6 +4280,7 @@ async function bootFailure(browser) {
   await payAttribution(browser, errors);
   await myPayoutQr(browser, errors);
   await unlockVisibility(browser, errors);
+  await extraTreasurer(browser, errors);
   await transferRole(browser, errors);
   await signInPrompt(browser, errors);
   await onboarding(browser, errors);

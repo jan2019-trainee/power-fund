@@ -273,7 +273,7 @@ function getPayoutReleased(rounds, r) {
  * my-payout-qr-notes). Enforced in Postgres too — see tests/sql/run.sh.
  */
 function payoutDest(m, ctx) {
-  const { escapeHtml, icon, payoutOwner, maskAccount, isAdmin, inlineArgSafe } = ctx;
+  const { escapeHtml, icon, payoutOwner, maskAccount, isTreasurerAccount, inlineArgSafe } = ctx;
   // A LINKED account, never the who-am-I preference: that is unverified and
   // per-device, so trusting it would let anyone with the site URL change where
   // somebody's 30,000 is sent.
@@ -282,7 +282,7 @@ function payoutDest(m, ctx) {
   // member with no account has no way to set their own destination and nobody
   // else does either, which is worse than the treasurer-managed world this
   // replaces. It closes by itself as people sign in.
-  const coverFor = !isMe && isAdmin && !m.auth_user_id;
+  const coverFor = !isMe && isTreasurerAccount && !m.auth_user_id;
   const has =
     m.payout_qr_url || m.payout_bank || m.payout_account_name || m.payout_account_number;
 

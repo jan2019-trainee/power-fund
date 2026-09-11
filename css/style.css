@@ -1249,6 +1249,64 @@ body {
 .transfer-role-modal .modal-sub { text-align: center; }
 .transfer-role-modal .modal-sub { margin-bottom: 12px; }
 
+/* More than one treasurer flagged — a state the app can reach (a transfer
+   whose second write did not land) and, until this, could not leave. Red
+   rather than amber: it is not a step to take later, it is two people holding
+   the same money permission. */
+.transfer-extra {
+  background: var(--danger-soft);
+  border: 1px solid rgba(225, 83, 83, 0.35);
+  border-radius: 12px;
+  padding: 11px 12px;
+  margin: 0 0 12px;
+}
+.transfer-extra-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 5px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.transfer-extra-title svg { color: var(--danger); flex-shrink: 0; }
+.transfer-extra-note {
+  margin: 0 0 9px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.transfer-extra-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 0;
+}
+.transfer-extra-row + .transfer-extra-row { border-top: 1px solid var(--border); }
+.transfer-extra-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.transfer-extra-remove {
+  flex-shrink: 0;
+  background: none;
+  border: 1px solid rgba(225, 83, 83, 0.45);
+  border-radius: 8px;
+  color: var(--danger);
+  font-family: 'Inter', sans-serif;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 5px 11px;
+  cursor: pointer;
+}
+.transfer-extra-remove:hover:not(:disabled) { background: rgba(225, 83, 83, 0.14); }
+.transfer-extra-remove:disabled { opacity: 0.5; cursor: default; }
+
 .transfer-current {
   display: flex;
   align-items: center;

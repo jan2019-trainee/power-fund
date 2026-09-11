@@ -564,6 +564,25 @@ MEASURES BOXES for this (`ctaGeometry`).
   resets `height: auto`. A test asserts the sidebar is still full height —
   that regression was introduced and caught inside one edit.
 
+## Member names: "Board Members", capped at 10 characters
+
+- The roster heading on Home, the Members screen's own title, and the desktop
+  sidebar's nav label all read **"Board Members"**. The mobile tab bar has no
+  Members item at all (it is a Home drill-down), so that label only ever
+  appears in the 232px sidebar, where it fits at the same row height as the
+  others — measured, not assumed.
+- **`NAME_MAX = 10`** is enforced in BOTH validators (`profileNameProblem()`
+  and `editNamesProblem()`) and as `maxlength` on both inputs. The attribute is
+  the courtesy that stops the keystroke; the validators are the rule, because
+  `maxlength` does not survive a paste into a modified field or a direct call
+  to the exported setter.
+- Counted in UTF-16 units to match what `maxlength` itself counts, so the two
+  can never disagree about whether a given string fits.
+- The treasurer's modal **names the offending value** ("\"Wednesdayyy\" is too
+  long") rather than saying one of five is — and flags that field, since a name
+  already on file from before the cap arrives over-length and Save would
+  otherwise refuse with nothing to point at.
+
 ## Migrations
 
 Run in the Supabase SQL editor, in order. `006` also needs a one-off

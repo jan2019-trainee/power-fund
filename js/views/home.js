@@ -625,7 +625,7 @@ window.PFViews.home = function (ctx) {
   // a treasurer wants while looking at the round.
   html += `<div class="roster-strip-wrap">
     <div class="roster-strip-head">
-      <span class="roster-strip-title">Members</span>
+      <span class="roster-strip-title">Board Members</span>
       <button type="button" class="roster-strip-all" onclick="PowerFund.setView('members')">See all ${icon(
         "chevron",
         13

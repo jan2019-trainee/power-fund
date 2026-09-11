@@ -917,15 +917,26 @@
     render();
   }
 
+  /** The longest a member's name may be. Enforced in BOTH validators and as
+   *  `maxlength` on both inputs — the attribute is the courtesy that stops the
+   *  keystroke, the validators are the rule, since `maxlength` is trivially
+   *  bypassed by pasting into a devtools-modified field or by calling the
+   *  exported setter directly.
+   *
+   *  Counted in UTF-16 units to match what `maxlength` itself counts, so the
+   *  two can never disagree about whether a given string fits. */
+  const NAME_MAX = 10;
+
   /** The same rule the treasurer's Edit-names modal enforces, scoped to one
-   *  member: non-empty, and unique across everybody else. One rule, two
-   *  screens — a name that Save accepts here must not be one the treasurer's
-   *  screen would reject. */
+   *  member: non-empty, within NAME_MAX, and unique across everybody else. One
+   *  rule, two screens — a name that Save accepts here must not be one the
+   *  treasurer's screen would reject. */
   function profileNameProblem() {
     const me = editableMember();
     if (!me) return "Sign in first.";
     const v = String(profileNameValue || "").trim();
     if (!v) return "Name can't be empty.";
+    if (v.length > NAME_MAX) return `Name must be ${NAME_MAX} characters or fewer.`;
     const clash = state.members.some(
       (m) => m.id !== me.id && String(m.name || "").trim().toLowerCase() === v.toLowerCase()
     );
@@ -2777,6 +2788,11 @@
     if (!state || !state.members) return null;
     const trimmed = state.members.map((m) => (editNamesValues[m.id] || "").trim());
     if (trimmed.some((v) => !v)) return "All names must be filled in.";
+    // Named rather than counted: "one is too long" makes you hunt five fields.
+    const tooLong = trimmed.find((v) => v.length > NAME_MAX);
+    if (tooLong) {
+      return `"${tooLong}" is too long — names must be ${NAME_MAX} characters or fewer.`;
+    }
     const lower = trimmed.map((n) => n.toLowerCase());
     if (new Set(lower).size !== lower.length) return "Names must be unique.";
     return null;
@@ -2794,15 +2810,19 @@
     }
     const save = document.getElementById("editNamesSave");
     if (save) save.disabled = busy || !!editNamesError;
-    // Flag the duplicates themselves, so "Names must be unique" points somewhere.
+    // Flag the offending fields themselves, so the message points somewhere.
     const seen = {};
     state.members.forEach((m) => {
       const v = (editNamesValues[m.id] || "").trim().toLowerCase();
       seen[v] = (seen[v] || 0) + 1;
     });
     document.querySelectorAll(".edit-names-modal .name-input").forEach((el) => {
-      const v = (el.value || "").trim().toLowerCase();
-      el.classList.toggle("invalid", !v || seen[v] > 1);
+      const raw = (el.value || "").trim();
+      const v = raw.toLowerCase();
+      // Over-length is reachable despite maxlength — a name already on file
+      // from before the limit existed arrives too long, and the field must say
+      // which one rather than just refusing to save.
+      el.classList.toggle("invalid", !raw || seen[v] > 1 || raw.length > NAME_MAX);
     });
   }
 
@@ -3402,7 +3422,7 @@
   const TAB_VIEWS = [
     { id: "home", label: "Home", icon: "home" },
     { id: "rounds", label: "Rounds", icon: "rounds" },
-    { id: "members", label: "Members", icon: "members" },
+    { id: "members", label: "Board Members", icon: "members" },
     { id: "activity", label: "Activity", icon: "activity" },
     { id: "insights", label: "Insights", icon: "insights" },
     { id: "menu", label: "Menu", icon: "menu" },
@@ -6212,10 +6232,12 @@
             }
             <label class="field-label" for="profile-name">Display name</label>
             <input id="profile-name" class="text-input profile-name-input" type="text"
+                   maxlength="${NAME_MAX}"
                    value="${escapeHtml(profileNameValue)}" placeholder="Your name"
                    oninput="PowerFund.setProfileName(this.value)">
             <p class="profile-name-hint${problem ? " is-error" : ""}" id="profileNameHint">${escapeHtml(
-          problem || "Visible to the rest of the group. Must be unique."
+          problem ||
+            `Visible to the rest of the group. Must be unique, up to ${NAME_MAX} characters.`
         )}</p>
             ${
               profileError
@@ -6292,13 +6314,14 @@
       html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeEditNamesModal()">
         <div class="modal edit-names-modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
           <h3 id="dlg-title">Edit member names</h3>
-          <p class="modal-sub">Updates apply everywhere — payment history stays linked to each person.</p>
+          <p class="modal-sub">Updates apply everywhere — payment history stays
+            linked to each person. Up to ${NAME_MAX} characters each.</p>
           ${ordered
             .map(
               (m) => `
-            <input type="text" class="pin-input name-input" data-member="${escapeHtml(
-              m.id
-            )}" value="${escapeHtml(editNamesValues[m.id] || "")}"
+            <input type="text" class="pin-input name-input" maxlength="${NAME_MAX}"
+                   data-member="${escapeHtml(m.id)}"
+                   value="${escapeHtml(editNamesValues[m.id] || "")}"
                    oninput="PowerFund.setEditName('${m.id}', this.value)" placeholder="Name">
           `
             )

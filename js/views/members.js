@@ -41,7 +41,7 @@ window.PFViews.members = function (ctx) {
 
   html += `<div class="view-head${isWide ? " view-head-row" : ""}">
     <div class="view-head-text">
-      <h2 class="view-title">Members</h2>
+      <h2 class="view-title">Board Members</h2>
       <p class="view-sub">${members.length} members · sorted by payout order</p>
     </div>
     ${

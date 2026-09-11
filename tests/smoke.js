@@ -1785,6 +1785,13 @@ const C_AMOUNT = Number(
     .match(/const CONTRIBUTION_AMOUNT = (\d+)/) || [, "1000"])[1]
 );
 
+/** The name length cap, read from js/app.js so the test cannot drift from it. */
+const NAME_MAX = Number(
+  (require("fs")
+    .readFileSync(path.join(__dirname, "..", "js", "app.js"), "utf8")
+    .match(/const NAME_MAX = (\d+)/) || [, "10"])[1]
+);
+
 const PAYOUT_BANK_COUNT =
   (require("fs")
     .readFileSync(path.join(__dirname, "..", "js", "app.js"), "utf8")
@@ -3649,6 +3656,24 @@ async function profileEditing(browser, errors) {
   // the row being edited or Save would never re-enable.
   await page.locator("#profile-name").fill(me.name);
   await page.waitForTimeout(200);
+  // The same cap applies on the member's own sheet — one rule, two screens.
+  check(
+    "profile/the display name carries the same maxlength",
+    (await page.locator("#profile-name").getAttribute("maxlength")) === String(NAME_MAX)
+  );
+  await page.evaluate(() => window.PowerFund.setProfileName("Wednesdayyy"));
+  await page.waitForTimeout(250);
+  check(
+    "profile/an over-long display name is refused",
+    /10 characters or fewer/i.test(await page.locator("#profileNameHint").innerText()) &&
+      (await page.locator("#profileSave").isDisabled())
+  );
+  // Put the valid name back — the check below is about the name the member
+  // already has, and leaving the over-long one here would fail it for the
+  // wrong reason.
+  await page.locator("#profile-name").fill(me.name);
+  await page.waitForTimeout(250);
+
   check(
     "profile/your own current name is still valid",
     !(await page.locator("#profileSave").isDisabled()) &&
@@ -3989,6 +4014,35 @@ async function desktopHeaderActions(browser, errors) {
   await page.waitForTimeout(200);
   check(
     "names/valid names clear the error and re-enable Save",
+    (await page.locator("#editNamesError").isHidden()) &&
+      !(await page.locator("#editNamesSave").isDisabled())
+  );
+
+  // A 10-character cap, enforced in the validator and not only by maxlength —
+  // the attribute stops a keystroke, it does not stop a paste into a modified
+  // field, the exported setter, or a name already on file from before the cap.
+  check(
+    "names/the field carries the 10-character maxlength",
+    (await names.nth(1).getAttribute("maxlength")) === String(NAME_MAX)
+  );
+  await page.evaluate(
+    (args) => window.PowerFund.setEditName(args.id, args.v),
+    { id: await names.nth(1).getAttribute("data-member"), v: "Wednesdayyy" }
+  );
+  await page.waitForTimeout(250);
+  check(
+    "names/an over-long name is refused and named",
+    /too long/i.test(await page.locator("#editNamesError").innerText()) &&
+      /Wednesdayyy/.test(await page.locator("#editNamesError").innerText()) &&
+      (await page.locator("#editNamesSave").isDisabled())
+  );
+  await page.evaluate(
+    (args) => window.PowerFund.setEditName(args.id, args.v),
+    { id: await names.nth(1).getAttribute("data-member"), v: "Wednesday" }
+  );
+  await page.waitForTimeout(250);
+  check(
+    "names/exactly 10 characters is allowed",
     (await page.locator("#editNamesError").isHidden()) &&
       !(await page.locator("#editNamesSave").isDisabled())
   );

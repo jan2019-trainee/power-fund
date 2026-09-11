@@ -2395,6 +2395,79 @@ async function ctaGeometry(browser, errors) {
   await wide.close();
 }
 
+/** Resubmitting a rejected batch. Reported from use: a member paid six cycles
+ *  in one transfer, the treasurer rejected all six, and "Resubmit payment"
+ *  opened a sheet set to ONE cycle — so five stayed rejected and the card kept
+ *  reporting a refusal the member thought they had answered. */
+async function resubmitBatch(browser, errors) {
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`resubmit: ${e}`));
+  const members = rosterWithEmails();
+  const me = members[2];
+  const contributions = [];
+  for (let n = 1; n <= 6; n++) {
+    // cycle_id, not cycle_number: app.js:468 DERIVES cycle_number from
+    // cycle_id, so a fixture that sets only the number has it overwritten with
+    // undefined and every cycle label renders as "undefined".
+    contributions.push({
+      id: "j" + n, member_id: me.id, cycle_id: M.CYCLES[n - 1].id, status: 3,
+      amount: C_AMOUNT, proof_url: "batch.jpg",
+      rejected_at: "2026-09-10T00:00:00Z", rejection_note: "Blurry",
+    });
+  }
+  await serve(page, { ...M.TABLE_DATA, members, contributions, payouts: [] });
+  await page.addInitScript((id) => {
+    try { localStorage.setItem("pf_my_member_id", id); } catch (e) {}
+  }, me.id);
+  await withAuthMode(page, "off");
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2400);
+
+  check(
+    "resubmit/the rejection card names the whole batch",
+    /Cycles 1.6/.test(await page.locator(".rejected-card").innerText())
+  );
+  await page.locator(".rejected-cta").click();
+  await page.waitForTimeout(600);
+  // THE FIX: the sheet offers to redo all six, not one.
+  const sheetText = (await page.locator(".sheet-pay").innerText()).replace(/\s+/g, " ");
+  check(
+    "resubmit/the sheet defaults to the whole rejected batch",
+    /6\s*cycles/i.test(sheetText) || /6,000/.test(sheetText),
+    sheetText.slice(0, 120)
+  );
+  await page.close();
+
+  // A PARTIAL resubmission must still say so: the remaining cycles are genuinely
+  // still owed, and the card used to mention only the refusal.
+  const part = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  part.on("pageerror", (e) => errors.push(`resubmit/partial: ${e}`));
+  // Keyed on cycle_id, for the same reason the fixture above is: cycle_number
+  // is not on these rows — the app derives it.
+  const partial = contributions.map((r) =>
+    r.cycle_id === M.CYCLES[0].id ? { ...r, status: 1 } : r
+  );
+  await serve(part, { ...M.TABLE_DATA, members, contributions: partial, payouts: [] });
+  await part.addInitScript((id) => {
+    try { localStorage.setItem("pf_my_member_id", id); } catch (e) {}
+  }, me.id);
+  await withAuthMode(part, "off");
+  await part.goto(BASE, { waitUntil: "domcontentloaded" });
+  await part.waitForTimeout(2400);
+  const card = (await part.locator(".rejected-card").innerText()).replace(/\s+/g, " ");
+  check(
+    "resubmit/a partial resubmission still reports what is STILL rejected",
+    /Cycles 2.6/.test(card),
+    card.slice(0, 100)
+  );
+  check(
+    "resubmit/...and says the resubmitted cycle is with the treasurer",
+    (await part.locator(".rejected-inreview").count()) === 1 &&
+      /Cycle 1 is/.test(await part.locator(".rejected-inreview").innerText())
+  );
+  await part.close();
+}
+
 /** Whose cycle is this? Tapping another member's chip in Rounds used to open
  *  the pay sheet for THEM, with their name only in a small subtitle — so a
  *  mis-tap filed your screenshot as their contribution. Migration 011 refuses
@@ -4277,6 +4350,7 @@ async function bootFailure(browser) {
   await accountLinking(browser, errors);
   console.log("\nOnboarding");
   await ctaGeometry(browser, errors);
+  await resubmitBatch(browser, errors);
   await payAttribution(browser, errors);
   await myPayoutQr(browser, errors);
   await unlockVisibility(browser, errors);

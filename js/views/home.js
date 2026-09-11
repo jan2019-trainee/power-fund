@@ -99,6 +99,27 @@ window.PFViews.home = function (ctx) {
       <p class="rejected-hint">${
         cyc.length > 1 ? "These cycles are" : "This cycle is"
       } still due. Send the payment again and attach a clearer screenshot.</p>
+      ${
+        // A PARTIAL RESUBMISSION has to be visible here. Resubmit part of a
+        // rejected batch and the rest stays rejected — correctly, it is still
+        // owed — but the card then led with "rejected" and said nothing about
+        // the payment that HAD just been sent, so it read as though the
+        // resubmission had vanished.
+        (function () {
+          const inReview = [];
+          for (let c = 1; c <= C.TOTAL_CYCLES; c++) {
+            if (C.statusOf(state.contributions, myMember.id, c) === C.STATUS_PENDING) {
+              inReview.push(c);
+            }
+          }
+          if (!inReview.length) return "";
+          return `<p class="rejected-inreview">${icon("clock", 13)}<span>${
+            inReview.length > 1
+              ? `Cycles ${inReview[0]}–${inReview[inReview.length - 1]} are`
+              : `Cycle ${inReview[0]} is`
+          } with the treasurer for review.</span></p>`;
+        })()
+      }
     </div>`;
   }
 

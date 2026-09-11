@@ -661,7 +661,20 @@ body {
 .member-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .member-chip.editable { cursor: pointer; }
 .member-chip.paid { background: var(--success-soft); border-color: var(--success); color: var(--success); }
-.member-chip.pending { background: rgba(245,166,35,0.16); border-color: var(--accent); color: var(--accent); }
+/* Purple, like every other "awaiting the treasurer" surface: .my-status-pending,
+   .acct-pill.wait, .stat-value.pending and the Insights donut's "In review"
+   slice all use --pending-review. This chip was the lone amber one, so the
+   same payment read as one colour in the cycle grid and another in Insights.
+   Reported from use, and fair — the app teaches these colours by repetition.
+
+   NOT changed: .round-state.pending is "Payout Pending", a ROUND lifecycle
+   state rather than a payment awaiting review. Amber is right there, and
+   making it purple would claim the two mean the same thing. */
+.member-chip.pending {
+  background: var(--pending-review-soft);
+  border-color: var(--pending-review);
+  color: var(--pending-review);
+}
 .member-chip.overdue { border-color: #E15353; color: #E15353; background: rgba(225,83,83,0.1); }
 /* Rejected: same danger hue as overdue, but struck through so the two read
    apart at a glance — one was never sent, the other was sent and refused. */
@@ -3791,6 +3804,24 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   /* A treasurer's note is free text: let it wrap rather than overflow. */
   overflow-wrap: anywhere;
 }
+/* "Cycle 1 is with the treasurer for review." — purple, the same as every
+   other awaiting-review surface, sitting inside the red card so a partial
+   resubmission is visible rather than buried. */
+.rejected-inreview {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 9px 0 0;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: var(--pending-review-soft);
+  color: var(--pending-review);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+.rejected-inreview svg { flex-shrink: 0; }
+
 .rejected-hint { margin: 0 0 11px; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
 .rejected-cta {
   display: flex;

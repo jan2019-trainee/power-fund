@@ -615,6 +615,47 @@ while nothing is due stays `notDue`; without that, everybody would read as
 specifies only "on-time rate, per-member standing, and a per-round collection
 timeline"), so its semantics were ours to correct.
 
+## Resubmitting a rejected batch
+
+Reported from use: a member paid six cycles in one transfer, the treasurer
+rejected all six, and **"Resubmit payment" opened a sheet set to ONE cycle**
+(`modalCount = 1`, unconditionally). They submitted, one cycle went to review,
+five stayed rejected — and the card kept reporting a refusal they thought they
+had answered.
+
+`openContributeModal()` now defaults the count to the size of the rejected
+batch the cycle belongs to, capped by `maxAdvanceCount()` so it can never
+select a cycle that is already confirmed or in review. The button offers to
+redo the rejection shown beside it, so it should offer to redo all of it;
+reducing the count is still one tap.
+
+**The owner asked for the remaining rejected cycles to be RESET when a member
+resubmits any of them. That was declined and put back to them as a product
+decision**, per rule 9 and the QA gate's money carve-out. A member who
+resubmits 1 of 6 still owes the other five: clearing the flag would stop the
+member being told, drop them out of the treasurer's attention queue, and take
+them out of `isOwed()` so the round's funding gap silently shrinks on screen.
+`CLAUDE.md` already states the invariant — *"a rejected cycle stays OVERDUE:
+refusing a claim must never quietly excuse the member from paying it."*
+
+What was done instead is honest about both halves: a **partial** resubmission
+now shows a purple `.rejected-inreview` line inside the red card ("Cycle 1 is
+with the treasurer for review"), so a resubmission never looks like it
+vanished while the genuinely-still-owed cycles keep saying so.
+
+### Pending is purple everywhere now
+
+`.member-chip.pending` was the lone amber one, while `.my-status-pending`,
+`.acct-pill.wait`, `.stat-value.pending` and the Insights donut's "In review"
+slice all used `--pending-review`. The same payment read as one colour in the
+cycle grid and another in Insights. **`.round-state.pending` is deliberately
+left amber** — it is "Payout Pending", a round lifecycle state, not a payment
+awaiting review, and making it purple would claim the two mean the same thing.
+
+The full chip vocabulary: green paid · purple in review · **red solid
+overdue** · **red dashed rejected** (sent and refused, versus never sent) ·
+plain not-due-yet.
+
 ## Migrations
 
 Run in the Supabase SQL editor, in order. `006` also needs a one-off

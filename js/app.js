@@ -510,7 +510,35 @@
     }
     contributePicker = null;
     modalTarget = { memberId, cycleNumber };
-    modalCount = 1;
+
+    // RESUBMITTING A REJECTED BATCH DEFAULTS TO THE WHOLE BATCH, not to one
+    // cycle. Reported from use: a member paid six cycles in one transfer, the
+    // treasurer rejected all six, and "Resubmit payment" opened a sheet set to
+    // ONE cycle. They submitted, one cycle went to review, and five stayed
+    // rejected — which the app then correctly but confusingly reported as
+    // still refused.
+    //
+    // The button offers to redo the rejection it was just shown beside, so it
+    // should offer to redo ALL of it. Reducing the count is still one tap, and
+    // then the five that are left really are still owed.
+    //
+    // Capped by maxAdvanceCount so this can never select a cycle that is
+    // already confirmed or awaiting review.
+    const rejected = C.latestRejection
+      ? C.latestRejection(state.contributions, memberId)
+      : null;
+    const inThisBatch =
+      rejected && rejected.cycles.indexOf(cycleNumber) !== -1
+        ? rejected.cycles.length
+        : 1;
+    const payable = C.maxAdvanceCount(
+      state.contributions,
+      memberId,
+      cycleNumber,
+      C.roundEndCycle(cycleNumber)
+    );
+    modalCount = Math.max(1, Math.min(inThisBatch, payable || 1));
+
     clearProofSelection();
     render();
   }

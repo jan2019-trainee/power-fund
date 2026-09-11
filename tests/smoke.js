@@ -78,6 +78,28 @@ async function serve(page, data, opts) {
   // intro in "optional" mode, and the onboarding tests are not about it.
   if (opts && opts.freshDevice) await markSignInSkipped(page);
   else await markOnboarded(page);
+
+  // AUTH_MODE is pinned to a NON-GATING default for every page, rather than
+  // inheriting whatever js/config.js currently ships. The shipped value is a
+  // deploy-time decision the treasurer makes; a test that reads it is testing
+  // the deployment, not the code — and the day it became "required" every
+  // check that had not opted in met the sign-in wall instead of the app.
+  //
+  // A test that cares about auth calls withAuthMode() AFTER this and wins:
+  // Playwright matches the most recently registered route first.
+  await page.route("**/js/config.js", async (route) => {
+    const res = await route.fetch();
+    const body = (await res.text()).replace(
+      /AUTH_MODE:\s*"[a-z]*"/,
+      'AUTH_MODE: "off"'
+    );
+    return route.fulfill({
+      status: 200,
+      contentType: "application/javascript",
+      body,
+    });
+  });
+
   await page.route("**/rest/v1/**", (route) => {
     const url = new URL(route.request().url());
     if (url.pathname.includes("/rpc/")) {
@@ -725,6 +747,11 @@ async function membersAndMenu(browser, errors) {
   const mem = await browser.newPage({ viewport: { width: 430, height: 950 } });
   mem.on("pageerror", (e) => errors.push(`menu/member: ${e}`));
   await serve(mem, M.TABLE_DATA);
+  // States its own mode. serve() pins AUTH_MODE to "off", and with accounts
+  // off there is deliberately no "My Payout QR Code" row — nobody can own
+  // payout details, so offering it would be a dead end. This test is about
+  // the member menu WITH accounts on, which is where that row lives.
+  await withAuthMode(mem, "optional");
   await mem.addInitScript((id) => {
     try { localStorage.setItem("pf_my_member_id", id); } catch (e) {}
   }, ME.id);
@@ -3468,7 +3495,12 @@ async function pinVault(browser, errors) {
   // ---- Post-010: the digits never reach the browser --------------------
   const vault = await browser.newPage({ viewport: { width: 430, height: 950 } });
   vault.on("pageerror", (e) => errors.push(`vault: ${e}`));
-  await markOnboarded(vault); // routes by hand, so serve() never ran
+  // Routes by hand, so serve() never ran — which means BOTH of serve()'s
+  // defaults have to be set here: the storage flags and the AUTH_MODE pin.
+  // Missing the flags stranded this test on the intro once; missing the pin
+  // stranded it on the sign-in gate the day AUTH_MODE became "required".
+  await markOnboarded(vault);
+  await withAuthMode(vault, "off");
   const rpcCalls = [];
   const bodies = [];
   // app_settings without the PIN columns, exactly as 010 leaves it.
@@ -3562,6 +3594,7 @@ async function pinVault(browser, errors) {
   const broken = await browser.newPage({ viewport: { width: 430, height: 950 } });
   broken.on("pageerror", (e) => errors.push(`vault: ${e}`));
   await markOnboarded(broken); // routes by hand, so serve() never ran
+  await withAuthMode(broken, "off"); // ...so the AUTH_MODE pin is not set either
   await broken.route("**/rest/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const last = url.pathname.split("/").pop();
@@ -4054,6 +4087,10 @@ async function desktopHeaderActions(browser, errors) {
  *  failing to load — so this page's errors are not collected. */
 async function bootFailure(browser) {
   const page = await browser.newPage({ viewport: { width: 430, height: 900 } });
+  // Routes by hand, so serve()'s AUTH_MODE pin never ran. Without this the
+  // shipped "required" fronts a sign-in gate and the boot error — the entire
+  // subject of this test — never renders.
+  await withAuthMode(page, "off");
   await page.route("**/rest/v1/**", (r) => r.abort());
   await page.route("**/realtime/v1/**", (r) => r.abort());
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
@@ -4078,6 +4115,28 @@ async function bootFailure(browser) {
     executablePath: process.env.PF_CHROMIUM || undefined,
     args: ["--no-sandbox"],
   });
+
+  // EVERY PAGE GETS ITS OWN CONTEXT, WITH THE SERVICE WORKER BLOCKED.
+  //
+  // Playwright's page.route() does NOT intercept requests a service worker
+  // makes. sw.js installs on the first load and claims the client, so from the
+  // second navigation onward every mocked route was silently bypassed and the
+  // page fetched the real files instead.
+  //
+  // That was invisible for as long as the shipped js/config.js happened to
+  // match what the tests wanted. The moment AUTH_MODE became "required", a
+  // test that reloaded got the real config and met the sign-in gate — which is
+  // how this was finally noticed. The service worker is not what these tests
+  // are about; the one test that IS about it registers its own.
+  //
+  // A fresh context per page, not one shared context: pages here rely on their
+  // own localStorage (pf_onboarded, pf_my_member_id, the Supabase session), and
+  // sharing one would leak identity between checks.
+  browser.newPage = async (opts) => {
+    const context = await browser.newContext({ ...(opts || {}), serviceWorkers: "block" });
+    return context.newPage();
+  };
+
   const errors = [];
 
   console.log("\nTabs render (mobile shell)");

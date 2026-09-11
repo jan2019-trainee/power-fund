@@ -608,9 +608,20 @@ off `members.auth_user_id`, so an unlinked member is denied everything.
 Overridable with `select set_config('pf.allow_unready','yes',false);` but
 don't.
 
-**011 and `AUTH_MODE = "required"` must ship together.** 011 revokes `anon`
-entirely, so the migration without the deploy shows every member a load error,
-and the deploy without the migration is a gate in front of nothing.
+**011 needs `AUTH_MODE = "required"`, but NOT the other way round.** The
+coupling runs one direction only, and an earlier version of this note had it
+as a mutual dependency, which is wrong and would have held up a safe step:
+
+- **011 without `required`** shows every member a load error — it revokes
+  `anon` entirely, so an unauthenticated browser can read nothing.
+- **`required` without 011** is merely a gate in front of rules Postgres is not
+  yet enforcing. Harmless, reversible, and worth shipping first: it shakes out
+  any sign-in problem while a bad outcome is still one redeploy away.
+
+What `required` actually needs is **every member linked** — an address on file
+and one sign-in each. Without that, a member hits the `unknown` dead-end with
+no way into the app at all. `AUTH_MODE` is now `"required"`; all five are
+linked.
 
 Every migration from 010 on is wrapped in `begin; … commit;`. Not decoration:
 without it a `raise` in 011's preflight aborted one statement and psql
@@ -944,6 +955,25 @@ because otherwise the flow is unreachable and untestable after its one
 showing; and `pesoWhole()` for the prose figures, since `C.peso()`'s two
 decimals are right for a ledger and wrong in a sentence — the artboards write
 "₱1,000", not "₱1,000.00".
+
+**Two harness defaults, both learned the hard way.**
+
+- **`serve()` pins `AUTH_MODE` to `"off"` for every page**, rather than
+  inheriting whatever `js/config.js` ships. The shipped value is a deploy-time
+  decision; a test that reads it is testing the deployment. The day it became
+  `"required"`, every check that had not opted in met the sign-in wall. A test
+  that cares calls `withAuthMode()` after, and wins — Playwright matches the
+  most recently registered route first.
+- **Every page gets its own context with `serviceWorkers: "block"`.**
+  `page.route()` does NOT intercept requests a service worker makes, and
+  `sw.js` claims the client on the first load — so from the second navigation
+  onward every mocked route was silently bypassed and the page fetched the real
+  files. That was invisible while the shipped config happened to match what the
+  tests wanted. A fresh context per page, not one shared: these tests rely on
+  their own `localStorage`, and sharing would leak identity between checks.
+- **A test that routes by hand instead of calling `serve()` gets NEITHER
+  default** and must set both itself. `pinVault`, `bootFailure` and the
+  unreadable-vault check each had to be fixed for exactly this.
 
 **`tests/smoke.js`'s `serve()` now marks onboarding seen by default**, or it
 would front all ~290 checks. Pass `{ freshDevice: true }` for a first-run

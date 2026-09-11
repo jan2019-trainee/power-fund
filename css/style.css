@@ -54,6 +54,17 @@
   --text-primary: #EDEFF2;
   --text-muted: #93A2B8;
   --border: rgba(255,255,255,0.08);
+
+  /* The mobile tab bar's height, and the floating CTA's clearance above it.
+     ONE value, because these were two hardcoded guesses that disagreed: the
+     bar measures 60px and the CTA was pinned at 58px, so the CTA sat 2px
+     INSIDE it — and on a phone with a home indicator both gained the safe-area
+     inset and stayed 2px apart. --cta-h is the CTA's own measured height
+     (34px top pad + 55px button + 12px bottom pad = 101px, with a little
+     slack) and is what .cta-spacer must reserve so the last card clears it.
+     If either the button's padding or its font changes, re-measure. */
+  --tab-h: 60px;
+  --cta-h: 104px;
 }
 
 * { box-sizing: border-box; }
@@ -2336,6 +2347,10 @@ body { padding-top: calc(28px + var(--pf-bar-h, 0px)); }
   background: var(--bg-card);
   border-top: 1px solid var(--border);
   padding: 6px 4px calc(6px + env(safe-area-inset-bottom, 0px));
+  /* Stated rather than left to the content, so .floating-cta can sit exactly
+     on top of it instead of guessing. box-sizing is border-box globally, and
+     60px is what the icon + label + padding already measured. */
+  height: calc(var(--tab-h) + env(safe-area-inset-bottom, 0px));
 }
 .tab-item {
   flex: 1;
@@ -2385,6 +2400,10 @@ body { padding-top: calc(28px + var(--pf-bar-h, 0px)); }
     top: 0;
     right: auto;
     width: 232px;
+    /* Undo the mobile bar's fixed height — here the same element is a
+       full-height sidebar (top:0 and the base rule's bottom:0), and leaving
+       60px on it would collapse it to a strip across the top. */
+    height: auto;
     flex-direction: column;
     justify-content: flex-start;
     align-items: stretch;
@@ -3292,10 +3311,22 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   position: fixed;
   left: 0;
   right: 0;
-  bottom: calc(58px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(var(--tab-h) + env(safe-area-inset-bottom, 0px));
   z-index: 15;
-  padding: 28px 16px 12px;
-  background: linear-gradient(to top, var(--bg-primary) 55%, transparent);
+  padding: 34px 16px 12px;
+  /* The scrim has to separate the button from whatever scrolls under it
+     WITHOUT looking like the card behind has been chopped. The old
+     `--bg-primary 55%, transparent` put 52px of fully opaque page background
+     over a lighter card, and against .battery-hero that read as a straight cut
+     through the card rather than a fade. Opaque only where the button
+     actually is, then a long fade out. */
+  background: linear-gradient(
+    to top,
+    var(--bg-primary) 0%,
+    var(--bg-primary) 38%,
+    rgba(13, 27, 42, 0.72) 62%,
+    rgba(13, 27, 42, 0) 100%
+  );
   pointer-events: none;
 }
 .floating-cta .hero-cta {
@@ -3304,7 +3335,10 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
   margin: 0 auto;
   display: block;
 }
-.cta-spacer { height: 84px; }
+/* Was 84px against a CTA that measures 96px, so the last card was 12px short
+   of clearing it — and a button that wrapped to two lines would have been
+   covered outright. Tied to the same variable now. */
+.cta-spacer { height: var(--cta-h); }
 
 @media (min-width: 900px) {
   /* With a sidebar there is no thumb zone to hug — the action returns to the

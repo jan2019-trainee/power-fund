@@ -1778,6 +1778,13 @@ const FAKE_USER_ID = "11111111-1111-1111-1111-111111111111";
 /** PAYOUT_BANKS lives in js/app.js; read it rather than hardcoding a number,
  *  so adding a bank does not fail a test for the wrong reason. +2 for the
  *  "Choose one…" placeholder and "Other". */
+/** The contribution amount, read from js/calculations.js. */
+const C_AMOUNT = Number(
+  (require("fs")
+    .readFileSync(path.join(__dirname, "..", "js", "calculations.js"), "utf8")
+    .match(/const CONTRIBUTION_AMOUNT = (\d+)/) || [, "1000"])[1]
+);
+
 const PAYOUT_BANK_COUNT =
   (require("fs")
     .readFileSync(path.join(__dirname, "..", "js", "app.js"), "utf8")
@@ -2176,6 +2183,102 @@ async function accountLinking(browser, errors) {
       /roster/i.test(await soft.locator(".save-warning-banner").first().innerText())
   );
   await soft.close();
+}
+
+/** The floating CTA's geometry. Reported from a real phone: the "Resubmit
+ *  payment" button cut a hard band across the round card behind it and sat
+ *  2px inside the tab bar.
+ *
+ *  None of the ~370 checks around this one could see it — they assert markup
+ *  and behaviour, and this was three numbers disagreeing. So this one measures
+ *  boxes instead. */
+async function ctaGeometry(browser, errors) {
+  const page = await browser.newPage({ viewport: { width: 393, height: 852 } });
+  page.on("pageerror", (e) => errors.push(`cta-geom: ${e}`));
+  // A rejected member gets the pinned "Resubmit payment" CTA — the exact case
+  // that was reported.
+  const members = rosterWithEmails();
+  const rejected = [
+    {
+      id: "geom-1",
+      member_id: members[0].id,
+      cycle_number: 1,
+      status: 3,
+      rejection_note: "Blurry screenshot",
+      rejected_at: new Date().toISOString(),
+      proof_url: null,
+      amount: C_AMOUNT,
+    },
+  ];
+  await serve(page, { ...M.TABLE_DATA, members, contributions: rejected });
+  await page.addInitScript((id) => {
+    try { localStorage.setItem("pf_my_member_id", id); } catch (e) {}
+  }, members[0].id);
+  await withAuthMode(page, "off");
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2200);
+
+  check(
+    "cta-geom/the rejected member gets a pinned Resubmit action",
+    (await page.locator(".floating-cta .rejected-cta").count()) === 1
+  );
+
+  const box = async (sel) =>
+    page.evaluate((s) => {
+      const el = document.querySelector(s);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { top: Math.round(r.top), bottom: Math.round(r.bottom), h: Math.round(r.height) };
+    }, sel);
+
+  const cta = await box(".floating-cta");
+  const bar = await box(".tab-bar");
+  const spacer = await box(".cta-spacer");
+
+  // It used to be pinned at 58px above a bar that measures 60px.
+  check(
+    "cta-geom/the CTA sits ON the tab bar, not inside it",
+    !!cta && !!bar && cta.bottom <= bar.top,
+    `cta bottom ${cta && cta.bottom} vs tab-bar top ${bar && bar.top}`
+  );
+  // The spacer was 84px against a CTA of 95px, so the last card could never
+  // fully clear it.
+  check(
+    "cta-geom/the spacer reserves at least the CTA's height",
+    !!cta && !!spacer && spacer.h >= cta.h,
+    `spacer ${spacer && spacer.h}px vs CTA ${cta && cta.h}px`
+  );
+
+  // Scrolled to the end, nothing real may still be under the button.
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await page.waitForTimeout(500);
+  const cta2 = await box(".floating-cta");
+  const spacer2 = await box(".cta-spacer");
+  check(
+    "cta-geom/at the end of the page the CTA covers only the spacer",
+    !!cta2 && !!spacer2 && cta2.top >= spacer2.top,
+    `cta top ${cta2 && cta2.top} vs spacer top ${spacer2 && spacer2.top}`
+  );
+  await page.close();
+
+  // Desktop reuses .tab-bar as a full-height sidebar, so the mobile bar's
+  // fixed height must not leak into it.
+  const wide = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  wide.on("pageerror", (e) => errors.push(`cta-geom/desktop: ${e}`));
+  await serve(wide, { ...M.TABLE_DATA, members, contributions: rejected });
+  await withAuthMode(wide, "off");
+  await wide.goto(BASE, { waitUntil: "domcontentloaded" });
+  await wide.waitForTimeout(2200);
+  const side = await wide.evaluate(() => {
+    const el = document.querySelector(".tab-bar");
+    return el ? Math.round(el.getBoundingClientRect().height) : 0;
+  });
+  check(
+    "cta-geom/the desktop sidebar is still full height",
+    side > 400,
+    `${side}px tall`
+  );
+  await wide.close();
 }
 
 /** Whose cycle is this? Tapping another member's chip in Rounds used to open
@@ -3871,6 +3974,7 @@ async function bootFailure(browser) {
   await signInAdmin(browser, errors);
   await accountLinking(browser, errors);
   console.log("\nOnboarding");
+  await ctaGeometry(browser, errors);
   await payAttribution(browser, errors);
   await myPayoutQr(browser, errors);
   await unlockVisibility(browser, errors);

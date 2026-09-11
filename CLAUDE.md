@@ -529,6 +529,32 @@ accident, hard to notice afterwards.
   for Sarah") and an amber `.pay-for-warn` says the proof is filed against
   their cycle. Your own payment looks exactly as it did.
 
+## The floating CTA's geometry
+
+Reported from a real phone: the pinned "Resubmit payment" button cut a hard
+band across the round card behind it. Three numbers disagreed, and none of the
+~370 behavioural checks could see any of them — so `tests/smoke.js` now
+MEASURES BOXES for this (`ctaGeometry`).
+
+- **`--tab-h` and `--cta-h` on `:root` are the single source.** The tab bar's
+  height and the CTA's clearance above it were two hardcoded guesses: the bar
+  measures 60px, the CTA was pinned at `bottom: 58px`, so it sat **2px inside
+  the bar** — and both gained `env(safe-area-inset-bottom)` independently, so
+  they stayed 2px apart on a phone with a home indicator.
+- **`.cta-spacer` was 84px against a CTA that measures 101px.** The last card
+  could never fully clear it, and a button wrapping to two lines would have
+  been covered outright. If the button's padding or font changes, re-measure
+  and update `--cta-h`.
+- **The scrim now fades instead of cutting.** It was
+  `linear-gradient(to top, var(--bg-primary) 55%, transparent)` — 52px of fully
+  opaque page background laid over `.battery-hero`, which is *lighter*
+  (`--bg-card`). Against a card with its own rounded corners that reads as a
+  chunk removed from the card, not as a scrim.
+- **`.tab-bar` is the desktop sidebar too.** Giving the mobile bar a fixed
+  height collapsed the sidebar to a 60px strip, so the desktop media query
+  resets `height: auto`. A test asserts the sidebar is still full height —
+  that regression was introduced and caught inside one edit.
+
 ## Migrations
 
 Run in the Supabase SQL editor, in order. `006` also needs a one-off

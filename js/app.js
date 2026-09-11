@@ -226,6 +226,18 @@
    * fund whose schedule slipped by a month accused people of being late and
    * the only fix was the Supabase SQL editor. A draft map keyed by cycle id,
    * a live-validated error, one save — the same shape as edit-names. */
+  /* Does the NEXT render get the entry animation?
+   *
+   * render() reassigns innerHTML, so every element is new every time and every
+   * CSS entry animation restarts. That is right for a screen change and wrong
+   * for everything else — most visibly the 30-second background poll, which
+   * re-assembled the whole screen under somebody who was reading it.
+   *
+   * True for the first paint and for a deliberate move between screens; false
+   * for a poll, a realtime push, a busy flip, or any re-render of the screen
+   * you are already on. See --pf-entry in css/style.css. */
+  let animateEntry = true;
+
   let scheduleModalOpen = false;
   let scheduleValues = {};
   /* The last VALID date seen for each cycle, which is what a shift measures
@@ -619,6 +631,7 @@
   function finishOnboarding() {
     lsSet(ONBOARDED_KEY, "1");
     onboardingStep = null;
+    animateEntry = true; // the tour giving way to the dashboard
     render();
   }
   function onboardingNext() {
@@ -626,6 +639,7 @@
     if (onboardingStep == null) return;
     if (onboardingStep >= last) return finishOnboarding();
     onboardingStep += 1;
+    animateEntry = true; // each step is its own screen
     render();
   }
   function onboardingPick(memberId) {
@@ -639,6 +653,7 @@
    *  everyone after the first run. */
   function replayOnboarding() {
     onboardingStep = 0;
+    animateEntry = true;
     render();
   }
 
@@ -4034,6 +4049,7 @@
       selectedMemberId = null;
       autoSelectMember();
     }
+    animateEntry = true; // a real screen change — this is what it is for
     undoPaidTarget = null;
     markPaidTarget = null;
     currentView = view;
@@ -5405,6 +5421,11 @@
     // so the desktop shell's sidebar gutter (body padding-left) has to go or
     // the card sits off-centre.
     document.body.classList.toggle("auth-gate", isAuthScreenUp());
+    // Set BEFORE renderView assigns innerHTML, so the new elements are
+    // inserted with the class already on <body> and the animation runs. Then
+    // cleared, so the next render — a poll, a busy flip — does not replay it.
+    document.body.classList.toggle("pf-anim", animateEntry);
+    animateEntry = false;
     try {
       renderView(app);
     } catch (e) {

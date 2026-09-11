@@ -1002,6 +1002,49 @@ permits the write.
   `.modal` treatment the way Edit member names does. Flagged for UI/UX QA as
   new design, not as a port.
 
+## The entry animation marks a SCREEN CHANGE, not a render
+
+Reported from use: the 30-second background poll replayed the whole page's
+entry transition, so the screen re-assembled under somebody who was reading it.
+The owner wanted the transition KEPT for navigation — it is good — and gone
+everywhere else.
+
+`render()` reassigns `innerHTML`, so every element is new on every render and
+every CSS entry animation restarts. That is right for a screen change and
+wrong for a poll, a realtime push, a `busy` flip, or any re-render of the
+screen you are already on.
+
+`animateEntry` (js/app.js) is true for the first paint and for a deliberate
+move between screens — `setView()`, an onboarding step, entering or leaving
+the tour — and false otherwise. `render()` toggles `body.pf-anim` from it
+BEFORE assigning innerHTML, so the new elements are inserted with the class
+already present, then clears the flag.
+
+**The switch is a CUSTOM PROPERTY, not a class selector, and that is the part
+not to "simplify".** `body.pf-anim .view-head { … }` looks equivalent and is
+not: it raises specificity from (0,1,0) to (0,2,1), and the `animation`
+SHORTHAND resets `animation-delay` to 0. The stagger (`.fund-total`,
+`.battery-hero`, …) and the whole `prefers-reduced-motion` block are both
+(0,1,0) and win today purely by SOURCE ORDER — they would have silently lost,
+taking the stagger and the accessibility opt-out with them. Swapping only the
+VALUE (`animation: var(--pf-entry)`) leaves every existing cascade
+relationship exactly as it was. Tests assert both: the 0.08s stagger survives,
+and reduced motion still overrides.
+
+**The trap this fix could have introduced.** `.spark-line` draws itself by
+animating `stroke-dashoffset` 400 → 0. Switching the animation off without
+moving the BASE to 0 would have left the line fully dashed — invisible — on
+every screen that is not a fresh navigation, which is worse than the bug being
+fixed. `--pf-dash` is 400 only while animating. A test asserts the line is
+still drawn when it does not animate.
+
+**Not covered, and worth knowing:** an ERROR toast visible when the poll fires
+still replays `pfToastIn`. Success toasts auto-dismiss after 4.5s so the window
+is small, but an error toast waits to be dismissed. Fixing it properly means
+tracking the toast's identity the way `runCountUps()` tracks `countedValues`,
+rather than reusing `pf-anim` — gating a toast on a screen change would stop a
+NEW toast animating in, which is the case that matters.
+
 ## Migrations
 
 Run in the Supabase SQL editor, in order. `006` also needs a one-off

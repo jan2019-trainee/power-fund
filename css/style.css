@@ -3128,6 +3128,45 @@ body::after {
 body::before { animation: pfDrift1 16s ease-in-out infinite; }
 body::after { animation: pfDrift2 19s ease-in-out infinite; }
 
+/* ENTRY ANIMATIONS ARE SWITCHED BY A CUSTOM PROPERTY, NOT BY A CLASS SELECTOR.
+ *
+ * render() reassigns innerHTML, so every element is new on every render and
+ * every CSS entry animation restarts — including the 30-second background
+ * poll, which made the whole screen re-assemble while somebody was reading it.
+ * The animation should mark a SCREEN CHANGE, which is what it is for; a
+ * refresh that changes nothing should change nothing on screen.
+ *
+ * js/app.js puts `pf-anim` on <body> only for the render that follows a view
+ * change (or the first paint), and these values collapse to `none` otherwise.
+ *
+ * Why a variable rather than `body.pf-anim .view-head { … }`: that prefix
+ * raises specificity from (0,1,0) to (0,2,1), and the `animation` SHORTHAND
+ * resets animation-delay to 0. The stagger below and the reduced-motion block
+ * further down are both (0,1,0) and win today purely by source order — they
+ * would silently lose, taking the stagger and the accessibility opt-out with
+ * them. Swapping only the VALUE leaves every existing cascade relationship
+ * exactly as it was. */
+:root {
+  --pf-entry: pfFadeUp 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --pf-batt: pfBattFill 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both;
+  --pf-spark: pfDash 1s ease-out 0.5s both;
+  --pf-dash: 400;
+  /* The full-screen shells — boot error, the sign-in gate, an onboarding step.
+     Same switch, their own 0.5s timing. An onboarding STEP change counts as a
+     screen change and sets the class; a background reload behind one does not,
+     which is what used to re-assemble the tour every 30 seconds. */
+  --pf-screen: pfFadeUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+body:not(.pf-anim) {
+  --pf-entry: none;
+  --pf-screen: none;
+  --pf-batt: none;
+  --pf-spark: none;
+  /* The line is drawn by animating dashoffset 400 -> 0, so with no animation
+     the base must already be 0 or the sparkline would not render at all. */
+  --pf-dash: 0;
+}
+
 /* Staggered so a view assembles rather than snapping in all at once. */
 .view-head,
 .my-status-card,
@@ -3146,7 +3185,7 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
 .activity-list,
 .payout-history,
 .footer-note {
-  animation: pfFadeUp 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: var(--pf-entry);
 }
 .fund-total { animation-delay: 0.04s; }
 .battery-hero { animation-delay: 0.08s; }
@@ -3158,7 +3197,7 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
 .batt-fill {
   transform-box: fill-box;
   transform-origin: bottom;
-  animation: pfBattFill 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both;
+  animation: var(--pf-batt);
 }
 
 .tab-item, .menu-row, .contribute-btn, .my-status-cta {
@@ -3482,8 +3521,8 @@ body::after { animation: pfDrift2 19s ease-in-out infinite; }
    same 140x40 box — so any real path is fully covered. */
 .spark-line {
   stroke-dasharray: 400;
-  stroke-dashoffset: 400;
-  animation: pfDash 1s ease-out 0.5s both;
+  stroke-dashoffset: var(--pf-dash);
+  animation: var(--pf-spark);
 }
 @keyframes pfDash { to { stroke-dashoffset: 0; } }
 @media (prefers-reduced-motion: reduce) {
@@ -5663,7 +5702,7 @@ body.modal-open .lightbox-overlay { touch-action: auto; }
   width: 100%;
   max-width: 280px;
   text-align: center;
-  animation: pfFadeUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: var(--pf-screen);
 }
 .boot-error-icon {
   width: 80px;
@@ -5756,7 +5795,7 @@ body.auth-gate {
   width: 100%;
   max-width: 320px;
   text-align: center;
-  animation: pfFadeUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: var(--pf-screen);
 }
 /* Desktop: the composition this screen says it borrows.
    DesktopOnboardingWelcome.dc.html is a 520px centred column with two large
@@ -6016,7 +6055,7 @@ body.auth-gate {
   align-items: center;
   justify-content: center;
   text-align: center;
-  animation: pfFadeUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: var(--pf-screen);
 }
 .ob-emblem {
   width: 104px;
@@ -6163,7 +6202,7 @@ body.auth-gate {
 .ob-picker-name { flex: 1; font-size: 14.5px; font-weight: 600; }
 .ob-picker-chevron { color: var(--text-muted); }
 
-.ob-foot { flex: none; animation: pfFadeUp 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.12s both; }
+.ob-foot { flex: none; animation: var(--pf-screen); animation-delay: 0.12s; }
 .ob-dots { display: flex; gap: 8px; justify-content: center; margin-bottom: 20px; }
 .ob-dot {
   width: 6px;

@@ -3136,6 +3136,94 @@ async function extraTreasurer(browser, errors) {
   await solo.close();
 }
 
+/** The entry animation marks a SCREEN CHANGE, not a render.
+ *
+ *  render() reassigns innerHTML, so every element is new every time and every
+ *  CSS entry animation restarted — including on the 30-second background poll,
+ *  which re-assembled the whole screen under somebody reading it. Reported
+ *  from use. */
+async function entryAnimation(browser, errors) {
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`anim: ${e}`));
+  await serve(page, M.TABLE_DATA);
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1800);
+
+  const animOn = () => page.evaluate(() => document.body.classList.contains("pf-anim"));
+  const entryValue = () =>
+    page.evaluate(() =>
+      getComputedStyle(document.body).getPropertyValue("--pf-entry").trim()
+    );
+
+  check("anim/the first paint animates", (await animOn()) === true);
+
+  // THE REPORTED BUG. visibilitychange runs the same reload() the 30-second
+  // poll does, so this exercises the real path without waiting 30 seconds.
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await page.waitForTimeout(900);
+  check("anim/a background refresh does NOT re-animate", (await animOn()) === false);
+  check("anim/and the entry animation is switched off, not just restarted",
+    (await entryValue()) === "none", await entryValue());
+
+  // The thing the owner explicitly asked to keep.
+  await page.locator(".tab-item", { hasText: "Rounds" }).click();
+  await page.waitForTimeout(200);
+  check("anim/navigating to another tab still animates", (await animOn()) === true);
+  check("anim/with the real animation value",
+    /pfFadeUp/.test(await entryValue()), await entryValue());
+
+  // A re-render that is not a navigation — the same path a poll takes.
+  await page.evaluate(() => window.PowerFund.toggleRound(1));
+  await page.waitForTimeout(200);
+  check("anim/but re-rendering the same screen does not", (await animOn()) === false);
+
+  // THE TRAP IN THIS FIX. The sparkline is drawn by animating stroke-dashoffset
+  // from 400 to 0; switching the animation off without moving the BASE to 0
+  // would leave the line fully dashed — i.e. invisible — on every screen that
+  // is not a fresh navigation. Worse than the bug being fixed.
+  await page.locator(".tab-item", { hasText: "Home" }).click();
+  await page.waitForTimeout(300);
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await page.waitForTimeout(900);
+  const spark = await page.evaluate(() => {
+    const el = document.querySelector(".spark-line");
+    if (!el) return null;
+    const cs = getComputedStyle(el);
+    return { offset: cs.strokeDashoffset, anim: cs.animationName };
+  });
+  check("anim/premise: the sparkline is on screen", spark !== null);
+  if (spark) {
+    check("anim/the sparkline is still DRAWN when it does not animate",
+      parseFloat(spark.offset) === 0, JSON.stringify(spark));
+  }
+
+  // The stagger must survive: the `animation` shorthand resets animation-delay,
+  // so a class-prefixed rule would have out-specified the delays below it.
+  const delay = await page.evaluate(() => {
+    const el = document.querySelector(".battery-hero");
+    return el ? getComputedStyle(el).animationDelay : null;
+  });
+  check("anim/the stagger survives the switch", delay === "0.08s", String(delay));
+  await page.close();
+
+  // Reduced motion must still win — those rules are (0,1,0) and win by source
+  // order today; raising specificity anywhere here would have broken them.
+  const rm = await browser.newPage({
+    viewport: { width: 430, height: 950 },
+    reducedMotion: "reduce",
+  });
+  rm.on("pageerror", (e) => errors.push(`anim/rm: ${e}`));
+  await serve(rm, M.TABLE_DATA);
+  await rm.goto(BASE, { waitUntil: "domcontentloaded" });
+  await rm.waitForTimeout(1600);
+  const rmAnim = await rm.evaluate(() => {
+    const el = document.querySelector(".battery-hero");
+    return el ? getComputedStyle(el).animationName : null;
+  });
+  check("anim/reduced motion still overrides it", rmAnim === "none", String(rmAnim));
+  await rm.close();
+}
+
 /** The P3 items with behaviour rather than colour: each was invisible to the
  *  suite, and two turned out to be defects rather than polish. */
 async function polishPass(browser, errors) {
@@ -5137,6 +5225,7 @@ async function bootFailure(browser) {
   await tabletBand(browser, errors);
   await fundCompleteOrder(browser, errors);
   await polishPass(browser, errors);
+  await entryAnimation(browser, errors);
   await signInPrompt(browser, errors);
   await onboarding(browser, errors);
   console.log("\nBackup round-trip");

@@ -507,6 +507,28 @@ details were not in that audit. `tests/sql/run.sh` asserts the refusal returns
 0 rows and no error, which is what makes the guard necessary rather than
 decorative.
 
+## Whose cycle is this? (payment attribution)
+
+Reported from use: tapping another member's chip in Rounds opened the pay
+sheet **for them**, with their name only in a small subtitle after "Round 2 ·".
+Submitting filed your screenshot as *their* contribution. Easy to do by
+accident, hard to notice afterwards.
+
+- **A member may now only tap their OWN chip.** `cellClicked()` refuses another
+  member's cycle by name ("That's Regine's cycle — you can only send your own
+  payment"), and `rounds.js` no longer marks those chips clickable. The guard
+  is in both places because `cellClicked` is exported on `PowerFund`.
+- **Migration 011 settles it anyway**: `contributions_self` checks
+  `member_id = pf_member_id()`, so paying for somebody else is about to be
+  refused by Postgres. The UI was offering a button that is going to fail.
+- **Not identified on this device → ask.** `openWhoAmIPicker()`, rather than
+  taking the chip they happened to tap as the answer. That guess is what filed
+  the payment against somebody else.
+- **The treasurer's path is unchanged** and is the legitimate one, but it now
+  announces itself: the member's name moves into the sheet TITLE ("Pay Cycle 7
+  for Sarah") and an amber `.pay-for-warn` says the proof is filed against
+  their cycle. Your own payment looks exactly as it did.
+
 ## Migrations
 
 Run in the Supabase SQL editor, in order. `006` also needs a one-off

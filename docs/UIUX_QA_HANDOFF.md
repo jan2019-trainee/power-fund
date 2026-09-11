@@ -94,6 +94,15 @@ genuinely different code paths).
   prominent enough to work, and does it sit correctly against the personal
   status card on both frames?
 
+### Payment attribution in Rounds
+- A member sees only **their own** cycle chips as tappable; others render as
+  plain status badges.
+- Tapping another member's chip (via the exported handler) refuses **by name**.
+- Not identified on the device → the who-am-I picker, not a guess.
+- The treasurer paying for someone else gets the name in the **title** and an
+  amber warning that the proof is filed against that member's cycle. Worth
+  checking the warning is prominent enough without looking like an error.
+
 ### Transfer treasurer role (admin only)
 - Names the current holder; lists only members who have **signed in**; says
   why the others are missing.
@@ -175,7 +184,10 @@ Please check these before filing, they have each been argued out:
 8. **The treasurer can edit an unlinked member's payout details.** Deliberate,
    and it closes when that member signs in. Without it a member with no account
    has no route to their own destination and nor does anyone else.
-9. **The treasurer can still edit payout details in the database.** The UI
+9. **A member cannot pay another member's cycle.** Deliberate, and migration
+   011 enforces it in Postgres regardless. The treasurer still can, and that
+   path announces itself.
+10. **The treasurer can still edit payout details in the database.** The UI
    hides the button; Postgres deliberately keeps the treasurer's write access,
    because a member who loses their Google account would otherwise have no
    route to correct where their payout goes and nor would anyone else. A

@@ -1382,6 +1382,29 @@
       // Rejected behaves like unpaid here: the cycle is still owed, and
       // tapping it is how the member sends a fresh screenshot.
       if (C.isOwed(status)) {
+        // ONLY YOUR OWN. Tapping another member's chip used to open the pay
+        // sheet for THEM — their name only in a small subtitle — so a
+        // mis-tap filed your screenshot as their contribution. Migration 011
+        // refuses it outright (contributions_self keys on pf_member_id()), so
+        // this also stops the app offering a button that is about to fail.
+        //
+        // The chip is already non-clickable in that case; this is the same
+        // rule again because cellClicked is exported on PowerFund.
+        const meId = accountMemberId || myMemberId;
+        if (meId && String(memberId) !== String(meId)) {
+          const them = state.members.find((x) => String(x.id) === String(memberId));
+          return showError(
+            `That's ${
+              them ? them.name + "'s" : "another member's"
+            } cycle — you can only send your own payment.`
+          );
+        }
+        // Nobody identified on this device yet. Ask who they are rather than
+        // taking the chip they happened to tap as the answer: that guess would
+        // file the payment against somebody else.
+        if (!meId) {
+          return openWhoAmIPicker();
+        }
         // With migration 002 active, members can only pay into a round the
         // treasurer has started, so a new round always begins at ₱0. Without it
         // this check is a no-op (currentRound == first unfunded round).
@@ -5373,11 +5396,27 @@
         modalTarget.cycleNumber + modalCount - 1
       );
       const cycleRound = C.roundOfCycle(modalTarget.cycleNumber);
+      // Recording somebody else's contribution — only reachable in treasurer
+      // mode now, and it has to announce itself. A member tapping the wrong
+      // chip used to land here with nothing but a small "· Clara" to warn them.
+      const meIdNow = accountMemberId || myMemberId;
+      const forSomeoneElse =
+        !!member && !!meIdNow && String(member.id) !== String(meIdNow);
       html += `<div class="modal-overlay sheet" onclick="if(event.target===this) PowerFund.closeModal()">
         <div class="modal sheet-pay" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
           <div class="sheet-head">
             <div class="sheet-head-titles">
-              <h3 id="dlg-title">Pay Cycle ${modalTarget.cycleNumber}</h3>
+              <h3 id="dlg-title">${
+                // WHOSE payment this is belongs in the TITLE, not tucked after
+                // "Round 2 ·" in the subtitle where it was. The sheet's whole
+                // job is attributing money to a person; if that is the one
+                // thing a glance misses, the sheet is wrong.
+                forSomeoneElse
+                  ? `Pay Cycle ${modalTarget.cycleNumber} for ${escapeHtml(
+                      member.name
+                    )}`
+                  : `Pay Cycle ${modalTarget.cycleNumber}`
+              }</h3>
               <p class="modal-sub">${
                 due ? `Due ${C.formatDate(due)} · ` : ""
               }Round ${cycleRound}${
@@ -5389,6 +5428,16 @@
               14
             )}</button>
           </div>
+
+          ${
+            forSomeoneElse
+              ? `<div class="pay-for-warn">${icon("alert", 15)}<span>This
+                   records the payment as <b>${escapeHtml(
+                     member.name
+                   )}</b>'s, not yours. The proof you attach is filed against
+                   their cycle.</span></div>`
+              : ""
+          }
 
           ${
             qrUrl

@@ -1417,6 +1417,26 @@ body {
   margin-left: 6px;
 }
 
+/* "This records the payment as X's, not yours." Amber, not red: it is a
+   correct and intended action for a treasurer, just one that must not happen
+   by accident. Matches .payout-dest-warn, which says the same kind of thing on
+   the release side. */
+.pay-for-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  background: var(--accent-soft);
+  border: 1px solid rgba(245, 166, 35, 0.35);
+  border-radius: 12px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+.pay-for-warn svg { color: var(--accent); flex-shrink: 0; margin-top: 1px; }
+.pay-for-warn b { color: var(--text-primary); }
+
 .payout-done-tag {
   font-size: 11px;
   font-weight: 600;

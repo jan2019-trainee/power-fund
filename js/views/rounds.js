@@ -14,7 +14,7 @@ window.PFViews.rounds = function (ctx) {
     members, rounds, curCycle, allDone, curRound, ROUND_PILL, state,
     unlocked, openRound, escapeHtml, inlineArg, icon, getPayout,
     payoutRecipientName, payoutDateText, C, isWide, undoPaidTarget, payCycle,
-    markPaidTarget
+    markPaidTarget, myMember
   } = ctx;
   let html = "";
   // Filled only on wide screens, where the list and detail render separately.
@@ -107,7 +107,23 @@ window.PFViews.rounds = function (ctx) {
                       : overdue
                       ? "!"
                       : "";
-                  const clickable = unlocked || status === 0 || status === 3;
+                  // WHOSE CHIP IS THIS? A member may only send their OWN
+                  // payment. Tapping somebody else's used to open the pay
+                  // sheet with their name in a small subtitle, and submitting
+                  // recorded the contribution as THEIRS with your screenshot
+                  // attached — easy to do by accident and hard to notice.
+                  //
+                  // Migration 011 settles it anyway: contributions_self checks
+                  // `member_id = pf_member_id()`, so paying for somebody else
+                  // is about to be refused by Postgres. Offering it would mean
+                  // offering a button that fails.
+                  //
+                  // Not yet identified (no linked account, no who-am-I
+                  // preference) → still tappable, but it asks who you are
+                  // first rather than guessing from the chip you hit.
+                  const isMine = !!myMember && String(m.id) === String(myMember.id);
+                  const clickable =
+                    unlocked || ((isMine || !myMember) && (status === 0 || status === 3));
                   // This string is now the chip's accessible NAME, so it has
                   // to describe what tapping does for THIS viewer. It said
                   // "tap to resubmit" to everyone, but a treasurer tapping a
@@ -154,7 +170,11 @@ window.PFViews.rounds = function (ctx) {
                     m.id
                   )}', ${c})" aria-label="${escapeHtml(m.name)}: ${escapeHtml(
                     tip
-                  )}">${escapeHtml(m.name)}${icon ? ` ${icon}` : ""}</button>`;
+                  )}${
+                    !unlocked && myMember && !isMine && C.isOwed(status)
+                      ? " — only " + escapeHtml(m.name) + " can send this payment"
+                      : ""
+                  }">${escapeHtml(m.name)}${icon ? ` ${icon}` : ""}</button>`;
                 })
                 .join("");
               // Undoing one confirmed payment, inline under the row whose pill

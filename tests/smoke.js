@@ -2178,6 +2178,148 @@ async function accountLinking(browser, errors) {
   await soft.close();
 }
 
+/** Whose cycle is this? Tapping another member's chip in Rounds used to open
+ *  the pay sheet for THEM, with their name only in a small subtitle — so a
+ *  mis-tap filed your screenshot as their contribution. Migration 011 refuses
+ *  it outright (contributions_self keys on pf_member_id()), so the UI must not
+ *  offer a button that is about to fail. */
+async function payAttribution(browser, errors) {
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`pay-attr: ${e}`));
+  const members = rosterWithEmails();
+  const me = members[1]; // Sarah
+  me.auth_user_id = FAKE_USER_ID;
+  // Nothing paid, so every cycle-1 chip is genuinely owed and the guard is
+  // actually reached. With the default fixture many are already confirmed and
+  // cellClicked returns early — which passes the refusal checks below for the
+  // wrong reason.
+  await serve(page, { ...M.TABLE_DATA, members, contributions: [] });
+  // Identity seeded DIRECTLY, not left to the sign-in round-trip. WHO THE APP
+  // THINKS YOU ARE is the entire subject of this test, so it must not depend
+  // on the harness happening to link an account — that is exactly how these
+  // checks first passed for the wrong reason: nobody was identified, so every
+  // chip was clickable and the handler took the who-are-you branch instead of
+  // the refusal branch.
+  await page.addInitScript((id) => {
+    try { localStorage.setItem("pf_my_member_id", id); } catch (e) {}
+  }, me.id);
+  await withAuthMode(page, "optional");
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
+  await page.locator(".tab-item", { hasText: "Rounds" }).click();
+  await page.waitForTimeout(500);
+  // Open the current round so the per-cycle chips are on screen.
+  await page.locator(".round-head, .round").first().click().catch(() => {});
+  await page.waitForTimeout(600);
+
+  const owedChips = page.locator(".member-chip.editable");
+  const n = await owedChips.count();
+  // The PREMISE, asserted rather than assumed: only the open round's own
+  // cycles are tappable, all of them Sarah's. If this is wrong, the two checks
+  // after it mean nothing.
+  const allChips = await page.locator(".member-chip").count();
+  // The PREMISE, asserted rather than assumed: the grid draws every cycle of
+  // every round, so "one member's share" — not "one round's worth" — is what
+  // tappable should mean. Getting this wrong is how the refusal checks below
+  // first passed while every chip on screen was still clickable.
+  check(
+    "pay-attr/exactly one member's share of chips is tappable",
+    n > 0 && allChips > 0 && n === allChips / M.MEMBERS.length,
+    `${n} editable of ${allChips} chips, ${M.MEMBERS.length} members`
+  );
+  // Every chip a member can tap must be their own.
+  let foreignClickable = 0;
+  for (let i = 0; i < n; i++) {
+    const label = await owedChips.nth(i).getAttribute("aria-label");
+    if (label && !label.startsWith(me.name + ":")) foreignClickable++;
+  }
+  check(
+    "pay-attr/a member can only tap their OWN chip",
+    foreignClickable === 0,
+    `${foreignClickable} other members' chips were clickable`
+  );
+
+  // The handler is exported, so the disabled button is not the gate.
+  const otherId = members[0].id;
+  await page.evaluate((id) => window.PowerFund.cellClicked(id, 1), otherId);
+  await page.waitForTimeout(500);
+  check(
+    "pay-attr/the handler refuses another member's cycle",
+    (await page.locator(".sheet-pay").count()) === 0
+  );
+  const errText = await page
+    .locator(".save-error-banner")
+    .innerText()
+    .catch(() => "");
+  check(
+    "pay-attr/and says whose cycle it was, rather than failing silently",
+    /can only send your own payment/i.test(errText),
+    errText
+      ? errText.replace(/\s+/g, " ").slice(0, 90)
+      : "no error banner — identified as: " +
+        (await page.evaluate(() => {
+          const el = document.querySelector(".profile-card-name");
+          return el ? el.textContent : "(nobody)";
+        }))
+  );
+  await page.close();
+
+  // Nobody identified: ask who they are rather than guessing from the chip.
+  const anon = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  anon.on("pageerror", (e) => errors.push(`pay-attr/anon: ${e}`));
+  await serve(anon, { ...M.TABLE_DATA, contributions: [] });
+  // Explicitly NOT identified: no linked account and no who-am-I preference.
+  await anon.addInitScript(() => {
+    try { localStorage.removeItem("pf_my_member_id"); } catch (e) {}
+  });
+  await withAuthMode(anon, "off");
+  await anon.goto(BASE, { waitUntil: "domcontentloaded" });
+  await anon.waitForTimeout(2200);
+  const firstId = M.MEMBERS[0].id;
+  await anon.evaluate((id) => window.PowerFund.cellClicked(id, 1), firstId);
+  await anon.waitForTimeout(500);
+  check(
+    "pay-attr/an unidentified device is asked who it is, not guessed at",
+    (await anon.locator(".sheet-pay").count()) === 0 &&
+      (await anon.locator(".modal-overlay").count()) === 1
+  );
+  await anon.close();
+
+  // The treasurer's legitimate path must announce whose payment it is.
+  const tre = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  tre.on("pageerror", (e) => errors.push(`pay-attr/treasurer: ${e}`));
+  const t = rosterWithEmails();
+  t[0].auth_user_id = FAKE_USER_ID;
+  await serve(tre, { ...M.TABLE_DATA, members: t, contributions: [] });
+  await tre.addInitScript((id) => {
+    try { localStorage.setItem("pf_my_member_id", id); } catch (e) {}
+  }, t[0].id);
+  await withAuthMode(tre, "optional");
+  await tre.goto(BASE, { waitUntil: "domcontentloaded" });
+  await tre.waitForTimeout(2500);
+  await tre.evaluate((id) => window.PowerFund.openContributeModal(id, 1), t[1].id);
+  await tre.waitForTimeout(500);
+  check(
+    "pay-attr/paying for someone else names them in the TITLE, not a subtitle",
+    /for Sarah/i.test(await tre.locator("#dlg-title").innerText())
+  );
+  check(
+    "pay-attr/and warns the proof is filed against their cycle",
+    (await tre.locator(".pay-for-warn").count()) === 1
+  );
+  // Your own payment must not carry the warning.
+  await tre.evaluate(() => window.PowerFund.closeModal());
+  await tre.waitForTimeout(300);
+  await tre.evaluate((id) => window.PowerFund.openContributeModal(id, 1), t[0].id);
+  await tre.waitForTimeout(500);
+  check(
+    "pay-attr/your own payment is unchanged — no name, no warning",
+    !/for Regine/i.test(await tre.locator("#dlg-title").innerText()) &&
+      (await tre.locator(".pay-for-warn").count()) === 0
+  );
+  await tre.close();
+}
+
 /** My Payout QR Code — member-managed (MyPayoutQRManage.dc.html). This is
  *  where a member's ₱30,000 gets sent, so the interesting assertions are the
  *  refusals: the UI must not offer, and the handlers must not accept, editing
@@ -3729,6 +3871,7 @@ async function bootFailure(browser) {
   await signInAdmin(browser, errors);
   await accountLinking(browser, errors);
   console.log("\nOnboarding");
+  await payAttribution(browser, errors);
   await myPayoutQr(browser, errors);
   await unlockVisibility(browser, errors);
   await transferRole(browser, errors);

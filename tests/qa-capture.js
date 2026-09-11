@@ -495,10 +495,28 @@ async function tabs(page, prefix, list) {
     await p.locator(".mark-paid-panel button", { hasText: "Cancel" }).click();
     await p.waitForTimeout(300);
   }
-  const paidChip = p.locator(".member-chip.paid").first();
-  if (await paidChip.count()) {
+  // A confirmed chip in a round that has NOT been paid out. Round 1 is
+  // released in these fixtures, and reverting inside a released round is now
+  // refused, so the panel would never open there. Find an open round whose
+  // accordion has no release record, rather than taking the first paid chip
+  // on the page.
+  let paidChip = null;
+  for (const head of await p.locator(".round-header").all()) {
+    const card = head.locator("xpath=..");
+    if (await card.locator(".payout-status-box").count()) continue; // released
+    if (!/is-open/.test((await card.getAttribute("class")) || "")) {
+      await head.click();
+      await p.waitForTimeout(450);
+    }
+    const c = card.locator(".member-chip.paid").first();
+    if (await c.count()) { paidChip = c; break; }
+  }
+  if (paidChip) {
     await paidChip.click();
     await p.waitForTimeout(500);
+    if (!(await p.locator(".undo-paid-panel").count())) {
+      throw new Error("undo panel did not open on an unreleased round");
+    }
     await p.locator(".undo-paid-panel").scrollIntoViewIfNeeded();
     await p.waitForTimeout(250);
     await shot(p, "t-mobile-undo-paid", "Undo one confirmed payment, inline", true);

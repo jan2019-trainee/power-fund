@@ -3110,6 +3110,96 @@ async function extraTreasurer(browser, errors) {
   await solo.close();
 }
 
+/** P1-2: treasurer mode says nothing about whether the writes behind it land.
+ *  011 keys confirm/reject/revert/record/release off members.is_treasurer, and
+ *  the PIN that opens the mode is shared with all five members by design. */
+async function moneyGate(browser, errors) {
+  // A member the app can POSITIVELY identify as not the treasurer: Jan is
+  // signed in and linked, Regine carries the flag.
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`money-gate: ${e}`));
+  const members = rosterWithEmails();
+  members[2].auth_user_id = FAKE_USER_ID;
+  await serve(page, {
+    ...M.TABLE_DATA,
+    members,
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234" },
+  });
+  await withAuthMode(page, "optional", { signedIn: true, email: "jan@example.com" });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
+
+  // Premise: they really can unlock. canUnlockTreasurer() hides the button
+  // only from someone it can identify as a non-treasurer — so it IS hidden
+  // here, and the mode is reached the way the guard must survive: the
+  // exported handler. If this premise breaks, the checks below prove nothing.
+  await page.evaluate(() => { window.PowerFund.toggleUnlock(); });
+  await page.waitForTimeout(400);
+  if (await page.locator(".modal-overlay").count()) {
+    await page.keyboard.type("1234");
+    await page.locator(".modal-btn-primary").first().click();
+    await page.waitForTimeout(800);
+  }
+
+  const pending = M.CONTRIBUTIONS.find((c) => c.status === 1);
+  const cyc = (M.CYCLES.find((c) => c.id === pending.cycle_id) || {}).cycle_number;
+  await page.evaluate(
+    (a) => window.PowerFund.openReviewModal(a.id, a.cycle),
+    { id: pending.member_id, cycle: cyc }
+  );
+  await page.waitForTimeout(500);
+  const openedReview = (await page.locator(".modal-btn-confirm").count()) === 1;
+  check("money-gate/premise: a PIN-unlocked member reaches Review Payment", openedReview);
+
+  if (openedReview) {
+    check("money-gate/it says the writes are refused, before the press",
+      (await page.locator(".money-refused").count()) === 1);
+    check("money-gate/Confirm Payment is disabled",
+      (await page.locator(".modal-btn-confirm").isDisabled()) === true);
+    check("money-gate/Reject claim is disabled",
+      (await page.locator(".modal-btn-secondary.reject").isDisabled()) === true);
+  }
+
+  // The buttons are not the gate — every handler is exported on PowerFund.
+  let wrote = false;
+  await page.route("**/rest/v1/contributions**", (r) => {
+    if (r.request().method() !== "GET") wrote = true;
+    return r.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await page.evaluate(() => window.PowerFund.confirmReview());
+  await page.waitForTimeout(500);
+  check("money-gate/the exported confirm handler refuses too", wrote === false);
+  check("money-gate/and explains why",
+    /flagged treasurer/.test(await page.locator(".save-error-banner").innerText()),
+    await page.locator(".save-error-banner").innerText());
+  await page.close();
+
+  // THE DIRECTION THAT MATTERS MORE. isTreasurerAccount() is false whenever
+  // the app cannot identify the viewer at all — and a fund on AUTH_MODE "off"
+  // still has flagged members, so keying this off it would disable every money
+  // action for a legitimate treasurer with no session. It must not.
+  const off = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  off.on("pageerror", (e) => errors.push(`money-gate/off: ${e}`));
+  await serve(off, {
+    ...M.TABLE_DATA,
+    members: rosterWithEmails(), // flags set, nobody linked
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234" },
+  });
+  await off.goto(BASE, { waitUntil: "domcontentloaded" });
+  await off.waitForTimeout(2000);
+  await unlockTreasurer(off);
+  await off.evaluate(
+    (a) => window.PowerFund.openReviewModal(a.id, a.cycle),
+    { id: pending.member_id, cycle: cyc }
+  );
+  await off.waitForTimeout(500);
+  check("money-gate/auth off: a flagged roster does NOT disable the treasurer",
+    (await off.locator(".modal-btn-confirm").isDisabled()) === false);
+  check("money-gate/auth off: and no refusal notice is shown",
+    (await off.locator(".money-refused").count()) === 0);
+  await off.close();
+}
+
 /** The findings from the independent UI/UX QA pass that were implementation
  *  gaps rather than product decisions. Every one of these passed the suite
  *  before the fix, because nothing asserted the behaviour at all. */
@@ -4781,6 +4871,7 @@ async function bootFailure(browser) {
   await paymentSchedule(browser, errors);
   await pinDeadEnds(browser, errors);
   await qaFindings(browser, errors);
+  await moneyGate(browser, errors);
   await signInPrompt(browser, errors);
   await onboarding(browser, errors);
   console.log("\nBackup round-trip");

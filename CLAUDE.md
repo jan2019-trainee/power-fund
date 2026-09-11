@@ -745,30 +745,49 @@ one was a false pass (`/short/` matched the sentinel string "(no
 .payout-shortfall rendered)"), the other called `cellClicked(null, …)`, a
 no-op. A check that cannot fail is not a check.
 
-### Still open, and why
+**P1 — money actions were gated on `unlocked`, the SHARED PIN.** 011 keys every
+money write off `members.is_treasurer`; only the five ADMIN surfaces had been
+moved. Confirm, reject, revert, record-as-paid and release still checked the
+PIN, so four of five members were invited into a mode where Postgres refuses
+every write — and found out by pressing Confirm on a real claim.
 
-- **P1 — money actions are gated on `unlocked`, not `isTreasurerAccount()`.**
-  011 keys every money write off `members.is_treasurer`; only the five ADMIN
-  surfaces were moved. Confirm, reject, revert, record-as-paid and release
-  still check the shared PIN, so four of five members are invited into a mode
-  where Postgres refuses every write. The project's own reasoning, written for
-  the Payment schedule, applies verbatim. `requireRows()` reports it honestly,
-  so this is presentation, not a hole — but the Release path uploads the
-  receipt BEFORE the `payouts` write it may be refused, orphaning a file.
-- **P1 — the Release Payout amount is fixed at `GOAL_PER_ROUND`**, where
-  `payout-release-notes` says it stays editable as a historical record. A
-  deliberate change (there is a comment saying so at `js/app.js:2606`) that was
-  never recorded and contradicts a published annotation. **A product decision:
-  it is what `payouts.amount` MEANS** — what was sent, or a restatement of the
-  goal. Put to the owner. Dead doc-comment at `js/app.js:2560` to delete either
-  way.
-- **P1 — Home's hierarchy.** An undesigned "WHOLE FUND · ALL 5 ROUNDS /
-  ₱150,000" block sits above the designed round hero on every Home variant, in
-  both shells, carrying the largest type on the screen. Verified: zero hits for
-  `150,000` / `whole fund` / `all 5 rounds` across `Main`, `MainMember`,
-  `DesktopHomeTreasurer`, `DesktopHomeMember`. `rounds-notes` states the intent
-  — *"split out of Home so the dashboard stays glanceable."* **A design
-  decision, put to the owner**: demote it, or record the override.
+**The obvious fix would have broken the app, and this is the part to keep.**
+The predicate is NOT `!isTreasurerAccount()`: that is false whenever the app
+cannot identify the viewer AT ALL — auth off, signed out, a link that broke —
+and a fund on `AUTH_MODE` `"off"` still has flagged members, so keying off it
+would disable every money action for a legitimate treasurer with no session.
+`moneyWritesRefused()` acts only on a viewer it can POSITIVELY identify as
+somebody other than the treasurer, the same direction `canUnlockTreasurer()`
+takes, with the same nobody-flagged escape hatch. A test asserts the
+auth-off direction, which is the one that would have taken the fund down.
+
+The note is shown in Review Payment before the press, both buttons are
+disabled, and all five handlers refuse — they are exported on `PowerFund`, so
+a disabled button is not the gate.
+
+### The two product decisions, taken by the owner
+
+- **The Release Payout amount stays FIXED** at `GOAL_PER_ROUND`, against
+  `payout-release-notes` ("stays editable … historical record only"). Recorded
+  here rather than left as an unexplained deviation. `payouts.amount` is a
+  restatement of the goal, not a record of what was transferred — so a bank fee
+  or a partial send is not expressible, and release is funded-gated so the
+  round always held at least that much when it went out. The dead doc-comment
+  describing the removed parser is deleted.
+- **Home's whole-fund block is DEMOTED to one line**, per the design's
+  "split out of Home so the dashboard stays glanceable" (`rounds-notes`); no
+  Home artboard carries a whole-fund meter. **The QA report's stated reason was
+  wrong and it is worth knowing why**: it said the block "carries the largest
+  type on the screen". Measured, `.battery-amount` is **30px** against
+  `.fund-total-amount`'s **16px** — the hero already won on size, and the code
+  comment claiming it was demoted was accurate. What actually outranked the
+  hero was SHAPE and POSITION: a three-line block with its own progress bar,
+  sitting first. So the fix is the shape, not the type — one line, and the
+  second progress bar is gone, because two meters in one scroll read as a
+  fault rather than as two questions.
+
+### Still open
+
 - **The 16 P2s and 16 P3s**, which are a consistency pass rather than a
   rebuild. The sharpest: the cycle-chip affordance is inverted (the chips a
   member may NOT tap look tappable; their own does not, on touch); the payment

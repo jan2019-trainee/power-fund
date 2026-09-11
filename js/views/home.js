@@ -273,33 +273,38 @@ window.PFViews.home = function (ctx) {
     const remaining = C.remainingAmount(state.contributions);
     const overallPct = Math.round(C.progressPercentOverall(state.contributions));
     const pendingPesos = C.pendingTotal(state.contributions);
-    // Scope has to be on the label. The hero directly below shows the CURRENT
-    // ROUND's progress, and the design carries only that one hero — two
-    // unlabelled progress bars reading 20% and 0% within a single scroll look
-    // like a fault rather than two questions. Demoted to a strip in CSS so the
-    // hero stays the primary answer; the lifetime total is worth keeping, just
-    // not worth competing.
-    return `<div class="fund-total">
-      <p class="fund-total-label">Whole fund · all ${C.TOTAL_ROUNDS} rounds</p>
-      <div class="fund-total-amount">${C.peso(collected)} <span>/ ${C.peso(
-      C.TARGET_AMOUNT
-    )}</span></div>
-      <div class="fund-total-bar"><div class="fund-total-fill" style="width:${Math.min(
-        100,
-        Math.max(0, overallPct)
-      )}%"></div></div>
-      <div class="fund-total-meta">${
-        C.allRoundsComplete(state.contributions, rounds)
-          ? "Fund complete"
-          : `${overallPct}% collected · <b>${C.peso(remaining)}</b> to go`
-      }${
+    // ONE LINE, AND NO SECOND PROGRESS BAR.
+    //
+    // The type was never the problem — .battery-amount is 30px against this
+    // block's 16px, so the hero already won on size (measured, after an
+    // independent QA pass reported the opposite). What made this outrank the
+    // hero was SHAPE and POSITION: a three-line block with its own progress
+    // bar, sitting first, above the round the member can actually act on.
+    //
+    // rounds-notes: Rounds was "split out of Home so the dashboard stays
+    // glanceable", and no Home artboard carries a whole-fund meter at all.
+    // The lifetime total is still worth knowing — it is just a footnote to
+    // the round, not a competitor to it. The bar is gone because the hero
+    // directly below is a progress meter, and two of them in one scroll read
+    // as a fault rather than as two questions.
+    const pendingClause =
       pendingPesos > 0
-        ? ` <span class="fund-total-pending">+ ${C.peso(
+        ? ` · <span class="fund-total-pending">+${C.peso(
             pendingPesos
-          )} awaiting review</span>`
-        : ""
-    }</div>
-    </div>`;
+          )} in review</span>`
+        : "";
+    return `<p class="fund-total">
+      <span class="fund-total-label">Whole fund</span>
+      ${
+        C.allRoundsComplete(state.contributions, rounds)
+          ? `<b>${C.peso(collected)}</b> of ${C.peso(
+              C.TARGET_AMOUNT
+            )} · all ${C.TOTAL_ROUNDS} rounds complete`
+          : `<b>${C.peso(collected)}</b> of ${C.peso(
+              C.TARGET_AMOUNT
+            )} · ${overallPct}% · ${C.peso(remaining)} to go`
+      }${pendingClause}
+    </p>`;
   })();
 
   // Rounds whose payout is funded and unreleased. Computed once, up here,

@@ -946,6 +946,39 @@
     return !((state && state.members) || []).some((m) => m.is_treasurer);
   }
 
+  /** Will Postgres refuse this viewer's money writes?
+   *
+   *  Migration 011 keys confirm / reject / revert / record-as-paid / release
+   *  off `members.is_treasurer`. The treasurer PIN is SHARED WITH ALL FIVE
+   *  MEMBERS by design, so unlocking treasurer mode says nothing about whether
+   *  the writes behind it will land: four of five were being offered Confirm
+   *  Payment on a real claim and finding out by pressing it.
+   *
+   *  NOT `!isTreasurerAccount()`. That is false whenever the app cannot
+   *  identify the viewer at all — auth off, signed out, a link that broke —
+   *  and a fund on AUTH_MODE "off" has flagged members, so keying off it would
+   *  disable every money action for a legitimate treasurer who simply has no
+   *  session. Same direction as canUnlockTreasurer(): act only on a viewer we
+   *  can POSITIVELY identify as somebody other than the treasurer, and stay
+   *  out of the way in every uncertain case. Postgres is the real gate either
+   *  way; this only decides whether they meet a button that is not theirs or
+   *  an error that looks like a bug. */
+  function moneyWritesRefused() {
+    const mine = editableMember();
+    if (!mine || mine.is_treasurer) return false;
+    // Nobody flagged at all: the fund has no treasurer account yet, 011's
+    // readiness check refuses the lockdown, and the PIN is the only authority
+    // that exists. Same bootstrap escape hatch as isTreasurerAccount().
+    return ((state && state.members) || []).some((m) => m.is_treasurer);
+  }
+
+  /** The one sentence shown wherever a money action is disabled for this
+   *  reason, so it reads the same everywhere it appears. */
+  const MONEY_REFUSED_NOTE =
+    "Only the fund's flagged treasurer can confirm payments, reject them or " +
+    "release a payout. Treasurer mode is unlocked, but these writes are " +
+    "refused — see Menu → Security → Transfer treasurer role.";
+
   function openProfileModal() {
     const me = editableMember();
     if (!me) {
@@ -1516,6 +1549,7 @@
   /** The actual direct (cash) record, after the inline confirmation. */
   async function confirmMarkPaid() {
     if (busy || !markPaidTarget) return;
+    if (moneyWritesRefused()) return showError(MONEY_REFUSED_NOTE);
     const { memberId, cycleNumber } = markPaidTarget;
     markPaidTarget = null;
     busy = true;
@@ -1570,6 +1604,7 @@
 
   async function doRevertContribution(memberId, cycleNumber) {
     if (busy) return;
+    if (moneyWritesRefused()) return showError(MONEY_REFUSED_NOTE);
     // Checked here as well as where the panel opens: confirmUndoPaid is
     // exported on PowerFund, so the absent panel is not the gate.
     const broken = revertBreaksReleasedRound(memberId, cycleNumber);
@@ -1689,6 +1724,7 @@
   /** Shared worker: mark the given pending cycles as confirmed-paid. */
   async function confirmCycles(memberId, cycles) {
     if (busy || !cycles || !cycles.length) return;
+    if (moneyWritesRefused()) return showError(MONEY_REFUSED_NOTE);
     busy = true;
     render();
     try {
@@ -1750,6 +1786,7 @@
 
   async function doRejectReview() {
     if (!reviewTarget || busy) return;
+    if (moneyWritesRefused()) return showError(MONEY_REFUSED_NOTE);
     const { memberId, cycles } = reviewTarget;
     const note = rejectNoteValue.trim();
     if (!note) {
@@ -2626,9 +2663,6 @@
     render();
   }
 
-  /** Parse the release-modal amount field. Blank => the ₱30,000 default.
-   *  This is a historical record only — it never touches round funding. */
-
   /** Release, but explicitly WITHOUT a receipt, after an upload has failed.
    *  The break-glass: refusing outright is right for a transient failure, but
    *  if the storage bucket is missing the treasurer can never record a payout
@@ -2643,6 +2677,7 @@
 
   async function markPayoutReleased(opts) {
     if (!payoutModalRound || busy) return;
+    if (moneyWritesRefused()) return showError(MONEY_REFUSED_NOTE);
     const skipReceipt = !!(opts && opts.skipReceipt === true);
     const round = payoutModalRound;
     // Guard at the action level: a payout can only be released once the round
@@ -5801,6 +5836,8 @@
       undoPaidTarget, markPaidTarget,
       hasMasterPin: hasMasterPin(),
       hasTreasurerPin: hasTreasurerPin(),
+      moneyRefused: moneyWritesRefused(),
+      MONEY_REFUSED_NOTE,
       // Accounts (migration 008). The mode drives whether Menu shows an
       // Account group at all; the email is what "Signed in as ..." prints.
       authMode: AUTH_MODE,
@@ -6199,8 +6236,18 @@
                 : // The mockup: a green Confirm carrying a tick, then "Reject
                   // claim" as a red outline. Close lives in the header × now,
                   // so a third stacked button is no longer needed.
-                  `<button class="modal-btn-primary modal-btn-confirm" onclick="PowerFund.confirmReview()" ${
-                    busy ? "disabled" : ""
+                  `${
+                    // Say it before the press, not after. 011 refuses both of
+                    // these for anyone but the flagged treasurer, and the PIN
+                    // that opened this modal is shared with all five members.
+                    moneyWritesRefused()
+                      ? `<p class="money-refused">${icon(
+                          "alert",
+                          14
+                        )}<span>${escapeHtml(MONEY_REFUSED_NOTE)}</span></p>`
+                      : ""
+                  }<button class="modal-btn-primary modal-btn-confirm" onclick="PowerFund.confirmReview()" ${
+                    busy || moneyWritesRefused() ? "disabled" : ""
                   }>${
                     busy
                       ? "Working…"
@@ -6208,7 +6255,9 @@
                           multi ? `Confirm all ${rc.length} as paid` : "Confirm Payment"
                         }</span>`
                   }</button>
-                   <button class="modal-btn-secondary reject" onclick="PowerFund.rejectReview()">Reject claim</button>`
+                   <button class="modal-btn-secondary reject" onclick="PowerFund.rejectReview()" ${
+                     moneyWritesRefused() ? "disabled" : ""
+                   }>Reject claim</button>`
             }
           </div>
         </div>

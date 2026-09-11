@@ -1155,6 +1155,25 @@ body {
 .edit-names-modal { text-align: left; }
 .edit-names-modal h3, .edit-names-modal .modal-sub { text-align: center; }
 
+/* Treasurer mode is open, but this viewer's money writes are refused by
+   Postgres (migration 011 keys them off members.is_treasurer, and the PIN that
+   opened the mode is shared with the whole group). Amber, not red: nothing has
+   gone wrong — the buttons simply are not theirs. */
+.money-refused {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  text-align: left;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 10px;
+  padding: 10px 11px;
+  margin: 0 0 12px;
+}
+.money-refused .icon { flex: none; margin-top: 2px; }
+
 /* An already-released round that no longer holds its full goal. Only reachable
    on a fund that got there before the guard existed — but it must read as the
    contradiction it is, not as a normal release record. */
@@ -2007,52 +2026,30 @@ body {
    progress indicator (the design has no second one); this carries the
    lifetime figure without competing for that job — no card chrome, smaller
    numerals, scope stated in the label. */
+/* One quiet line above the round hero — see the note in js/views/home.js.
+   It used to be a three-line block with its own progress bar, which outranked
+   the hero by shape and position even though the hero's figure is nearly
+   twice the size. */
 .fund-total {
-  background: none;
-  border: none;
+  display: block;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
   border-bottom: 1px solid var(--border);
-  border-radius: 0;
-  padding: 0 2px 12px;
-  margin-bottom: 14px;
+  padding: 0 2px 11px;
+  margin: 0 0 14px;
 }
 .fund-total-label {
   font-family: 'Space Grotesk', sans-serif;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-muted);
-  margin: 0 0 6px;
+  margin-right: 7px;
 }
-/* Deliberately smaller than the hero's round figure — this is context, the
-   hero is the headline. */
-.fund-total-amount {
-  font-family: 'Space Grotesk', sans-serif;
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text-primary);
-}
-.fund-total-amount span { color: var(--text-muted); font-size: 13px; font-weight: 500; }
-.fund-total-bar {
-  height: 6px;
-  border-radius: 4px;
-  background: var(--bg-card-alt);
-  margin: 10px 0 8px;
-  overflow: hidden;
-}
-.fund-total-fill {
-  height: 100%;
-  border-radius: 4px;
-  background: var(--success);
-  transition: width 0.6s cubic-bezier(0.22, 1, 0.36, 1);
-}
-.fund-total-meta { font-size: 12.5px; color: var(--text-muted); }
-.fund-total-meta b { color: var(--text-primary); font-weight: 600; }
+.fund-total b { color: var(--text-primary); font-weight: 600; }
 .fund-total-pending { color: var(--accent); white-space: nowrap; }
-
-@media (prefers-reduced-motion: reduce) {
-  .fund-total-fill { transition: none; }
-}
 
 /* ==========================================================================
    Treasurer "Needs your attention" panel + pending-review queue (M3)

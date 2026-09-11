@@ -57,6 +57,19 @@ Test both frames for everything: **mobile ≤ 430px** and **desktop ≥ 900px**
 (`isWide` is a JS branch at 900px, not a CSS reflow — the two shells are
 genuinely different code paths).
 
+### Every screen is now captured
+The first pass could not review 20-odd screens — they needed a linked account,
+a first-run device, an `AUTH_MODE` other than `off`, or a file, and the harness
+offered none of those. `tests/qa-capture.js` now produces **174** screenshots
+including the two that were named as priorities and missing entirely:
+**My payout details** (`acct-*-payout-details`) and **Onboarding**
+(`ob-*-1..5`, `ob-*-picker`). Also added: Edit Profile and Change Photo, the
+three account dead-ends, Menu → Security scrolled into view, the payment QR /
+edit-names / reorder modals, the three payment sheets as desktop modals, the
+proof lightbox, both restore states, boot failure in both frames, the error
+and success toasts, and **768px** — a real device band (iPad portrait, phone
+landscape) that no capture had ever fallen in.
+
 ### The two PIN dead ends (new copy — no mockup)
 Both only appear in states that were previously unreachable.
 - **A fund with no treasurer PIN.** Sign in as the flagged treasurer on a fund

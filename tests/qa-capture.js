@@ -32,6 +32,11 @@ const PIN = "1234";
 
 const shots = [];
 const errors = [];
+/* Some captures INDUCE a failure on purpose — the error toast has to come from
+   a real failed write, not a poked state. Without this the harness reports the
+   deliberate 500 as a page error and exits non-zero, which would train the
+   next reader to ignore the error list. */
+let expectErrors = false;
 
 function uuid(n) {
   return `00000000-0000-0000-0000-${String(n).padStart(12, "0")}`;
@@ -251,6 +256,7 @@ async function open(browser, data, viewport, member, opts) {
     // The RPC 404 is deliberate (see serve()), and the realtime socket is not
     // available here. Reporting either drowns the errors that do matter.
     if (
+      !expectErrors &&
       m.type() === "error" &&
       !/realtime|websocket/i.test(m.text()) &&
       !/404 \(Not Found\)/.test(m.text())
@@ -655,6 +661,255 @@ async function tabs(page, prefix, list) {
   for (const [label, vp] of [["mobile", MOBILE], ["desktop", DESKTOP]]) {
     p = await open(browser, midFund, vp, null, { authMode: "required" });
     await shot(p, `e-${label}-signin-gate`, "AUTH_MODE required, signed out — no way past");
+    await p.close();
+  }
+
+  // ---- THE SCREENS THE FIRST QA PASS COULD NOT SEE ----
+  // Everything here was classified J ("not yet verified") in the first report,
+  // because it needs a LINKED ACCOUNT, a first-run device, an AUTH_MODE other
+  // than "off", or a file — and the harness offered none of those. Unreviewed
+  // is not approved, so these are captured rather than asserted about.
+  console.log("\nMember-account surfaces (My payout details, profile)");
+  {
+    const acct = withAccounts(midFund, 2); // Jan: linked, NOT the treasurer
+    for (const [label, vp] of [["mobile", MOBILE], ["desktop", DESKTOP]]) {
+      p = await open(browser, acct.data, vp, null, {
+        authMode: "optional",
+        signedInAs: acct.me,
+      });
+      const gated = [
+        ["payout-details", "My payout details — bank picker, account fields, QR (a PORT of MyPayoutQRManage)",
+          () => window.PowerFund.openPayoutQrModal()],
+        ["edit-profile", "Edit Profile — a port of EditProfile.dc.html",
+          () => window.PowerFund.openProfileModal()],
+        ["share", "Share fund status",
+          () => window.PowerFund.openShareModal()],
+      ];
+      for (const [name, note, fn] of gated) {
+        await p.evaluate(fn);
+        await p.waitForTimeout(600);
+        await shot(p, `acct-${label}-${name}`, note);
+        if (name === "edit-profile") {
+          // Change Photo opens OVER Edit Profile and is the one Escape closes
+          // first — so it is captured here, from the screen it belongs to.
+          await p.evaluate(() => window.PowerFund.openPhotoSheet());
+          await p.waitForTimeout(600);
+          await shot(p, `acct-${label}-change-photo`, "Change Photo, over Edit Profile (ProfilePhotoSheet.dc.html)");
+        }
+        for (let i = 0; i < 4 && (await p.locator(".modal-overlay").count()); i++) {
+          await p.keyboard.press("Escape").catch(() => {});
+          await p.waitForTimeout(220);
+        }
+      }
+      await p.close();
+    }
+  }
+
+  console.log("\nOnboarding — first run, both frames");
+  for (const [label, vp] of [["mobile", MOBILE], ["desktop", DESKTOP]]) {
+    p = await open(browser, midFund, vp, null, { fresh: true });
+    for (let i = 1; i <= 6; i++) {
+      if (!(await p.locator(".onboarding").count())) break;
+      await shot(p, `ob-${label}-${i}`, `Onboarding step ${i}`);
+      const next = p.locator(".ob-next").first();
+      if (await next.count()) {
+        await next.click();
+      } else {
+        // The final step is the who-am-I picker, which has no Next.
+        await shot(p, `ob-${label}-picker`, "Onboarding — which member are you");
+        break;
+      }
+      await p.waitForTimeout(500);
+    }
+    await p.close();
+  }
+
+  console.log("\nAccount dead-ends (AUTH_MODE required)");
+  {
+    const linkedElsewhere = withAccounts(midFund, 0).data;
+    linkedElsewhere.members = linkedElsewhere.members.map((m, i) =>
+      i === 0 ? { ...m, auth_user_id: "99999999-9999-9999-9999-999999999999" } : m
+    );
+    const noEmails = {
+      ...midFund,
+      members: midFund.members.map((m) => ({ ...m, email: null, auth_user_id: null })),
+    };
+    const cases = [
+      ["unknown", "Signed in with an address on no member row", withAccounts(midFund, 0).data,
+        { email: "stranger@example.com" }],
+      ["taken", "The matching member row belongs to another login", linkedElsewhere,
+        { email: "regine@example.com" }],
+      ["no-email", "The roster carries no addresses at all — migration 008's one-off never ran",
+        noEmails, { email: "regine@example.com" }],
+    ];
+    for (const [name, note, data, who] of cases) {
+      p = await open(browser, data, MOBILE, null, { authMode: "required", signedInAs: who });
+      await shot(p, `e-mobile-account-${name}`, note);
+      await p.close();
+    }
+  }
+
+  console.log("\nTreasurer modals that had no capture");
+  for (const [label, vp] of [["mobile", MOBILE], ["desktop", DESKTOP]]) {
+    p = await open(browser, midFund, vp, null);
+    await unlock(p);
+    for (const [name, note, fn] of [
+      ["payment-qr", "Payment QR code — what members scan", () => window.PowerFund.openQrModal()],
+      ["edit-names", "Edit member names", () => window.PowerFund.openEditNamesModal()],
+      ["reorder", "Reorder payout order", () => window.PowerFund.openReorderModal()],
+    ]) {
+      await p.evaluate(fn);
+      await p.waitForTimeout(600);
+      await shot(p, `t-${label}-${name}`, note);
+      for (let i = 0; i < 4 && (await p.locator(".modal-overlay").count()); i++) {
+        await p.keyboard.press("Escape").catch(() => {});
+        await p.waitForTimeout(220);
+      }
+    }
+    // The Security group, scrolled INTO VIEW. The existing menu captures stop
+    // above it, so the first report could not see it at all.
+    await p.evaluate(() => window.PowerFund.setView("menu"));
+    await p.waitForTimeout(500);
+    const sec = p.locator(".section-label", { hasText: "Security" }).first();
+    if (await sec.count()) {
+      await sec.scrollIntoViewIfNeeded();
+      await p.waitForTimeout(300);
+      await shot(p, `t-${label}-menu-security`, "Menu → Security, scrolled into view", true);
+    }
+    await p.close();
+  }
+
+  console.log("\nThe payment sheets as DESKTOP modals");
+  {
+    // Above 640px these become centred modals rather than bottom sheets, and
+    // above 900px what is behind them blurs. Neither was ever captured.
+    p = await open(browser, midFund, DESKTOP, M.MEMBERS[2].id);
+    await p.evaluate((id) => window.PowerFund.openContributeModal(id, 7), M.MEMBERS[2].id);
+    await p.waitForTimeout(700);
+    await shot(p, "d-desktop-contribute", "Contribute as a centred desktop modal");
+    await p.close();
+
+    p = await open(browser, midFund, DESKTOP, null);
+    await unlock(p);
+    const pend = M.CONTRIBUTIONS.find((c) => c.status === 1);
+    const pc = (M.CYCLES.find((c) => c.id === pend.cycle_id) || {}).cycle_number;
+    await p.evaluate((a) => window.PowerFund.openReviewModal(a.id, a.c), { id: pend.member_id, c: pc });
+    await p.waitForTimeout(700);
+    await shot(p, "d-desktop-review", "Review Payment as a centred desktop modal");
+    await p.close();
+
+    p = await open(browser, funded, DESKTOP, null);
+    await unlock(p);
+    await p.evaluate(() => window.PowerFund.openPayoutModal(2));
+    await p.waitForTimeout(700);
+    await shot(p, "d-desktop-release", "Release Payout as a centred desktop modal");
+    await p.close();
+  }
+
+  console.log("\nLightbox, restore, and the untested width");
+  {
+    p = await open(browser, midFund, MOBILE, M.MEMBERS[1].id);
+    await p.evaluate(() => window.PowerFund.openLightbox("https://example.invalid/proof.jpg"));
+    await p.waitForTimeout(600);
+    await shot(p, "e-mobile-lightbox", "Proof zoom — close button below the image");
+    await p.close();
+
+    // Restore: both the invalid file and the REPLACE confirmation. pickRestoreFile
+    // builds a detached <input> and clicks it, which Playwright sees as a
+    // filechooser — so this drives the real path rather than poking state.
+    for (const [name, note, body] of [
+      ["restore-invalid", "Restore — the file is not a Power Fund backup", "{ not json"],
+      ["restore-confirm", "Restore — type REPLACE to confirm",
+        JSON.stringify({
+          version: 2,
+          exported_at: new Date().toISOString(),
+          contributions: M.CONTRIBUTIONS.slice(0, 12),
+          payouts: M.PAYOUTS,
+          members: M.MEMBERS,
+        })],
+    ]) {
+      p = await open(browser, midFund, MOBILE, null);
+      await unlock(p);
+      const chooser = p.waitForEvent("filechooser");
+      await p.evaluate(() => window.PowerFund.pickRestoreFile());
+      const fc = await chooser;
+      await fc.setFiles({
+        name: "power-fund-backup.json",
+        mimeType: "application/json",
+        buffer: Buffer.from(body),
+      });
+      await p.waitForTimeout(800);
+      await shot(p, `t-mobile-${name}`, note);
+      await p.close();
+    }
+
+    // 641-899px: the mobile tab bar with desktop-sized touch targets and
+    // desktop-positioned modals. No capture has ever fallen in this band.
+    p = await open(browser, midFund, { width: 768, height: 1024 }, M.MEMBERS[1].id);
+    await shot(p, "e-768-home", "Home at 768px — mobile shell, desktop sheet/touch rules");
+    await p.evaluate(() => window.PowerFund.setView("menu"));
+    await p.waitForTimeout(500);
+    await shot(p, "e-768-menu", "Menu at 768px");
+    await p.evaluate((id) => window.PowerFund.openContributeModal(id, 7), M.MEMBERS[1].id);
+    await p.waitForTimeout(700);
+    await shot(p, "e-768-contribute", "Contribute at 768px — sheet or modal?");
+    await p.close();
+  }
+
+  console.log("\nBoot failure and the toast stack");
+  {
+    // NoConnection.dc.html. Every table fails, so the app never boots — and it
+    // only claims "No connection" when the failure really looks like one.
+    for (const [label, vp] of [["mobile", MOBILE], ["desktop", DESKTOP]]) {
+      const q = await browser.newPage({ viewport: vp });
+      await q.route("**/js/config.js", async (r) => {
+        const res = await r.fetch();
+        return r.fulfill({ status: 200, contentType: "application/javascript",
+          body: (await res.text()).replace(/AUTH_MODE:\s*"[a-z]*"/, 'AUTH_MODE: "off"') });
+      });
+      await q.addInitScript(() => {
+        try {
+          localStorage.setItem("pf_onboarded", "1");
+          localStorage.setItem("pf_signin_skipped", "1");
+        } catch (e) {}
+      });
+      await q.route("**/rest/v1/**", (r) => r.abort("connectionfailed"));
+      await q.route("**/realtime/v1/**", (r) => r.abort());
+      await q.goto(BASE, { waitUntil: "domcontentloaded" });
+      await q.waitForTimeout(2500);
+      await shot(q, `e-${label}-boot-failure`, "Boot failure — the fund could not be loaded");
+      await q.close();
+    }
+
+    // A real failed write, not a poked state: the toast has to carry Retry,
+    // and it is bottom-anchored above the tab bar on the phone. The 500 below
+    // is deliberate, so the error collector is muted for this one page.
+    expectErrors = true;
+    p = await open(browser, midFund, MOBILE, null);
+    await unlock(p);
+    await p.route("**/rest/v1/contributions**", (r) =>
+      r.request().method() === "GET"
+        ? r.fulfill({ status: 200, contentType: "application/json",
+            body: JSON.stringify(midFund.contributions) })
+        : r.fulfill({ status: 500, contentType: "application/json",
+            body: JSON.stringify({ message: "Internal server error" }) })
+    );
+    const pend2 = M.CONTRIBUTIONS.find((c) => c.status === 1);
+    const pc2 = (M.CYCLES.find((c) => c.id === pend2.cycle_id) || {}).cycle_number;
+    await p.evaluate((a) => window.PowerFund.openReviewModal(a.id, a.c), { id: pend2.member_id, c: pc2 });
+    await p.waitForTimeout(600);
+    await p.locator(".modal-btn-confirm").click();
+    await p.waitForTimeout(1500);
+    await shot(p, "e-mobile-toast-error", "A failed write — error toast with Retry, above the tab bar");
+    await p.close();
+    expectErrors = false;
+
+    // The success side of the same stack. Exporting used to save silently.
+    p = await open(browser, midFund, DESKTOP, null);
+    await unlock(p);
+    await p.evaluate(() => window.PowerFund.exportCsv());
+    await p.waitForTimeout(900);
+    await shot(p, "e-desktop-toast-success", "Confirmation toast — bottom-right on desktop");
     await p.close();
   }
 

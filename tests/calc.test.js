@@ -190,9 +190,20 @@ console.log("\nPer-round on-time rate and member states");
 
   // roundMemberStates buckets each member by their earliest unsettled cycle.
   const st = C.roundMemberStates(rows, cycles, members, 1);
-  // MEMBER paid cycles 1-2 but not 3-6, and cycle 3 is far future -> not due.
+  // MEMBER paid cycles 1-2 but not 3-6, and cycle 3 is far future.
   eq("payer is not counted overdue", st.overdue.indexOf(MEMBER), -1);
-  eq("payer sits in notDue", st.notDue.indexOf(MEMBER) >= 0, true);
+  // `paid` means NOTHING OUTSTANDING, not "all six cycles done". This assertion
+  // used to read `st.notDue`, and that was the bug: "paid" was unreachable
+  // until a round was nearly over, so a member who had genuinely paid and been
+  // confirmed was charted as "Not due yet" — reported from use, and fair,
+  // because they had paid and the chart said they had done nothing.
+  eq("a member square so far counts as paid", st.paid.indexOf(MEMBER) >= 0, true);
+  // The distinction that makes it honest: having paid NOTHING while nothing is
+  // due is a different state, and must stay in notDue. Otherwise everybody
+  // would read as "paid" on the first day of a round.
+  const fresh = C.roundMemberStates([], cycles, [{ id: MEMBER }], 5);
+  eq("nothing paid and nothing due stays notDue", fresh.notDue.length, 1);
+  eq("...and is not counted as paid", fresh.paid.length, 0);
   // OTHER has paid nothing; cycle 1 is long past due -> overdue.
   eq("non-payer is overdue", st.overdue.indexOf(OTHER) >= 0, true);
   // Every member lands in exactly one bucket.

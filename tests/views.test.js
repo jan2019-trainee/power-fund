@@ -60,16 +60,43 @@ function ctxProvidedByApp() {
   );
 }
 
-/** The names a view destructures off ctx. */
+/** The names a view destructures off ctx — from EVERY `= ctx` in the file, not
+ *  just the first.
+ *
+ *  This used `match` rather than `matchAll`, so it only ever saw the top-level
+ *  view function's destructure and every helper below it was invisible. That
+ *  is how `inlineArgSafe` — a module-level function in members.js — got
+ *  re-destructured off ctx inside payoutDest(), shadowing the real function
+ *  with `undefined` and crashing the Members screen for anyone whose payout QR
+ *  was set. The static check existed precisely to stop that and could not see
+ *  it. */
 function ctxUsedByView(src) {
-  const m = src.match(/const\s*\{([\s\S]*?)\}\s*=\s*ctx;/);
-  if (!m) return new Set();
-  return new Set(
+  const out = new Set();
+  // [^{}] rather than [\s\S]: a non-greedy any-char body will happily start at
+  // one `const {` and run to a LATER `} = ctx;`, swallowing unrelated
+  // destructures on the way. That reported `startCycle` (from
+  // `const { startCycle, endCycle } = C.roundCycleRange(r)`) as a missing ctx
+  // name — a false positive that would have trained the next person to ignore
+  // this check.
+  for (const m of src.matchAll(/const\s*\{([^{}]*?)\}\s*=\s*ctx\s*;/g)) {
     m[1]
       .split(",")
       .map((n) => n.split(":").pop().trim())
       .filter((n) => /^[A-Za-z_$][\w$]*$/.test(n))
-  );
+      .forEach((n) => out.add(n));
+  }
+  return out;
+}
+
+/** Names the file destructures off ctx that it ALSO declares itself.
+ *
+ *  Always a bug, and a silent one: the destructured copy shadows the real
+ *  declaration inside that function, and since ctx does not carry it the value
+ *  is `undefined`. It only throws when that branch runs. */
+function ctxShadowingLocals(src) {
+  const declared = new Set();
+  for (const m of src.matchAll(/function\s+([A-Za-z_$][\w$]*)/g)) declared.add(m[1]);
+  return [...ctxUsedByView(src)].filter((n) => declared.has(n));
 }
 
 /** Names the file declares itself. */
@@ -105,6 +132,17 @@ for (const f of files) {
     `${f}: destructures only provided names`,
     missing.length === 0,
     missing.length ? `not on ctx: ${missing.join(", ")}` : `${used.size} names`
+  );
+
+  // The sharper version of the same mistake: a name the file DECLARES and then
+  // also pulls off ctx. The destructured copy shadows the real function inside
+  // that scope and is `undefined`, so it throws only when that branch runs —
+  // which for inlineArgSafe meant only for a member who had a payout QR.
+  const shadowed = ctxShadowingLocals(src);
+  check(
+    `${f}: never shadows its own functions with a ctx name`,
+    shadowed.length === 0,
+    shadowed.length ? `declared here AND destructured: ${shadowed.join(", ")}` : "clean"
   );
 }
 

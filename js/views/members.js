@@ -273,7 +273,10 @@ function getPayoutReleased(rounds, r) {
  * my-payout-qr-notes). Enforced in Postgres too — see tests/sql/run.sh.
  */
 function payoutDest(m, ctx) {
-  const { escapeHtml, icon, payoutOwner, maskAccount, isTreasurerAccount, inlineArgSafe } = ctx;
+  // NOT inlineArgSafe — it is a module-level function in this file (above), and
+  // destructuring it off ctx shadowed the real one with `undefined`, crashing
+  // the whole Members screen for any member who had a payout QR on file.
+  const { escapeHtml, icon, payoutOwner, maskAccount, isTreasurerAccount } = ctx;
   // A LINKED account, never the who-am-I preference: that is unverified and
   // per-device, so trusting it would let anyone with the site URL change where
   // somebody's 30,000 is sent.

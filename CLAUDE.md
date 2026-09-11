@@ -583,6 +583,38 @@ MEASURES BOXES for this (`ctaGeometry`).
   already on file from before the cap arrives over-length and Save would
   otherwise refuse with nothing to point at.
 
+## Two bugs from the first day on 011
+
+**A view destructured its own function off `ctx`.** `inlineArgSafe` is a
+module-level function in `members.js`; `payoutDest()` also pulled the name off
+`ctx`, which shadowed the real one with `undefined` and crashed the whole
+Members screen — but only for a member who had a payout QR on file, so it
+surfaced the day somebody uploaded one.
+
+`tests/views.test.js` exists precisely to catch this and could not see it:
+`ctxUsedByView()` used `match`, not `matchAll`, so it only ever checked the
+FIRST `= ctx` destructure in a file and every helper function's was invisible.
+Now it reads all of them, with the body bounded to `[^{}]` — a non-greedy
+any-char body happily spans from one `const {` to a LATER `} = ctx;` and
+reported `startCycle` (from `C.roundCycleRange`) as missing, a false positive
+that would have trained the next person to ignore the check. A second
+assertion catches the sharper form directly: **a name the file declares AND
+destructures off ctx** is always this bug.
+
+**The Insights donut called a paying member "Not due yet".** `roundMemberStates`
+bucketed by the earliest unsettled cycle, and `paid` meant all SIX cycles of
+the round — unreachable until a round is nearly over, so the slice was dead
+for most of a round's life and somebody who had genuinely paid and been
+confirmed was charted as having done nothing. Reported from use, and fair.
+
+`paid` now means **nothing outstanding**: square on every cycle that has come
+due. It degrades correctly — at the end of a round, square and all-six are the
+same thing. The distinction that keeps it honest is that having paid *nothing*
+while nothing is due stays `notDue`; without that, everybody would read as
+"paid" on day one of a round. The donut has no approved mockup (the design
+specifies only "on-time rate, per-member standing, and a per-round collection
+timeline"), so its semantics were ours to correct.
+
 ## Migrations
 
 Run in the Supabase SQL editor, in order. `006` also needs a one-off

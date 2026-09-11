@@ -41,9 +41,14 @@ function uuid(n) {
 // Each is a complete Supabase snapshot. Named for the situation a reviewer
 // needs to judge, not for the data that produces it.
 
+const MASTER_PIN = "9999";
 const SETTINGS = {
   ...M.SETTINGS,
   treasurer_pin: PIN,
+  // A fund WITH a master PIN, so the recovery path is photographable. It must
+  // differ from the treasurer PIN — the app refuses the two being the same,
+  // since the master PIN exists for when the treasurer PIN is what is lost.
+  master_pin: MASTER_PIN,
   fund_name: "ViTAMiN Fund 2027",
   qr_code_url: null,
 };
@@ -158,9 +163,39 @@ const complete = (() => {
 
 // --- Harness ---------------------------------------------------------------
 
-async function serve(page, data) {
+async function serve(page, data, authMode) {
+  // AUTH_MODE IS PINNED, NOT INHERITED. The shipped value is a deploy-time
+  // decision, and it is now "required" — so without this every capture in this
+  // file was a screenshot of the sign-in wall. That is not a hypothetical: it
+  // is what this harness produced until it was noticed, ~40 identical images
+  // handed to a reviewer as "the app".
+  await page.route("**/js/config.js", async (route) => {
+    const res = await route.fetch();
+    return route.fulfill({
+      status: 200,
+      contentType: "application/javascript",
+      body: (await res.text()).replace(
+        /AUTH_MODE:\s*"[a-z]*"/,
+        `AUTH_MODE: "${authMode || "off"}"`
+      ),
+    });
+  });
   await page.route("**/rest/v1/**", (route) => {
-    const table = new URL(route.request().url()).pathname.split("/").pop();
+    const url = new URL(route.request().url());
+    // Real PostgREST 404s a function it does not have. Answering 200 [] makes
+    // the app believe migration 010's PIN vault exists and returned nothing,
+    // which is the one reading that must never be reported as "no PIN is set".
+    if (url.pathname.includes("/rpc/")) {
+      return route.fulfill({
+        status: 404,
+        contentType: "application/json",
+        body: JSON.stringify({
+          code: "42883",
+          message: "Could not find the function",
+        }),
+      });
+    }
+    const table = url.pathname.split("/").pop();
     const rows = data[table];
     return route.fulfill({
       status: 200,
@@ -185,22 +220,90 @@ async function serve(page, data) {
   });
 }
 
-async function open(browser, data, viewport, member) {
+/** The Supabase auth storage key is derived from the project ref, so read it
+ *  rather than hardcode one: a stale copy seeds the wrong key, the session is
+ *  silently ignored, and the result looks exactly like "the account-gated
+ *  surfaces are missing". */
+let _ref = null;
+function projectRef() {
+  if (_ref) return _ref;
+  const src = fs.readFileSync(path.join(__dirname, "..", "js", "config.js"), "utf8");
+  const m = src.match(/SUPABASE_URL:\s*"https:\/\/([^.]+)\./);
+  if (!m) throw new Error("Couldn't read SUPABASE_URL from js/config.js");
+  _ref = m[1];
+  return _ref;
+}
+const FAKE_USER_ID = "11111111-1111-1111-1111-111111111111";
+
+/**
+ * opts.authMode  "off" (default) | "optional" | "required"
+ * opts.signedInAs  a member row to seed a Google session for. The account-only
+ *   surfaces (Member sign-in, Transfer role, Payment schedule) key off
+ *   members.is_treasurer on a LINKED row, so `member` — which only writes the
+ *   per-device pf_my_member_id preference — cannot reach them.
+ * opts.fresh  leave the onboarding/sign-in-prompt keys unset.
+ */
+async function open(browser, data, viewport, member, opts) {
+  const o = opts || {};
   const page = await browser.newPage({ viewport });
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("console", (m) => {
-    if (m.type() === "error" && !/realtime|websocket/i.test(m.text())) {
+    // The RPC 404 is deliberate (see serve()), and the realtime socket is not
+    // available here. Reporting either drowns the errors that do matter.
+    if (
+      m.type() === "error" &&
+      !/realtime|websocket/i.test(m.text()) &&
+      !/404 \(Not Found\)/.test(m.text())
+    ) {
       errors.push(`console: ${m.text()}`);
     }
   });
-  await serve(page, data);
-  await page.addInitScript((id) => {
-    if (id) window.localStorage.setItem("pf_my_member_id", id);
+  await serve(page, data, o.authMode);
+  await page.addInitScript((a) => {
+    if (a.id) window.localStorage.setItem("pf_my_member_id", a.id);
     else window.localStorage.removeItem("pf_my_member_id");
-  }, member || "");
+    if (!a.fresh) {
+      // Otherwise the intro, and then the sign-in prompt, front every capture.
+      window.localStorage.setItem("pf_onboarded", "1");
+      window.localStorage.setItem("pf_signin_skipped", "1");
+    }
+    if (a.email) {
+      window.localStorage.setItem(`sb-${a.ref}-auth-token`, JSON.stringify({
+        access_token: "qa-access-token",
+        token_type: "bearer",
+        expires_in: 31536000,
+        expires_at: Math.floor(Date.now() / 1000) + 31536000,
+        refresh_token: "qa-refresh-token",
+        user: { id: a.uid, email: a.email, aud: "authenticated" },
+      }));
+    }
+  }, {
+    id: member || "",
+    fresh: !!o.fresh,
+    ref: projectRef(),
+    uid: FAKE_USER_ID,
+    email: o.signedInAs ? o.signedInAs.email : "",
+  });
+  if (o.signedInAs) {
+    await page.route("**/auth/v1/**", (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: "{}" }));
+  }
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
-  await page.waitForTimeout(1700);
+  await page.waitForTimeout(o.signedInAs ? 2400 : 1700);
   return page;
+}
+
+/** The roster as it looks after migration 008's one-off, with one member
+ *  linked to the fake Google session. Returns the whole snapshot plus the
+ *  linked row, so a caller can pass it straight to open()'s signedInAs. */
+function withAccounts(data, linkedIndex) {
+  const members = data.members.map((m, i) => ({
+    ...m,
+    email: `${m.name.toLowerCase()}@example.com`,
+    auth_user_id: i === linkedIndex ? FAKE_USER_ID : null,
+    is_treasurer: i === 0,
+  }));
+  return { data: { ...data, members }, me: members[linkedIndex] };
 }
 
 async function unlock(page) {
@@ -263,6 +366,17 @@ async function tabs(page, prefix, list) {
     executablePath: process.env.PF_CHROMIUM || undefined,
     args: ["--no-sandbox"],
   });
+
+  // EVERY PAGE GETS ITS OWN CONTEXT, WITH THE SERVICE WORKER BLOCKED.
+  // page.route() does not intercept what a service worker fetches, and sw.js
+  // claims the client on the first load — so from the second navigation on,
+  // every mock here was bypassed and the page rendered the real config. A
+  // fresh context per page, not one shared: each capture relies on its own
+  // localStorage, and sharing would leak identity between scenarios.
+  browser.newPage = async (opt) => {
+    const context = await browser.newContext({ ...(opt || {}), serviceWorkers: "block" });
+    return context.newPage();
+  };
 
   const CORE = [
     { view: "home", note: "Home" },
@@ -418,6 +532,113 @@ async function tabs(page, prefix, list) {
   await p.waitForTimeout(400);
   await shot(p, "t-desktop-activity-all", "Activity table, All rounds");
   await p.close();
+
+  // ---- ACCOUNT-GATED SURFACES ----
+  // These key off members.is_treasurer on a LINKED row, so pf_my_member_id and
+  // the shared PIN cannot reach them at all. Without a seeded Google session
+  // they were simply absent from the review — not deferred, just unphotographed.
+  console.log("\nSigned-in treasurer · account-only surfaces");
+  {
+    const acct = withAccounts(midFund, 0); // Regine, flagged and linked
+    for (const [label, vp] of [["mobile", MOBILE], ["desktop", DESKTOP]]) {
+      p = await open(browser, acct.data, vp, null, {
+        authMode: "optional",
+        signedInAs: acct.me,
+      });
+      // A Google-verified treasurer unlocks with no PIN. If a modal appears the
+      // session did not link, and every shot below would be a locked screen
+      // labelled as a treasurer one.
+      await p.locator(".unlock-btn").click();
+      await p.waitForTimeout(600);
+      if (await p.locator(".modal-overlay").count()) {
+        throw new Error(
+          "treasurer mode asked for a PIN — the seeded session did not link, " +
+            "so these captures would be mislabelled"
+        );
+      }
+      await p.evaluate(() => window.PowerFund.setView("menu"));
+      await p.waitForTimeout(500);
+      await shot(p, `a-${label}-menu`, "Menu, signed-in treasurer (no PIN needed to unlock)");
+
+      const overlays = [
+        ["schedule", "Payment schedule — the 30 due dates", () => window.PowerFund.openScheduleModal()],
+        ["member-signin", "Member sign-in — the addresses a login is matched against", () => window.PowerFund.openMemberAccountsModal()],
+        ["transfer-role", "Transfer treasurer role", () => window.PowerFund.openTransferRole()],
+        ["change-pin", "Change PIN, step 1 of 3", () => window.PowerFund.openChangePin()],
+        ["master-pin", "Set or change the master PIN", () => window.PowerFund.openMasterPin()],
+        ["reset", "Reset all fund data — type RESET plus the PIN", () => window.PowerFund.resetData()],
+      ];
+      for (const [name, note, fn] of overlays) {
+        await p.evaluate(fn);
+        await p.waitForTimeout(600);
+        await shot(p, `a-${label}-${name}`, note);
+        // closeTopModal() is not exported; Escape is the public route, and the
+        // PIN wizard can stack two.
+        for (let i = 0; i < 4 && (await p.locator(".modal-overlay").count()); i++) {
+          await p.keyboard.press("Escape").catch(() => {});
+          await p.waitForTimeout(220);
+        }
+      }
+
+      // The schedule with a shift applied — the state a reviewer has to judge,
+      // since the untouched list says nothing about what the feature does.
+      await p.evaluate(() => window.PowerFund.openScheduleModal());
+      await p.waitForTimeout(600);
+      const dates = p.locator(".schedule-date");
+      const v = await dates.nth(2).inputValue();
+      const d = new Date(v + "T00:00:00");
+      d.setDate(d.getDate() + 14);
+      const pad = (n) => String(n).padStart(2, "0");
+      await dates.nth(2).fill(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
+      await p.waitForTimeout(500);
+      await shot(p, `a-${label}-schedule-moved`, "Payment schedule after a 14-day shift — settled-cycle warning");
+      await p.close();
+    }
+
+    // A fund that never set a treasurer PIN. The verified treasurer unlocks
+    // without one, so a PIN-gated action has nothing to type — this is the
+    // dialog that used to answer "Incorrect PIN" forever.
+    const noPin = {
+      ...acct.data,
+      app_settings: { ...acct.data.app_settings, treasurer_pin: null, master_pin: null },
+    };
+    p = await open(browser, noPin, MOBILE, null, {
+      authMode: "optional",
+      signedInAs: acct.me,
+    });
+    await p.locator(".unlock-btn").click();
+    await p.waitForTimeout(600);
+    await p.evaluate(() => window.PowerFund.setView("menu"));
+    await p.waitForTimeout(450);
+    await shot(p, "a-mobile-menu-no-pin", "Menu on a fund with no treasurer PIN — the Security row says so");
+    await p.evaluate(() => window.PowerFund.resetData());
+    await p.waitForTimeout(600);
+    await shot(p, "a-mobile-no-pin-confirm", "A PIN-gated action with no PIN to type — offers to create one");
+    await p.close();
+  }
+
+  // Unlocked with the MASTER PIN: Change PIN must not then demand the
+  // treasurer PIN the person has just proved they have forgotten.
+  console.log("\nMaster-PIN recovery");
+  p = await open(browser, midFund, MOBILE, null);
+  await p.locator(".unlock-btn").click();
+  await p.waitForTimeout(400);
+  await p.keyboard.type(MASTER_PIN);
+  await p.locator(".modal-btn-primary").first().click();
+  await p.waitForTimeout(900);
+  await shot(p, "e-mobile-master-unlocked", "Unlocked with the master PIN — the nudge to set a new treasurer PIN");
+  await p.evaluate(() => window.PowerFund.openChangePin());
+  await p.waitForTimeout(500);
+  await shot(p, "e-mobile-master-change-pin", "Change PIN after a master unlock — two steps, no current-PIN demand");
+  await p.close();
+
+  // The sign-in gate itself, which is what AUTH_MODE "required" actually ships.
+  console.log("\nSign-in gate");
+  for (const [label, vp] of [["mobile", MOBILE], ["desktop", DESKTOP]]) {
+    p = await open(browser, midFund, vp, null, { authMode: "required" });
+    await shot(p, `e-${label}-signin-gate`, "AUTH_MODE required, signed out — no way past");
+    await p.close();
+  }
 
   // ---- EDGE STATES ----
   console.log("\nEdge states");

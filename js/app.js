@@ -219,6 +219,26 @@
   let editNamesValues = {};
   let editNamesError = null;
 
+  /* Treasurer -> Group -> "Payment schedule". The 30 due dates are written once
+   * by supabase/seed.sql, two and a half years ahead, and had no editing
+   * surface at all — the schema comment says "edit freely", meaning in SQL.
+   * They drive every overdue chip, the attention queue and isOverdue(), so a
+   * fund whose schedule slipped by a month accused people of being late and
+   * the only fix was the Supabase SQL editor. A draft map keyed by cycle id,
+   * a live-validated error, one save — the same shape as edit-names. */
+  let scheduleModalOpen = false;
+  let scheduleValues = {};
+  /* The last VALID date seen for each cycle, which is what a shift measures
+   * from. It cannot be the previous draft value: editing a date field with the
+   * keyboard empties it between segments ("2026-10-15" -> "" -> "2026-11-15"),
+   * so measuring against the draft would see a move out of nothing and skip
+   * the shift entirely for anybody not using the picker. */
+  let scheduleLastValid = {};
+  let scheduleError = null;
+  /* Changing one date and dragging the rest with it is the actual use case
+   * ("round 3 started two weeks late"). Off, this edits one date alone. */
+  let scheduleShift = true;
+
   /* Treasurer -> Account -> "Member sign-in". The addresses a Google login is
    * matched against (migration 008) had no UI at all: they could only be set
    * with a hand-written SQL update, which meant the one person who could roll
@@ -2892,6 +2912,252 @@
     render();
   }
 
+
+  // ===================================================================
+  // Payment schedule (treasurer)
+  //
+  // Category: UI Only. `cycles.due_date` has existed since the first schema
+  // and migration 011's `cycles_treasurer` policy already permits the write —
+  // what was missing was any way to reach it from the app.
+  //
+  // Gated on isTreasurerAccount(), not on `unlocked`: 011 keys the policy off
+  // members.is_treasurer, which the shared PIN cannot express, so gating this
+  // on the PIN would offer four other people a button Postgres is going to
+  // refuse. (isTreasurerAccount() keeps its bootstrap fallback to the PIN for
+  // a fund with nobody flagged yet — there, 011 is not in force either.)
+  // ===================================================================
+
+  /** "YYYY-MM-DD" -> local midnight Date. Matches C.parseDueDate exactly, so
+   *  the editor and the overdue rules can never disagree about a day. */
+  function isoToDate(iso) {
+    return new Date(iso + "T00:00:00");
+  }
+  function dateToIso(d) {
+    const p = (n) => String(n).padStart(2, "0");
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+  }
+  /** Add whole days, via setDate() so a DST boundary moves the clock and not
+   *  the calendar day — the thing this screen is actually about. */
+  function shiftIso(iso, days) {
+    const d = isoToDate(iso);
+    d.setDate(d.getDate() + days);
+    return dateToIso(d);
+  }
+  /** Whole days from a to b. Rounded for the same DST reason: an hour lost
+   *  across the gap would otherwise truncate a 14-day move to 13. */
+  function daysBetweenIso(aIso, bIso) {
+    return Math.round((isoToDate(bIso) - isoToDate(aIso)) / 86400000);
+  }
+  function validIso(v) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(v || ""))) return false;
+    const d = isoToDate(v);
+    if (isNaN(d.getTime())) return false;
+    // A date input accepts a typed year, and "0202" is one keystroke from
+    // "2027". Out here it is not a schedule, it is a typo.
+    const y = d.getFullYear();
+    return y >= 2000 && y <= 2100 && dateToIso(d) === v;
+  }
+
+  /** Cycles in cycle_number order, which is the order everything here assumes.
+   *  state.cycles arrives ordered from the query; sorted again because the
+   *  ordering is load-bearing and a realtime patch could append out of band. */
+  function orderedCycles() {
+    return [...((state && state.cycles) || [])].sort(
+      (a, b) => a.cycle_number - b.cycle_number
+    );
+  }
+
+  function openScheduleModal() {
+    if (!isTreasurerAccount()) return;
+    scheduleValues = {};
+    scheduleLastValid = {};
+    orderedCycles().forEach((c) => {
+      scheduleValues[c.id] = c.due_date;
+      scheduleLastValid[c.id] = c.due_date;
+    });
+    scheduleError = null;
+    scheduleShift = true;
+    scheduleModalOpen = true;
+    render();
+  }
+  function closeScheduleModal() {
+    scheduleModalOpen = false;
+    scheduleValues = {};
+    scheduleLastValid = {};
+    scheduleError = null;
+    render();
+  }
+
+  function setScheduleShift(on) {
+    scheduleShift = !!on;
+  }
+
+  /**
+   * Move one cycle, and — with the shift on — everything after it by the same
+   * number of days. The delta is measured against the DRAFT value, not the
+   * stored one, so two successive nudges compound the way the treasurer means
+   * them to rather than both being measured from the original date.
+   */
+  function setScheduleDate(cycleId, value) {
+    scheduleValues[cycleId] = value;
+    if (validIso(value)) {
+      const from = scheduleLastValid[cycleId];
+      scheduleLastValid[cycleId] = value;
+      const delta = validIso(from) ? daysBetweenIso(from, value) : 0;
+      if (scheduleShift && delta !== 0) {
+        const list = orderedCycles();
+        const at = list.findIndex((c) => String(c.id) === String(cycleId));
+        for (let i = at + 1; at !== -1 && i < list.length; i++) {
+          const id = list[i].id;
+          if (validIso(scheduleValues[id])) {
+            scheduleValues[id] = shiftIso(scheduleValues[id], delta);
+            scheduleLastValid[id] = scheduleValues[id];
+          }
+        }
+      }
+    }
+    refreshScheduleValidity();
+  }
+
+  /** The one rule set, shared by the live check and the save.
+   *  Returns a message, or null when the draft is savable. */
+  function scheduleProblem() {
+    const list = orderedCycles();
+    if (!list.length) return "This fund has no cycles yet.";
+    for (const c of list) {
+      if (!validIso(scheduleValues[c.id])) {
+        return `Cycle ${c.cycle_number} needs a valid date.`;
+      }
+    }
+    // Strictly increasing, because currentCycle() returns the FIRST cycle in
+    // number order whose date has not passed while completedCyclesCount()
+    // counts every cycle whose date has. Out of order those two disagree, and
+    // the app shows one cycle as current while counting a later one as done.
+    for (let i = 1; i < list.length; i++) {
+      const prev = scheduleValues[list[i - 1].id];
+      const cur = scheduleValues[list[i].id];
+      if (isoToDate(cur) <= isoToDate(prev)) {
+        return (
+          `Cycle ${list[i].cycle_number} must fall after cycle ` +
+          `${list[i - 1].cycle_number}. Each cycle is due after the one before it.`
+        );
+      }
+    }
+    return null;
+  }
+
+  /** Cycles whose date the draft moves AND which already carry a confirmed
+   *  payment. Not a blocker — a schedule that really slipped should move — but
+   *  onTimeStats() judges paid_at against due_date, so moving one of these
+   *  rewrites who is recorded as having paid on time. The screen has to say so
+   *  rather than quietly restating history. */
+  function scheduleSettledMoves() {
+    const out = [];
+    for (const c of orderedCycles()) {
+      if (scheduleValues[c.id] === c.due_date) continue;
+      const paid = (state.contributions || []).some(
+        (r) => String(r.cycle_id) === String(c.id) && r.status === 2
+      );
+      if (paid) out.push(c.cycle_number);
+    }
+    return out;
+  }
+
+  /** Patch the affected nodes by hand. render() reassigns innerHTML, which
+   *  would close the open date picker and drop the caret — and with the shift
+   *  on, one edit changes up to 29 other inputs, so their values have to be
+   *  written back here too. */
+  function refreshScheduleValidity() {
+    scheduleError = scheduleProblem();
+    const box = document.getElementById("scheduleError");
+    if (box) {
+      box.textContent = scheduleError || "";
+      box.hidden = !scheduleError;
+    }
+    const save = document.getElementById("scheduleSave");
+    if (save) save.disabled = busy || !!scheduleError;
+
+    document.querySelectorAll(".schedule-modal .schedule-date").forEach((el) => {
+      const id = el.getAttribute("data-cycle");
+      const v = scheduleValues[id];
+      // Never write back into the field being typed in: replacing its value
+      // mid-entry is how a date input eats a half-typed year.
+      if (el !== document.activeElement && v != null && el.value !== v) el.value = v;
+      el.classList.toggle("invalid", !validIso(v));
+    });
+
+    const moved = orderedCycles().filter(
+      (c) => scheduleValues[c.id] !== c.due_date
+    ).length;
+    const count = document.getElementById("scheduleCount");
+    if (count) {
+      count.textContent = moved
+        ? moved === 1
+          ? "1 cycle moved"
+          : moved + " cycles moved"
+        : "No changes yet";
+    }
+    const warn = document.getElementById("scheduleSettled");
+    if (warn) {
+      const settled = scheduleSettledMoves();
+      warn.hidden = !settled.length;
+      warn.textContent = settled.length
+        ? "Cycle " +
+          settled.join(", ") +
+          (settled.length === 1 ? " has" : " have") +
+          " already-confirmed payments. Moving the due date changes whether" +
+          " those count as paid on time."
+        : "";
+    }
+  }
+
+  async function saveSchedule() {
+    if (busy || !isTreasurerAccount()) return;
+    const problem = scheduleProblem();
+    if (problem) {
+      scheduleError = problem;
+      return render();
+    }
+    const changed = orderedCycles().filter(
+      (c) => scheduleValues[c.id] !== c.due_date
+    );
+    if (!changed.length) return closeScheduleModal();
+
+    busy = true;
+    render();
+    try {
+      await window.DB.updateCycleDueDates(
+        changed.map((c) => ({ id: c.id, due_date: scheduleValues[c.id] }))
+      );
+      // Named, not counted, but bounded: eighteen dates in one log line is
+      // unreadable and the log is read by all five. The first change is the
+      // one that explains the rest, since the others followed it.
+      const first = changed[0];
+      const detail =
+        `cycle ${first.cycle_number} moved ${C.formatDate(isoToDate(first.due_date))}` +
+        ` → ${C.formatDate(isoToDate(scheduleValues[first.id]))}`;
+      await logActivity(
+        changed.length === 1
+          ? `Payment schedule updated: ${detail}`
+          : `Payment schedule updated: ${changed.length} cycles moved (${detail})`,
+        { type: "admin" }
+      );
+      closeScheduleModal();
+      await reload();
+      showSuccess(
+        changed.length === 1
+          ? "Due date updated."
+          : `${changed.length} due dates updated.`
+      );
+    } catch (e) {
+      scheduleError = e.message;
+      busy = false;
+      return render();
+    }
+    busy = false;
+    render();
+  }
+
   // ===================================================================
   // Member sign-in (treasurer)
   //
@@ -3349,6 +3615,9 @@
     bell: '<path d="M6 8a6 6 0 0 1 12 0c0 4 1.5 5.5 2 6H4c.5-.5 2-2 2-6Z"/><path d="M10 20a2 2 0 0 0 4 0"/>',
     party: '<path d="M4 20l4.5-11L19 19.5 4 20Z"/><path d="M14 4.5v2M18.5 8h2M16.8 6.2l1.4-1.4"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
+    calendar:
+      '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18"/>' +
+      '<path d="M8 3v4"/><path d="M16 3v4"/>',
     trash:
       '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/><path d="M9 7V4h6v3"/>',
     // From OnboardingWelcome.dc.html's emblem.
@@ -4793,6 +5062,7 @@
       payoutModalRound ||
       shareModalOpen ||
       editNamesModalOpen ||
+      scheduleModalOpen ||
       memberAccountsModalOpen ||
       transferRoleModalOpen ||
       reorderModalOpen ||
@@ -4825,6 +5095,7 @@
     if (restoreState && restoreState.phase !== "working") return closeRestoreState();
     if (reorderModalOpen) return closeReorderModal();
     if (editNamesModalOpen) return closeEditNamesModal();
+    if (scheduleModalOpen) return closeScheduleModal();
     if (memberAccountsModalOpen) return closeMemberAccountsModal();
     if (transferRoleModalOpen) return closeTransferRole();
     if (shareModalOpen) return closeShareModal();
@@ -6458,6 +6729,87 @@
       </div>`;
     }
 
+    // FLAGGED TREASURER ONLY — see openScheduleModal(). Checked here as well
+    // as in the menu row, because the open* handlers are exported on
+    // PowerFund and the render must never take the caller's word for it.
+    if (scheduleModalOpen && isTreasurerAccount()) {
+      const list = orderedCycles();
+      const today = C.startOfDay(new Date());
+      const movedCount = list.filter((c) => scheduleValues[c.id] !== c.due_date).length;
+      const settled = scheduleSettledMoves();
+
+      let rows = "";
+      let lastRound = 0;
+      for (const c of list) {
+        const round = C.roundOfCycle(c.cycle_number);
+        if (round !== lastRound) {
+          lastRound = round;
+          rows += `<p class="schedule-round">Round ${round}</p>`;
+        }
+        const v = scheduleValues[c.id] != null ? scheduleValues[c.id] : c.due_date;
+        const past = validIso(v) && isoToDate(v) < today;
+        rows += `<label class="schedule-row${past ? " past" : ""}">
+          <span class="schedule-cycle">Cycle ${c.cycle_number}</span>
+          <input type="date" class="schedule-date${validIso(v) ? "" : " invalid"}"
+                 data-cycle="${escapeHtml(c.id)}" value="${escapeHtml(v || "")}"
+                 aria-label="Cycle ${c.cycle_number} due date"
+                 onchange="PowerFund.setScheduleDate('${c.id}', this.value)"
+                 oninput="PowerFund.setScheduleDate('${c.id}', this.value)">
+        </label>`;
+      }
+
+      html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeScheduleModal()">
+        <div class="modal schedule-modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <h3 id="dlg-title">Payment schedule</h3>
+          <p class="modal-sub">When each cycle falls due. This is what marks a
+            payment overdue — it changes no amount and removes nothing.</p>
+
+          <label class="schedule-shift">
+            <input type="checkbox" ${scheduleShift ? "checked" : ""}
+                   onchange="PowerFund.setScheduleShift(this.checked)">
+            <span>
+              <span class="schedule-shift-label">Move later cycles too</span>
+              <span class="schedule-shift-note">Push one cycle back and the rest
+                of the schedule follows by the same number of days.</span>
+            </span>
+          </label>
+
+          <div class="schedule-list">${rows}</div>
+          <p class="schedule-count" id="scheduleCount">${
+            movedCount
+              ? movedCount === 1
+                ? "1 cycle moved"
+                : movedCount + " cycles moved"
+              : "No changes yet"
+          }</p>
+
+          <p class="schedule-settled" id="scheduleSettled" role="status"${
+            settled.length ? "" : " hidden"
+          }>${
+            settled.length
+              ? escapeHtml(
+                  "Cycle " +
+                    settled.join(", ") +
+                    (settled.length === 1 ? " has" : " have") +
+                    " already-confirmed payments. Moving the due date changes" +
+                    " whether those count as paid on time."
+                )
+              : ""
+          }</p>
+          <p class="pin-error" id="scheduleError" role="alert"${
+            scheduleError ? "" : " hidden"
+          }>${escapeHtml(scheduleError || "")}</p>
+
+          <div class="modal-actions">
+            <button class="modal-btn-primary" id="scheduleSave" onclick="PowerFund.saveSchedule()" ${
+              busy || scheduleProblem() ? "disabled" : ""
+            }>Save schedule</button>
+            <button class="modal-btn-secondary" onclick="PowerFund.closeScheduleModal()">Cancel</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
     // FLAGGED TREASURER: the addresses a login is matched against, and who has
     // actually signed in. Gated on isTreasurerAccount(), NOT on `unlocked` —
     // the treasurer PIN is shared with all five members, so gating this on the
@@ -7351,6 +7703,11 @@
       editNamesValues[id] = v;
       refreshEditNamesValidity();
     },
+    openScheduleModal,
+    closeScheduleModal,
+    setScheduleShift,
+    setScheduleDate,
+    saveSchedule,
   };
 
   if (document.readyState === "loading") {

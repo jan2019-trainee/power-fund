@@ -1155,6 +1155,96 @@ body {
 .edit-names-modal { text-align: left; }
 .edit-names-modal h3, .edit-names-modal .modal-sub { text-align: center; }
 
+/* --- Payment schedule (treasurer) ----------------------------------------
+   Thirty date fields is a lot of rows, so the list scrolls inside the dialog
+   and the cycle number carries the identity — the treasurer arrives knowing
+   which cycle slipped, not which date is currently on it. Cycles already in
+   the past are dimmed: they are still editable (that is the whole point when
+   a schedule slipped weeks ago) but they are not what you came for. */
+.schedule-modal { text-align: left; }
+.schedule-modal h3, .schedule-modal .modal-sub { text-align: center; }
+.schedule-modal .modal-sub { margin-bottom: 14px; }
+
+.schedule-shift {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 11px 12px;
+  margin-bottom: 12px;
+  cursor: pointer;
+}
+.schedule-shift input { margin-top: 2px; flex: none; width: 16px; height: 16px; accent-color: var(--accent); }
+.schedule-shift-label { display: block; font-size: 13.5px; font-weight: 600; color: var(--text-primary); }
+.schedule-shift-note { display: block; font-size: 12px; line-height: 1.45; color: var(--text-muted); margin-top: 2px; }
+
+/* A bordered box, not a bare run of rows: thirty cycles cannot fit, so the
+   list scrolls — and without an edge the cut-off row under the Save button
+   reads as a rendering fault rather than as "there is more below". */
+.schedule-list {
+  max-height: 50vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 10px 11px;
+}
+.schedule-round {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 12px 0 6px;
+}
+.schedule-round:first-child { margin-top: 0; }
+
+.schedule-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 0;
+}
+.schedule-cycle { font-size: 13.5px; color: var(--text-primary); }
+.schedule-row.past .schedule-cycle { color: var(--text-muted); }
+
+.schedule-date {
+  flex: none;
+  width: 156px;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 8px 10px;
+  color: var(--text-primary);
+  font-size: 13.5px;
+  font-family: inherit;
+}
+.schedule-date:focus { outline: none; border-color: var(--accent); }
+.schedule-date.invalid { border-color: var(--danger); background: var(--danger-soft); }
+
+.schedule-settled {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 9px;
+  padding: 9px 11px;
+  margin: 12px 0 0;
+}
+.schedule-count {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  margin: 9px 0 0;
+}
+
+@media (max-width: 480px) {
+  .schedule-date { width: 138px; }
+}
+
 /* --- Member sign-in (treasurer) ------------------------------------------
    One block per member: who they are and where their login stands on the top
    row, the address they are matched by underneath. The status has to be legible

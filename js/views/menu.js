@@ -80,6 +80,19 @@ window.PFViews.menu = function (ctx) {
         "PowerFund.openReorderModal()",
         "Round N always pays whoever is in position N"
       ),
+      // FLAGGED TREASURER ONLY. Migration 011 makes `cycles` treasurer-only by
+      // members.is_treasurer, which the shared PIN cannot express — so showing
+      // this to a PIN-unlocked member would offer a button Postgres refuses.
+      ...(isTreasurerAccount
+        ? [
+            row(
+              "calendar",
+              "Payment schedule",
+              "PowerFund.openScheduleModal()",
+              "When each cycle falls due \u2014 what marks a payment overdue"
+            ),
+          ]
+        : []),
       row("share", "Share fund status", "PowerFund.openShareModal()"),
     ]);
 

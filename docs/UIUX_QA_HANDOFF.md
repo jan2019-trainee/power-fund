@@ -46,6 +46,7 @@ them as new design.** Where they borrow, they borrow
 | Optional-mode warning banner | `optional` mode, same three conditions — a banner, not a wall |
 | **Member sign-in** panel | Menu → Account → Member sign-in (admin only) |
 | **Transfer treasurer role** | Menu → Security → Transfer treasurer role (admin only) |
+| **Payment schedule** | Menu → Group → Payment schedule (admin only) |
 
 ---
 
@@ -54,6 +55,25 @@ them as new design.** Where they borrow, they borrow
 Test both frames for everything: **mobile ≤ 430px** and **desktop ≥ 900px**
 (`isWide` is a JS branch at 900px, not a CSS reflow — the two shells are
 genuinely different code paths).
+
+### Payment schedule (new design — no mockup)
+The 30 due dates, editable from the app for the first time. Borrows the
+`.modal` treatment Edit member names uses.
+- **The list scrolls inside the dialog** (30 rows do not fit). It is a bordered
+  box on purpose: without an edge, the row clipped under Save reads as a
+  rendering fault rather than as "there is more below". Check that at 430px
+  and at a short desktop window.
+- **"Move later cycles too" is on by default.** Change one date and everything
+  after it moves by the same number of days. Check the counter under the list
+  updates, and that earlier cycles do not move.
+- **Try editing a date with the KEYBOARD, not the picker.** A date field
+  empties itself between segments; the shift has to survive that.
+- **States:** no changes yet · N cycles moved · an amber band when a moved
+  cycle already has confirmed payments · a red error plus a disabled Save when
+  the dates fall out of order · the database refusing the write.
+- Reachable only by a Google-verified treasurer. A PIN-unlocked member must
+  not see the row — and `PowerFund.openScheduleModal()` from the console must
+  do nothing for them.
 
 ### Sign-in / first-run prompt
 - **Skippable vs not.** `optional` shows **Not now**; `required` must not.

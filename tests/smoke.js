@@ -3103,6 +3103,160 @@ async function extraTreasurer(browser, errors) {
   await solo.close();
 }
 
+/** Payment schedule — the 30 due dates, which until now could only be changed
+ *  in SQL. Gated on the ACCOUNT (011's cycles_treasurer keys off
+ *  members.is_treasurer), not on the shared PIN. */
+async function paymentSchedule(browser, errors) {
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`schedule: ${e}`));
+  const members = rosterWithEmails();
+  members[0].auth_user_id = FAKE_USER_ID; // Regine, flagged AND signed in
+  const data = { ...M.TABLE_DATA, members };
+  await serve(page, data);
+
+  const writes = [];
+  await page.route("**/rest/v1/cycles**", async (route) => {
+    const req = route.request();
+    if (req.method() === "GET") {
+      return route.fulfill({
+        status: 200, contentType: "application/json",
+        body: JSON.stringify(data.cycles),
+      });
+    }
+    let body = {};
+    try { body = JSON.parse(req.postData() || "{}"); } catch (e) {}
+    const target = data.cycles.find((c) => req.url().includes(c.id));
+    writes.push({ cycle: target && target.cycle_number, body });
+    Object.assign(target || {}, body);
+    return route.fulfill({
+      status: 200, contentType: "application/json",
+      body: JSON.stringify([target || {}]),
+    });
+  });
+  await withAuthMode(page, "optional", { signedIn: true, email: "regine@example.com" });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
+  await page.locator(".unlock-btn").click();
+  await page.waitForTimeout(500);
+  await page.locator(".tab-item", { hasText: "Menu" }).click();
+  await page.waitForTimeout(400);
+
+  const rowLoc = page.locator(".menu-row", { hasText: "Payment schedule" });
+  check("schedule/the treasurer gets a Payment schedule row", (await rowLoc.count()) === 1);
+  await rowLoc.first().click();
+  await page.waitForTimeout(450);
+
+  const dates = page.locator(".schedule-modal .schedule-date");
+  check("schedule/every cycle is editable", (await dates.count()) === 30, `${await dates.count()} fields`);
+  check(
+    "schedule/grouped by round",
+    (await page.locator(".schedule-modal .schedule-round").count()) === 5
+  );
+  check("schedule/nothing is moved on open", /No changes yet/.test(
+    await page.locator("#scheduleCount").innerText()
+  ));
+
+  const vals = () => dates.evaluateAll((els) => els.map((e) => e.value));
+  const before = await vals();
+  const plusDays = (iso, n) => {
+    const d = new Date(iso + "T00:00:00");
+    d.setDate(d.getDate() + n);
+    const p = (x) => String(x).padStart(2, "0");
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+  };
+
+  // THE REASON THE SCREEN EXISTS: a round started late, so cycle 3 and
+  // everything after it moves. Doing that one field at a time is 28 edits.
+  await dates.nth(2).fill(plusDays(before[2], 14));
+  await page.waitForTimeout(350);
+  const after = await vals();
+  check("schedule/shift leaves earlier cycles alone",
+    after[0] === before[0] && after[1] === before[1],
+    `${after[0]} / ${after[1]}`);
+  check("schedule/the edited cycle moves",
+    after[2] === plusDays(before[2], 14), after[2]);
+  check(
+    "schedule/and every later cycle moves with it",
+    after.slice(3).every((v, i) => v === plusDays(before[i + 3], 14)),
+    after.slice(3, 6).join(" ")
+  );
+  check("schedule/it counts what moved", /28 cycles moved/.test(
+    await page.locator("#scheduleCount").innerText()
+  ));
+  // onTimeStats() judges paid_at against due_date, so moving a settled cycle
+  // rewrites who is on record as having paid on time. Not blocked — said.
+  check(
+    "schedule/it warns about already-confirmed cycles",
+    (await page.locator("#scheduleSettled").isVisible()) &&
+      /paid on time/.test(await page.locator("#scheduleSettled").innerText())
+  );
+
+  // Shift off: one date alone.
+  await page.locator(".schedule-shift input").uncheck();
+  await page.waitForTimeout(150);
+  const pre = await vals();
+  await dates.nth(19).fill(plusDays(pre[19], 1));
+  await page.waitForTimeout(300);
+  const post = await vals();
+  check("schedule/with the shift off only that cycle moves",
+    post[19] === plusDays(pre[19], 1) && post[20] === pre[20],
+    `${post[19]} / ${post[20]}`);
+
+  // Out of order is refused: currentCycle() returns the first cycle whose date
+  // has not passed while completedCyclesCount() counts every one that has, so
+  // an unordered schedule makes those two disagree.
+  await dates.nth(1).fill(plusDays(post[2], 5));
+  await page.waitForTimeout(300);
+  check("schedule/out-of-order dates are refused", /must fall after cycle 2/.test(
+    await page.locator("#scheduleError").innerText()
+  ), await page.locator("#scheduleError").innerText());
+  check("schedule/and Save is disabled while they are",
+    (await page.locator("#scheduleSave").isDisabled()) === true);
+
+  await dates.nth(1).fill(pre[1]);
+  await page.waitForTimeout(300);
+  check("schedule/fixing it re-enables Save",
+    (await page.locator("#scheduleSave").isDisabled()) === false);
+
+  await page.locator("#scheduleSave").click();
+  await page.waitForTimeout(1600);
+  check("schedule/the modal closes on save", (await page.locator(".schedule-modal").count()) === 0);
+  check("schedule/only the cycles that moved are written",
+    writes.length === 28, `${writes.length} write(s)`);
+  check("schedule/cycles 1 and 2 are left alone",
+    !writes.some((w) => w.cycle === 1 || w.cycle === 2),
+    writes.map((w) => w.cycle).slice(0, 3).join(","));
+  check(
+    "schedule/each write carries due_date and nothing else",
+    writes.every((w) => Object.keys(w.body).length === 1 && "due_date" in w.body),
+    JSON.stringify(writes[0] && writes[0].body)
+  );
+  await page.close();
+
+  // THE GATE. The treasurer PIN is shared with all five members, so unlocking
+  // treasurer mode with it must NOT reach a table 011 makes account-only.
+  const pin = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  pin.on("pageerror", (e) => errors.push(`schedule/pin: ${e}`));
+  const roster = rosterWithEmails();
+  roster[2].auth_user_id = FAKE_USER_ID; // Jan is signed in; Regine is the treasurer
+  await serve(pin, {
+    ...M.TABLE_DATA,
+    members: roster,
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234" },
+  });
+  await withAuthMode(pin, "optional", { signedIn: true, email: "jan@example.com" });
+  await pin.goto(BASE, { waitUntil: "domcontentloaded" });
+  await pin.waitForTimeout(2500);
+  await pin.evaluate(() => window.PowerFund.openScheduleModal());
+  await pin.waitForTimeout(400);
+  // Exported on PowerFund, so an absent menu row is not the gate.
+  check(
+    "schedule/a member who is not the flagged treasurer cannot open it",
+    (await pin.locator(".schedule-modal").count()) === 0
+  );
+  await pin.close();
+}
+
 /** Transfer treasurer role — moving `members.is_treasurer`, the flag Postgres
  *  checks. The PIN cannot express this, which is the whole point. */
 async function transferRole(browser, errors) {
@@ -4383,6 +4537,7 @@ async function bootFailure(browser) {
   await unlockVisibility(browser, errors);
   await extraTreasurer(browser, errors);
   await transferRole(browser, errors);
+  await paymentSchedule(browser, errors);
   await signInPrompt(browser, errors);
   await onboarding(browser, errors);
   console.log("\nBackup round-trip");

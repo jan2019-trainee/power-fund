@@ -688,6 +688,58 @@ The full chip vocabulary: green paid · purple in review · **red solid
 overdue** · **red dashed rejected** (sent and refused, versus never sent) ·
 plain not-due-yet.
 
+## The payment schedule is editable now (Menu → Group → Payment schedule)
+
+Found while auditing what "complete" was hiding. `cycles.due_date` has existed
+since the first schema, and all 30 dates are written **once** by
+`supabase/seed.sql`, generated two and a half years ahead. Nothing in `js/`
+ever wrote them — every reference was a read, and `schema.sql`'s own comment
+says *"edit freely"*, meaning in SQL.
+
+Those dates are not decoration. They drive `isOverdue()`, every red chip, the
+treasurer's attention queue and the share text. A paluwagan slips — somebody's
+salary is late, a round starts two weeks after the last one closed — and the
+app then confidently accused people of being late with the only fix being the
+Supabase SQL editor. The same shape of gap the Member sign-in panel was built
+to close for emails, on data that makes accusations about people.
+
+Category: **UI Only**. **No migration** — 011's `cycles_treasurer` already
+permits the write.
+
+- **Gated on `isTreasurerAccount()`, not on `unlocked`.** 011 keys the policy
+  off `members.is_treasurer`, which the shared PIN cannot express, so a
+  PIN-gated row would offer the other four a button Postgres refuses. Checked
+  in the menu row, in the render branch and in both handlers — `openScheduleModal`
+  and `saveSchedule` are exported on `PowerFund`, so the absent row is not the
+  gate. (The bootstrap fallback inside `isTreasurerAccount()` stands: with
+  nobody flagged, 011 is not in force either.)
+- **"Move later cycles too", on by default.** The real use case is "round 3
+  started two weeks late", which is 28 edits by hand — the kind of chore that
+  leaves a feature unused and the schedule wrong. It also keeps the ordering
+  correct for free.
+- **The shift measures from the last VALID date, not the previous draft.** A
+  date input empties itself between segments when edited with the keyboard
+  (`"2026-10-15"` → `""` → `"2026-11-15"`), so measuring against the draft saw
+  a move out of nothing and skipped the shift for anyone not using the picker.
+  Found while writing the test, not in the browser.
+- **Strictly increasing is ENFORCED**, and it is a technical invariant rather
+  than an invented business rule: `currentCycle()` returns the first cycle in
+  number order whose date has not passed, while `completedCyclesCount()` counts
+  every cycle whose date has. Out of order those two disagree and the app shows
+  one cycle as current while counting a later one as done.
+- **Moving a settled cycle is WARNED, never blocked.** `onTimeStats()` judges
+  `paid_at <= due_date`, so moving a cycle that already has confirmed payments
+  rewrites who is on record as having paid on time. A schedule that genuinely
+  slipped should still move — the screen names the affected cycles instead of
+  refusing, and refusing would be inventing a rule nobody asked for.
+- `updateCycleDueDates()` sends **only `due_date`**, row by row. An upsert would
+  need every NOT NULL column back in the payload, and sending `cycle_number`
+  with it is how a typo renumbers the schedule. `requireRows()`, not `.single()`
+  — the tenth place that bug could have landed.
+- **No approved mockup exists for this screen.** It borrows the established
+  `.modal` treatment the way Edit member names does. Flagged for UI/UX QA as
+  new design, not as a port.
+
 ## Migrations
 
 Run in the Supabase SQL editor, in order. `006` also needs a one-off
@@ -1192,6 +1244,11 @@ which would have read as migration bugs:
   real Supabase grants. Without it every policy denies for the wrong reason —
   and that is a false PASS on every DENY assertion, which is the dangerous
   direction.
+- **`run()` only sniffed `UPDATE n`, so every DELETE assertion passed blind.**
+  RLS refuses a DELETE the same way it refuses an UPDATE — `DELETE 0`, no
+  error — so the helper saw no error, no zero-row UPDATE, and reported OK.
+  Found by adding the first DELETE case (cycles); it now reads both verbs.
+  Any DENY result recorded before this that was a DELETE proved nothing.
 
 Bump `CACHE` in `sw.js` on every deploy that changes the shell.
 

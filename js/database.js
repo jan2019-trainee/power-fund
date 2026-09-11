@@ -171,6 +171,32 @@ window.DB = (function () {
     );
   }
 
+  /**
+   * Move one or more cycles' due dates. `updates` is [{ id, due_date }] with
+   * due_date as "YYYY-MM-DD".
+   *
+   * Row by row rather than an upsert: an upsert would need every NOT NULL
+   * column of `cycles` in the payload, and sending cycle_number back is how a
+   * typo renumbers the schedule. This sends the one column that is changing.
+   *
+   * requireRows(), not .single() — migration 011 makes `cycles` treasurer-only
+   * (cycles_treasurer), and RLS refuses an UPDATE by making the row invisible
+   * rather than raising: the reply is [] with no error. The treasurer PIN is
+   * shared with the whole group, so without this a member who unlocked with
+   * the PIN would be told the schedule moved when Postgres declined it.
+   */
+  async function updateCycleDueDates(updates) {
+    for (const u of updates) {
+      const res = await client
+        .from("cycles")
+        .update({ due_date: u.due_date })
+        .eq("id", u.id)
+        .select();
+      unwrap(res, "Couldn't update the payment schedule");
+      requireRows(res, "Couldn't update the payment schedule");
+    }
+  }
+
   // ===================================================================
   // Contributions
   // ===================================================================
@@ -1384,6 +1410,7 @@ window.DB = (function () {
     deleteMember,
     updateMemberOrder,
     getCycles,
+    updateCycleDueDates,
     getContributions,
     getContributionsForCycle,
     upsertContribution,

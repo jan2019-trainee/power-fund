@@ -71,6 +71,10 @@ create table members (
   payout_bank text, payout_account_name text, payout_account_number text,
   payout_qr_url text, payout_updated_at timestamptz);
 alter table members enable row level security;
+create table cycles (
+  id uuid primary key default gen_random_uuid(),
+  cycle_number int not null unique, due_date date not null);
+alter table cycles enable row level security;
 create or replace function pf_member_id() returns uuid
   language sql stable security definer set search_path = public as $$
   select id from members where auth_user_id = auth.uid() $$;
@@ -80,11 +84,14 @@ create or replace function pf_is_treasurer() returns boolean
 grant usage on schema auth, storage, public to anon, authenticated;
 grant execute on function auth.uid(), storage.foldername(text) to anon, authenticated;
 grant execute on function pf_member_id(), pf_is_treasurer() to anon, authenticated;
-grant select, insert, update, delete on storage.objects, members to anon, authenticated;
+grant select, insert, update, delete on storage.objects, members, cycles to anon, authenticated;
 insert into members (id, name, member_order, email, auth_user_id, is_treasurer) values
  ('11111111-0000-0000-0000-000000000001','Regine',1,'r@x.com','aaaaaaaa-0000-0000-0000-00000000000a', true),
  ('11111111-0000-0000-0000-000000000002','Sarah', 2,'s@x.com','bbbbbbbb-0000-0000-0000-00000000000b', false),
  ('11111111-0000-0000-0000-000000000003','Verdz', 3,'v@x.com', null, false);
+insert into cycles (id, cycle_number, due_date) values
+ ('22222222-0000-0000-0000-000000000001', 1, '2026-09-15'),
+ ('22222222-0000-0000-0000-000000000002', 2, '2026-09-28');
 SQL
 
 # ---------------------------------------------------------------------------
@@ -108,6 +115,10 @@ def cut(s, start, end):
     cut(schema, 'create policy "payment_assets_read"',
                 'create policy "payment_assets_write"')
     + cut(lock, 'drop policy if exists members_read', '-- 3) cycles')
+    # The schedule. Menu -> Payment schedule writes these, and the UI gates on
+    # members.is_treasurer precisely because this policy does — so the gate is
+    # only as real as what this section says.
+    + cut(lock, 'drop policy if exists cycles_read', '-- 4) contributions')
     + cut(lock, 'drop policy if exists "payment_assets_write"',
                 'drop policy if exists "member_avatars_write"')
     + cut(guard, 'create or replace function pf_members_guard()',
@@ -124,7 +135,10 @@ run() {
     pre="set local role authenticated; select set_config('request.jwt.claim.sub','$sub',true);"
   else pre="set local role anon;"; fi
   out=$(q -c "begin; $pre $sql; rollback;" 2>&1)
-  rows=$(printf '%s' "$out" | grep -oE 'UPDATE [0-9]+' | tail -1 | awk '{print $2}')
+  # UPDATE *and* DELETE: RLS refuses both by making the row invisible rather
+  # than raising, so each reports "<VERB> 0" with no error. Reading only
+  # UPDATE meant every DELETE assertion passed no matter what the policy said.
+  rows=$(printf '%s' "$out" | grep -oE '(UPDATE|DELETE) [0-9]+' | tail -1 | awk '{print $2}')
   if printf '%s' "$out" | grep -qiE "violates row-level security|permission denied|Only the treasurer|only edit your own"; then
     got=DENY
   elif [ "${rows:-x}" = "0" ]; then
@@ -204,6 +218,30 @@ run "member may still rename themselves" $MEM OK \
 echo "members — treasurer and anon"
 run "treasurer may set any member's payout details" $TRE OK "update members set $P where id='$SID'"
 run "anon may NOT touch payout details" - DENY "update members set $P where id='$SID'"
+
+echo "cycles — the payment schedule (Menu -> Payment schedule)"
+CY=22222222-0000-0000-0000-000000000001
+run "treasurer may move a due date" $TRE OK \
+  "update cycles set due_date='2026-09-29' where id='$CY'"
+# The UI hides the row from anyone who is not the flagged treasurer, but the
+# treasurer PIN is shared with all five members and the handlers are exported
+# on PowerFund. This is the guard that actually holds.
+run "member may NOT move a due date" $MEM DENY \
+  "update cycles set due_date='2026-09-29' where id='$CY'"
+run "member may NOT invent a cycle" $MEM DENY \
+  "insert into cycles (cycle_number, due_date) values (99, '2027-01-01')"
+run "member may NOT delete a cycle" $MEM DENY \
+  "delete from cycles where id='$CY'"
+run "anon may NOT move a due date" - DENY \
+  "update cycles set due_date='2026-09-29' where id='$CY'"
+# Reads stay open: the schedule is what every member's overdue chip is drawn
+# from, so a member who could not read it would see no due dates at all. A read
+# is not an OK/DENY write, so it is counted rather than run through run().
+seen=$(q -tAc "begin; set local role authenticated;
+  select set_config('request.jwt.claim.sub','$MEM',true);
+  select count(*) from cycles; rollback;" 2>&1 | grep -oE '^[0-9]+$' | head -1)
+if [ "${seen:-0}" -ge 2 ]; then printf '  ok   a member may still READ the schedule\n'
+else printf '  FAIL a member may still READ the schedule — saw %s row(s)\n' "${seen:-0}"; FAILED=1; fi
 
 echo
 if [ "$FAILED" = "0" ]; then echo "all payout-permission checks passed"; else echo "SOME CHECKS FAILED"; fi

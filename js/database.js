@@ -829,6 +829,47 @@ window.DB = (function () {
   }
 
   /**
+   * Report a released payout as never having arrived (migration 014).
+   *
+   * `disputed_at` is stamped SERVER-SIDE by the guard, like `received_at`, and
+   * the guard also refuses this on somebody else's payout, on an unreleased
+   * one, and on one already confirmed received.
+   */
+  async function disputePayout(roundNumber, note) {
+    const res = await client
+      .from("payouts")
+      .update({
+        disputed_at: new Date().toISOString(),
+        disputed_note: (note || "").trim() || null,
+      })
+      .eq("round_number", roundNumber)
+      .select();
+    unwrap(res, "Couldn't report that");
+    return requireRows(
+      res,
+      "Couldn't report that",
+      "the database refused it. Only the member a payout was sent to can " +
+        "report it as not arrived, and only while it is unconfirmed."
+    );
+  }
+
+  /** Withdraw a report — the money turned up, or it was filed by mistake. */
+  async function clearPayoutDispute(roundNumber) {
+    const res = await client
+      .from("payouts")
+      .update({ disputed_at: null, disputed_note: null })
+      .eq("round_number", roundNumber)
+      .select();
+    unwrap(res, "Couldn't withdraw that report");
+    return requireRows(
+      res,
+      "Couldn't withdraw that report",
+      "the database refused it. Only the member who filed a report, or the " +
+        "treasurer, can withdraw it."
+    );
+  }
+
+  /**
    * Mark a round as "started" (its payouts row gets a started_at timestamp).
    * The `.is("started_at", null)` guard makes this safe to call twice — a
    * second call updates zero rows, so a round can never be started twice.
@@ -1358,6 +1399,11 @@ window.DB = (function () {
         if (p.received_at !== undefined) extra.received_at = p.received_at || null;
         if (p.received_note !== undefined)
           extra.received_note = p.received_note || null;
+        // Migration 014. A member's report that their ₱30,000 never arrived is
+        // not the sort of thing a restore should drop.
+        if (p.disputed_at !== undefined) extra.disputed_at = p.disputed_at || null;
+        if (p.disputed_note !== undefined)
+          extra.disputed_note = p.disputed_note || null;
         if (!Object.keys(extra).length) continue;
         const res = await client
           .from("payouts")
@@ -1614,6 +1660,8 @@ window.DB = (function () {
     getPayouts,
     updatePayout,
     confirmPayoutReceived,
+    disputePayout,
+    clearPayoutDispute,
     startRound,
     getActivityLog,
     addActivityLog,

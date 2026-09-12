@@ -244,6 +244,11 @@
    * press, the same reasoning as the undo-paid and mark-paid panels. */
   let receiptAckRound = null;
   let receiptAckNote = "";
+  /* The "it never arrived" side (014). A separate panel from the confirm one:
+   * they are opposite answers to the same question and must not share a note
+   * field, or a half-typed "received in full" would be filed as a dispute. */
+  let disputeRound = null;
+  let disputeNote = "";
 
   /* Turn swaps (013). `swapTarget` is the member being asked; the note is
    * optional and free text, capped at 120 characters. */
@@ -2369,6 +2374,8 @@
         released_by: p.released_by, // /
         received_at: p.received_at, // } migration 012 — the recipient's
         received_note: p.received_note, // } acknowledgement
+        disputed_at: p.disputed_at, //   } migration 014 — and their report
+        disputed_note: p.disputed_note, // } that it never arrived
       })),
       activityLog: (state.activityLog || []).map((a) => ({
         message: a.message,
@@ -3153,6 +3160,9 @@
     const p = (state.payouts || []).find(
       (x) => x && x.recipient_member_id && x.recipient_member_id === me.id
     );
+    // A DISPUTED payout still comes back: the card is where the member sees
+    // their own open report and withdraws it when the money turns up. Only a
+    // confirmed one drops out.
     if (!p || !p.released || p.received_at) return null;
     // `received_at` is absent on a database without 012; undefined and null
     // both mean "not confirmed", and the write will simply fail until the
@@ -3164,6 +3174,8 @@
     const mine = myUnconfirmedPayout();
     // Exported on PowerFund, so the absent card is not the gate.
     if (!mine || Number(mine.round_number) !== Number(round)) return;
+    disputeRound = null; // opposite answers to one question; never both open
+    disputeNote = "";
     receiptAckRound = Number(round);
     receiptAckNote = "";
     render();
@@ -3209,6 +3221,124 @@
       );
       await reload();
       showSuccess("Thanks — that payout is confirmed received.");
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+
+  // ===================================================================
+  // "It never arrived" — the recipient's other answer (migration 014)
+  //
+  // 012 gave them one button. Reported from use: a member looking at a
+  // released payout that has NOT arrived could only press something untrue or
+  // stay silent, and silence is indistinguishable from forgetting to tap. The
+  // one dispute this app exists to settle was the one thing it could not
+  // record.
+  //
+  // A PRODUCT DECISION, taken by the owner: FLAGGED LOUDLY, BLOCKS NOTHING.
+  // It leads the treasurer's Home and shows on the round for everyone, and
+  // the fund keeps collecting — the same reasoning as 012's "a receipt is not
+  // a gate". One member must not be able to freeze the group over money that
+  // has already left the treasurer's hands.
+  // ===================================================================
+
+  /** Every open report, for the treasurer's attention panel. Visible to all
+   *  five, like the "Awaiting X's confirmation" line already is. */
+  function disputedPayouts() {
+    return (state && state.payouts ? state.payouts : []).filter(
+      (p) => p && p.released && p.disputed_at && !p.received_at
+    );
+  }
+
+  /** My own open report, or null. */
+  function myDisputedPayout() {
+    const mine = myUnconfirmedPayout();
+    return mine && mine.disputed_at ? mine : null;
+  }
+
+  function openDispute(round) {
+    const mine = myUnconfirmedPayout();
+    // Exported on PowerFund, so the absent button is not the gate.
+    if (!mine || Number(mine.round_number) !== Number(round)) return;
+    if (mine.disputed_at) return; // already filed
+    receiptAckRound = null; // the two panels are opposite answers; never both
+    disputeRound = Number(round);
+    disputeNote = "";
+    render();
+  }
+  function cancelDispute() {
+    disputeRound = null;
+    disputeNote = "";
+    render();
+  }
+  function setDisputeNote(v) {
+    disputeNote = v; // no render: it would eat the caret
+  }
+
+  async function submitDispute() {
+    if (busy || disputeRound == null) return;
+    const round = disputeRound;
+    const mine = myUnconfirmedPayout();
+    if (!mine || Number(mine.round_number) !== round) return cancelDispute();
+    const me = editableMember();
+    const note = disputeNote.trim();
+    disputeRound = null;
+    disputeNote = "";
+    busy = true;
+    render();
+    try {
+      await window.DB.disputePayout(round, note);
+      await logActivity(
+        `${(me && me.name) || "The recipient"} reported that the Round ${round} ` +
+          `payout has not arrived` + (note ? ` — ${note}` : ""),
+        {
+          // NO amount, for the same reason the confirmation carries none: no
+          // money moved here. A figure would make a release-and-dispute read
+          // as ₱60,000 leaving the fund.
+          type: "payout",
+          memberId: me ? me.id : null,
+          round: round,
+        }
+      );
+      await reload();
+      showSuccess(
+        "Reported. The treasurer sees this at the top of their screen."
+      );
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+
+  /** Withdraw a report. The member's own, or — per 014's guard — anyone's if
+   *  you are the treasurer, which is how a report gets closed out after the
+   *  two of them have sorted it. */
+  async function withdrawDispute(round) {
+    if (busy) return;
+    const p = getPayout(round);
+    const mine = myDisputedPayout();
+    const canClear =
+      !!p &&
+      !!p.disputed_at &&
+      ((mine && Number(mine.round_number) === Number(round)) ||
+        isTreasurerAccount());
+    if (!canClear) return; // exported on PowerFund
+    const me = editableMember();
+    busy = true;
+    render();
+    try {
+      await window.DB.clearPayoutDispute(round);
+      await logActivity(
+        `${(me && me.name) || "Someone"} withdrew the report on the Round ${round} payout`,
+        { type: "payout", memberId: me ? me.id : null, round: Number(round) }
+      );
+      await reload();
+      showSuccess("Report withdrawn.");
     } catch (e) {
       showError(e.message);
     } finally {
@@ -4434,6 +4564,7 @@
     undoPaidTarget = null;
     markPaidTarget = null;
     receiptAckRound = null;
+    disputeRound = null;
     swapModalOpen = false;
     currentView = view;
     render();
@@ -6399,6 +6530,12 @@
       myUnconfirmedPayout: myUnconfirmedPayout(),
       receiptAckRound,
       receiptAckNote,
+      // Disputes (014). `disputedPayouts` is every open report, which the
+      // treasurer's panel leads with; `myDisputedPayout` is the viewer's own.
+      disputedPayouts: disputedPayouts(),
+      myDisputedPayout: myDisputedPayout(),
+      disputeRound,
+      disputeNote,
       // Turn swaps (013). Passed as VALUES, already resolved: the views
       // cannot see this closure, and canSwapTurns() combines a linked
       // account, a database carrying 013, and having a round left to trade.
@@ -8530,6 +8667,11 @@
     openReceiptAck,
     cancelReceiptAck,
     confirmReceiptAck,
+    openDispute,
+    cancelDispute,
+    setDisputeNote,
+    submitDispute,
+    withdrawDispute,
     openSwapModal,
     closeSwapModal,
     setSwapTarget,

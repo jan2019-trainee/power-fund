@@ -773,6 +773,87 @@ async function tabs(page, prefix, list) {
 
   // Turn swaps (013) — NEW DESIGN, no mockup. Needs two LINKED members with
   // unreleased rounds, which no earlier capture had.
+  // Payout disputes (014) — NEW DESIGN, no mockup. Needs a linked recipient
+  // on a RELEASED round, which is the same shape Received ✓ needed.
+  console.log("\nPayout disputes — \"it never arrived\"");
+  {
+    const dp = withAccounts(midFund, 1); // Sarah, linked
+    dp.data.payouts = dp.data.payouts.map((p) =>
+      p.round_number === 1
+        ? {
+            ...p,
+            released: true,
+            released_on: "2026-09-20",
+            amount: 30000,
+            recipient_member_id: dp.me.id,
+            recipient_name: dp.me.name,
+            receipt_url: "https://example.invalid/receipt-r1.jpg",
+            received_at: null,
+            received_note: null,
+            disputed_at: null,
+            disputed_note: null,
+          }
+        : p
+    );
+    const withReport = {
+      ...dp.data,
+      payouts: dp.data.payouts.map((p) =>
+        p.round_number === 1
+          ? {
+              ...p,
+              disputed_at: new Date().toISOString(),
+              disputed_note: "nothing in GCash as of today",
+            }
+          : p
+      ),
+    };
+    for (const [label, vp] of [["mobile", MOBILE], ["desktop", DESKTOP]]) {
+      // The card with BOTH answers, and the treasurer's receipt beside them.
+      p = await open(browser, dp.data, vp, null, {
+        authMode: "optional", signedInAs: dp.me,
+      });
+      await shot(p, `disp-${label}-both-answers`, "Received ✓ card — the receipt, plus \"No — it hasn't arrived\"");
+      if (await p.locator(".ack-no").count()) {
+        await p.locator(".ack-no").click();
+        await p.waitForTimeout(500);
+        await shot(p, `disp-${label}-report-panel`, "Reporting it — its own note field, and what happens next");
+      }
+      await p.close();
+      // The reporter's own card afterwards.
+      p = await open(browser, withReport, vp, null, {
+        authMode: "optional", signedInAs: dp.me,
+      });
+      await shot(p, `disp-${label}-reported-mine`, "The reporter's own card — withdraw, or say it arrived after all");
+      await p.close();
+      // What the OTHER four see. The roster is rebuilt so exactly ONE row
+      // carries this session's login: my first version left Sarah's row on
+      // FAKE_USER_ID too, and editableMember() takes the first match — so the
+      // capture resolved to Sarah and photographed the recipient's own view
+      // under the group label. Real Supabase has auth_user_id UNIQUE, so a
+      // fixture that duplicates it is testing a state that cannot exist.
+      const groupRoster = withReport.members.map((m, i) => ({
+        ...m,
+        auth_user_id:
+          i === 3 ? FAKE_USER_ID : `8888888${i}-0000-0000-0000-00000000000${i}`,
+      }));
+      p = await open(
+        browser,
+        { ...withReport, members: groupRoster },
+        vp,
+        null,
+        { authMode: "optional", signedInAs: groupRoster[3] }
+      );
+      await shot(p, `disp-${label}-alert-group`, "What everyone else sees — the report leads the screen, blocking nothing");
+      await p.close();
+    }
+    // The treasurer's view, which adds Undo release & re-send.
+    p = await open(browser, withReport, MOBILE, null, { authMode: "off" });
+    await unlock(p);
+    await p.waitForTimeout(600);
+    await shot(p, "disp-mobile-alert-treasurer", "Treasurer — the report with Undo release & re-send");
+    await p.close();
+  }
+
   console.log("\nTurn swaps — palit ng turno");
   {
     // Everyone signed in, with DISTINCT ids, and FAKE_USER_ID on whichever

@@ -3136,6 +3136,427 @@ async function extraTreasurer(browser, errors) {
   await solo.close();
 }
 
+/** The card TITLE treatment, measured — not eyeballed.
+ *
+ *  Reported from a real phone: "Needs your attention" still carried a 13px
+ *  UPPERCASE amber label from an early pass, while every notice card built
+ *  afterwards used sentence case in Space Grotesk with the accent on the
+ *  glyph. `design/Main.dc.html` asks for the latter too, so the app had
+ *  drifted from its own approved artboard, not merely from itself.
+ *
+ *  The cause was five near-identical copies of one treatment in the CSS with
+ *  nothing tying them together, so this asserts the FAMILY rather than any one
+ *  card — six titles that must agree on case, size and family, and a panel
+ *  whose geometry matches the notice cards it sits among. Behavioural checks
+ *  cannot see any of this, which is why it survived ~550 of them.
+ */
+async function cardFamily(browser, errors) {
+  const page = await browser.newPage({ viewport: { width: 430, height: 1100 } });
+  page.on("pageerror", (e) => errors.push(`card-family: ${e}`));
+  // One screen carrying as much of the family as possible: a treasurer with a
+  // pending claim (attention), a funded round (release) and a dispute filed
+  // against their own released payout.
+  const members = rosterWithEmails();
+  members[0].auth_user_id = FAKE_USER_ID; // Regine, the flagged treasurer
+  const payouts = M.PAYOUTS.map((p) =>
+    p.round_number === 1
+      ? {
+          ...p,
+          released: true,
+          released_on: "2026-09-20",
+          amount: 30000,
+          recipient_member_id: members[1].id,
+          recipient_name: members[1].name,
+          disputed_at: "2026-09-22T02:00:00Z",
+          disputed_note: "nothing in GCash",
+        }
+      : p
+  );
+  await serve(page, {
+    ...M.TABLE_DATA,
+    members,
+    payouts,
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234" },
+  });
+  await withAuthMode(page, "off");
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1800);
+  await unlockTreasurer(page);
+  await page.waitForTimeout(600);
+
+  const styles = await page.evaluate(() => {
+    const out = {};
+    [
+      ".attention-title",
+      ".dispute-alert-title",
+      ".release-card-title",
+    ].forEach((sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return;
+      const cs = getComputedStyle(el);
+      out[sel] = {
+        transform: cs.textTransform,
+        size: cs.fontSize,
+        weight: cs.fontWeight,
+        family: cs.fontFamily.split(",")[0].replace(/["']/g, ""),
+        display: cs.display,
+        color: cs.color,
+      };
+      const ic = el.querySelector(".icon");
+      if (ic) out[sel].iconColor = getComputedStyle(ic).color;
+    });
+    const box = (sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return null;
+      const cs = getComputedStyle(el);
+      return {
+        radius: cs.borderTopLeftRadius,
+        leftBorder: cs.borderLeftWidth,
+        topBorder: cs.borderTopWidth,
+      };
+    };
+    out.panelBox = box(".attention-panel");
+    out.disputeBox = box(".dispute-alert");
+    out.releaseBox = box(".release-card");
+    return out;
+  });
+
+  const t = styles[".attention-title"];
+  // THE PREMISE: the panel is on screen at all. Without it every check below
+  // passes on an absent element.
+  check(
+    "card-family/the premise: the attention panel rendered",
+    !!t,
+    JSON.stringify(Object.keys(styles))
+  );
+  check(
+    "card-family/its title is sentence case, not UPPERCASE",
+    !!t && t.transform === "none",
+    t ? t.transform : "(no title)"
+  );
+  // The exact drift that was reported: 13px amber vs the family's 14.5px.
+  const fam = styles[".release-card-title"] || styles[".dispute-alert-title"];
+  check(
+    "card-family/...and agrees with the other cards on size, weight and family",
+    !!t && !!fam && t.size === fam.size && t.weight === fam.weight &&
+      t.family === fam.family,
+    JSON.stringify({ attention: t, family: fam })
+  );
+  check(
+    "card-family/the accent is on the GLYPH, not the words",
+    !!t && t.color === fam.color && t.iconColor !== t.color,
+    JSON.stringify({ text: t && t.color, icon: t && t.iconColor })
+  );
+  // Geometry: it is a notice card and must not keep the 18px structural
+  // radius or the 3px left rail no other card in the family has.
+  check(
+    "card-family/the panel's corners match the notice cards beside it",
+    !!styles.panelBox &&
+      !!styles.disputeBox &&
+      styles.panelBox.radius === styles.disputeBox.radius,
+    JSON.stringify({ panel: styles.panelBox, dispute: styles.disputeBox })
+  );
+  check(
+    "card-family/...and it has one even border, not a 3px rail",
+    !!styles.panelBox && styles.panelBox.leftBorder === styles.panelBox.topBorder,
+    JSON.stringify(styles.panelBox)
+  );
+  await page.close();
+}
+
+/** Payout disputes — "it never arrived" (migration 014).
+ *
+ *  012 gave the recipient one button. A member whose ₱30,000 has NOT arrived
+ *  could only press something untrue or stay silent, and silence reads the
+ *  same as forgetting to tap. Reported from use, along with the other half:
+ *  the treasurer's receipt existed but only on the Rounds screen, so somebody
+ *  was being asked to sign for ₱30,000 with the evidence two taps away.
+ *
+ *  Owner decision: a dispute is FLAGGED LOUDLY and BLOCKS NOTHING.
+ */
+async function payoutDispute(browser, errors) {
+  const roster = (i) => {
+    const m = rosterWithEmails();
+    m.forEach((x, j) => {
+      x.auth_user_id =
+        j === i ? FAKE_USER_ID : `8888888${j}-0000-0000-0000-00000000000${j}`;
+    });
+    return m;
+  };
+  const released = (members, recipIdx, extra) =>
+    M.PAYOUTS.map((p) =>
+      p.round_number === 1
+        ? {
+            ...p,
+            released: true,
+            released_on: "2026-09-20",
+            amount: 30000,
+            recipient_member_id: members[recipIdx].id,
+            recipient_name: members[recipIdx].name,
+            ...(extra || {}),
+          }
+        : p
+    );
+
+  async function withPayoutApi(page, payouts) {
+    const writes = [];
+    await page.route("**/rest/v1/payouts**", (r) => {
+      const req = r.request();
+      if (req.method() === "GET") {
+        return r.fulfill({
+          status: 200, contentType: "application/json", body: JSON.stringify(payouts),
+        });
+      }
+      let body = {};
+      try { body = JSON.parse(req.postData() || "{}"); } catch (e) {}
+      writes.push({ url: req.url(), body });
+      return r.fulfill({
+        status: 200, contentType: "application/json",
+        body: JSON.stringify([{ round_number: 1, ...body }]),
+      });
+    });
+    return writes;
+  }
+
+  // ---- the recipient's card: proof, and both answers --------------------
+  const page = await browser.newPage({ viewport: { width: 430, height: 1100 } });
+  page.on("pageerror", (e) => errors.push(`dispute: ${e}`));
+  const members = roster(1); // Sarah is signed in AND the recipient
+  const payouts = released(members, 1);
+  await serve(page, { ...M.TABLE_DATA, members, payouts });
+  const writes = await withPayoutApi(page, payouts);
+  await withAuthMode(page, "required", { signedIn: true, email: "sarah@example.com" });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
+
+  // THE GAP THAT WAS REPORTED: the treasurer's proof, where the question is.
+  check(
+    "dispute/the receipt is offered on the card that asks the question",
+    (await page.locator(".ack-card .ack-receipt").count()) === 1,
+    await page.locator(".ack-card").innerText().catch(() => "(no .ack-card)")
+  );
+  await page.locator(".ack-card .ack-receipt").click();
+  await page.waitForTimeout(500);
+  const src = await page.locator(".lightbox img, .lightbox-img").first().getAttribute("src").catch(() => null);
+  check(
+    "dispute/...and it opens the release's actual receipt",
+    src === payouts[0].receipt_url,
+    String(src)
+  );
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(400);
+
+  check(
+    "dispute/both answers are offered, not just Yes",
+    (await page.locator(".ack-card .ack-cta").count()) === 1 &&
+      (await page.locator(".ack-card .ack-no").count()) === 1
+  );
+
+  await page.locator(".ack-card .ack-no").click();
+  await page.waitForTimeout(400);
+  check(
+    "dispute/reporting opens its own note field, not the confirm one",
+    (await page.locator("#dispute-note").count()) === 1 &&
+      (await page.locator("#ack-note").count()) === 0
+  );
+  await page.locator("#dispute-note").fill("nothing in GCash as of today");
+  await page.locator(".ack-panel .dispute-go").click();
+  await page.waitForTimeout(1500);
+  const filed = writes.find((w) => w.body && "disputed_at" in w.body);
+  check(
+    "dispute/reporting writes disputed_at for that round only",
+    !!filed && /round_number=eq\.1/.test(filed.url),
+    filed ? filed.url : `(no PATCH; ${writes.length} write(s))`
+  );
+  check(
+    "dispute/the note is carried and nothing else is touched",
+    !!filed &&
+      filed.body.disputed_note === "nothing in GCash as of today" &&
+      Object.keys(filed.body).sort().join(",") === "disputed_at,disputed_note",
+    filed ? JSON.stringify(filed.body) : "(none)"
+  );
+  await page.close();
+
+  // ---- the two panels are opposite answers and must never both open -----
+  const both = await browser.newPage({ viewport: { width: 430, height: 1100 } });
+  both.on("pageerror", (e) => errors.push(`dispute-both: ${e}`));
+  const m1b = roster(1);
+  const p1b = released(m1b, 1);
+  await serve(both, { ...M.TABLE_DATA, members: m1b, payouts: p1b });
+  await withPayoutApi(both, p1b);
+  await withAuthMode(both, "required", { signedIn: true, email: "sarah@example.com" });
+  await both.goto(BASE, { waitUntil: "domcontentloaded" });
+  await both.waitForTimeout(2500);
+  // A half-typed "received in full" must never be filed as a dispute, so
+  // opening one panel closes the other.
+  await both.evaluate(() => {
+    window.PowerFund.openReceiptAck(1);
+    window.PowerFund.openDispute(1);
+  });
+  await both.waitForTimeout(600);
+  check(
+    "dispute/opening the report panel closes the confirm panel",
+    (await both.locator("#dispute-note").count()) === 1 &&
+      (await both.locator("#ack-note").count()) === 0
+  );
+  await both.evaluate(() => window.PowerFund.openReceiptAck(1));
+  await both.waitForTimeout(600);
+  check(
+    "dispute/...and the other way round",
+    (await both.locator("#ack-note").count()) === 1 &&
+      (await both.locator("#dispute-note").count()) === 0
+  );
+  await both.close();
+
+  // ---- a filed report, seen by the group -------------------------------
+  const open = await browser.newPage({ viewport: { width: 430, height: 1100 } });
+  open.on("pageerror", (e) => errors.push(`dispute-open: ${e}`));
+  const m2 = roster(3); // Clara is signed in — NOT the recipient
+  const p2 = released(m2, 1, {
+    disputed_at: "2026-09-22T02:00:00Z",
+    disputed_note: "nothing in GCash as of today",
+  });
+  await serve(open, { ...M.TABLE_DATA, members: m2, payouts: p2 });
+  const w2 = await withPayoutApi(open, p2);
+  await withAuthMode(open, "required", { signedIn: true, email: "clara@example.com" });
+  await open.goto(BASE, { waitUntil: "domcontentloaded" });
+  await open.waitForTimeout(2500);
+  const alert = await open.locator(".dispute-alert").first().innerText().catch(() => "");
+  check(
+    "dispute/a report leads the screen for everyone, naming who and how much",
+    /Sarah/.test(alert) && /Round 1/.test(alert) && /30,000/.test(alert),
+    alert.replace(/\n+/g, " | ").slice(0, 160) || "(no .dispute-alert)"
+  );
+  check(
+    "dispute/...quoting what they said",
+    /nothing in GCash/.test(alert),
+    alert.slice(0, 120)
+  );
+  check(
+    "dispute/...and saying plainly that it holds nothing up",
+    /not a hold/i.test(alert) && /keeps collecting/i.test(alert),
+    alert.slice(0, 200)
+  );
+  // It leads: nothing else comes before it in the DOM.
+  const firstCard = await open.evaluate(() => {
+    const el = document.querySelector(
+      ".dispute-alert, .rejected-card, .dayone-card, .release-card, .attention-panel, .ack-card, .my-status"
+    );
+    return el ? el.className : "(none)";
+  });
+  check(
+    "dispute/it is the FIRST card on the screen",
+    /dispute-alert/.test(firstCard),
+    firstCard
+  );
+  // A non-recipient must not be able to file or clear one.
+  await open.evaluate(() => {
+    window.PowerFund.openDispute(1);
+    window.PowerFund.submitDispute();
+    window.PowerFund.withdrawDispute(1);
+  });
+  await open.waitForTimeout(1200);
+  check(
+    "dispute/a non-recipient cannot file or withdraw one",
+    w2.length === 0,
+    JSON.stringify(w2.map((w) => w.body))
+  );
+  await open.close();
+
+  // ---- the reporter's own view: withdraw, or say it arrived -------------
+  const mine = await browser.newPage({ viewport: { width: 430, height: 1100 } });
+  mine.on("pageerror", (e) => errors.push(`dispute-mine: ${e}`));
+  const m3 = roster(1);
+  const p3 = released(m3, 1, {
+    disputed_at: "2026-09-22T02:00:00Z",
+    disputed_note: "nothing in GCash as of today",
+  });
+  await serve(mine, { ...M.TABLE_DATA, members: m3, payouts: p3 });
+  const w3 = await withPayoutApi(mine, p3);
+  await withAuthMode(mine, "required", { signedIn: true, email: "sarah@example.com" });
+  await mine.goto(BASE, { waitUntil: "domcontentloaded" });
+  await mine.waitForTimeout(2500);
+  const card = await mine.locator(".ack-card").first().innerText().catch(() => "");
+  // The duplication that a capture caught: the red alert AND the ack card both
+  // saying the same thing, with the payout-QR nudge wedged between the copies.
+  // The reporter's own card carries the actions, so the alert is for the
+  // OTHER four.
+  check(
+    "dispute/the reporter does NOT also get the group alert about themselves",
+    (await mine.locator(".dispute-alert").count()) === 0,
+    await mine.locator(".dispute-alert").first().innerText().catch(() => "")
+  );
+  check(
+    "dispute/the reporter's own card says it is reported, and offers both ways out",
+    /not arrived/i.test(card) &&
+      (await mine.locator(".ack-card .ack-cta").count()) === 1 &&
+      (await mine.locator(".ack-card .ack-withdraw").count()) === 1,
+    card.replace(/\n+/g, " | ").slice(0, 160) || "(no .ack-card)"
+  );
+  check(
+    "dispute/...and cannot file a second report",
+    (await mine.locator(".ack-card .ack-no").count()) === 0
+  );
+  await mine.locator(".ack-card .ack-withdraw").click();
+  await mine.waitForTimeout(1500);
+  const cleared = w3.find((w) => w.body && "disputed_at" in w.body);
+  check(
+    "dispute/withdrawing clears both dispute columns and nothing else",
+    !!cleared &&
+      cleared.body.disputed_at === null &&
+      cleared.body.disputed_note === null &&
+      Object.keys(cleared.body).sort().join(",") === "disputed_at,disputed_note",
+    cleared ? JSON.stringify(cleared.body) : "(no write)"
+  );
+  await mine.close();
+
+  // ---- the Rounds record line, and that nothing is blocked -------------
+  const rec = await browser.newPage({ viewport: { width: 430, height: 1100 } });
+  rec.on("pageerror", (e) => errors.push(`dispute-rec: ${e}`));
+  const m4 = M.MEMBERS;
+  const p4 = M.PAYOUTS.map((p) =>
+    p.round_number === 1
+      ? {
+          ...p,
+          released: true,
+          released_on: "2026-09-20",
+          amount: 30000,
+          recipient_member_id: m4[0].id,
+          recipient_name: m4[0].name,
+          disputed_at: "2026-09-22T02:00:00Z",
+          disputed_note: "nothing yet",
+        }
+      : p
+  );
+  await serve(rec, { ...M.TABLE_DATA, payouts: p4 });
+  await withAuthMode(rec, "off");
+  await rec.goto(BASE, { waitUntil: "domcontentloaded" });
+  await rec.waitForTimeout(1800);
+  await rec.locator(".tab-item", { hasText: "Rounds" }).click();
+  await rec.waitForTimeout(600);
+  await rec.locator(".round-head, .round").first().click().catch(() => {});
+  await rec.waitForTimeout(500);
+  const line = await rec.locator(".payout-disputed").first().innerText().catch(() => "");
+  check(
+    "dispute/the round's record line says it never arrived",
+    /never arrived/i.test(line) && /Regine/.test(line),
+    line || "(no .payout-disputed rendered)"
+  );
+  check(
+    "dispute/...and drops the awaiting line",
+    (await rec.locator(".payout-awaiting").count()) === 0
+  );
+  // BLOCKS NOTHING — the owner's decision. The round it belongs to still
+  // reads Completed and the fund still shows its collecting round.
+  const roundsText = await rec.locator(".view-rounds, .view-body").first().innerText();
+  check(
+    "dispute/a disputed round still reads Completed — it holds nothing up",
+    /Completed/i.test(roundsText),
+    roundsText.replace(/\n+/g, " | ").slice(0, 160)
+  );
+  await rec.close();
+}
+
 /** Who received round N: the RECORD, not the current position.
  *
  *  `payouts.recipient_member_id` is stamped at release and the roster can move
@@ -5983,6 +6404,8 @@ async function bootFailure(browser) {
   await fundCompleteOrder(browser, errors);
   await polishPass(browser, errors);
   await receiptAck(browser, errors);
+  await payoutDispute(browser, errors);
+  await cardFamily(browser, errors);
   await swapTurns(browser, errors);
   await releasedRecipient(browser, errors);
   await entryAnimation(browser, errors);

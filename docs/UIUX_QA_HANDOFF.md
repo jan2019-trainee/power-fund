@@ -51,6 +51,8 @@ them as new design.** Where they borrow, they borrow
 | **Received ✓** (payout receipt confirmation) | Home, signed in as the member a released payout was sent to |
 | **Swap my turn** (*palit ng turno*) | Menu → General → Swap my turn, signed in as a member whose round is not paid out |
 | **Swap request received** | Home, signed in as the member somebody asked |
+| **"It never arrived"** (payout dispute) | Home, signed in as the recipient of a released payout |
+| **A dispute, seen by the group** | Home, signed in as anybody else once a report is filed |
 
 ---
 
@@ -183,6 +185,43 @@ Worth re-testing rather than assuming, because **it never worked before**:
 updates, so the first always collided. The arrow now calls one RPC. Check that
 an arrow tap really reorders, that the end arrows stay disabled, and that a
 paid-out round refuses with a reason rather than a raw database error.
+
+### "It never arrived" — payout disputes (new design — no mockup)
+
+Migration 014, from a real report: the Received ✓ card had one button, so a
+member whose ₱30,000 had not arrived could only press something untrue or stay
+silent. The same report noted the treasurer's receipt was viewable only on
+Rounds — so somebody was signing for ₱30,000 with the evidence on another
+screen.
+
+**The owner's decision, not a UX choice:** a dispute is flagged loudly and
+**blocks nothing**. The fund keeps collecting. A finding that it should hold
+the fund is a product question — gating it was offered and declined, because
+the money has already left the treasurer's hands and one member who forgets to
+withdraw a resolved report would stall everybody.
+
+- **Reach it:** sign in as the recipient of a released payout. Captures:
+  `disp-{mobile,desktop}-{both-answers,report-panel,reported-mine,alert-group}`
+  and `disp-mobile-alert-treasurer`.
+- **Red, and it leads every screen** — ahead of the rejected card, a funded
+  round and the review queue. It outranks the rejected card by *position*, not
+  by a louder colour.
+- **"No — it hasn't arrived" is deliberately not a red button.** It sits under
+  a green primary; red there would read as a destructive confirmation, which it
+  is not. The panel's own submit IS red.
+- **The recipient does not also get the group alert about themselves** — their
+  own card carries it, and rendering both printed the same fact twice. If you
+  see both, that is a regression.
+- **States:** both answers offered (with the receipt) · the report panel · the
+  reporter's own card afterwards, offering *It arrived after all* and *Withdraw
+  my report* · what the other four see · the treasurer's version, which adds
+  *Undo release* · the Rounds record line.
+- **Only the recipient can file one**, and the treasurer explicitly cannot file
+  on a member's behalf. `PowerFund.openDispute(1)` / `submitDispute()` from the
+  console must do nothing for anyone else.
+- A payout already confirmed received cannot be disputed, and a dispute clears
+  itself if the member later confirms. Those are database rules, not UI
+  choices.
 
 ### Sign-in / first-run prompt
 - **Skippable vs not.** `optional` shows **Not now**; `required` must not.
@@ -337,6 +376,33 @@ change, but *Reset all data* deliberately makes you type `RESET` **before** the
 PIN, and focusing the PIN there would put the cursor in the wrong field of a
 two-step gate. That is a UX call about the shared dialog, which is this pass's
 call to make, not mine. Flagging it as an observation, unrated.
+
+---
+
+## 4d. A reported visual drift, now FIXED
+
+**"Needs your attention" looked like older UI than the cards around it**, and
+it was — not a matter of taste. `design/Main.dc.html` specifies the panel as
+sentence case, 14px/600 in `#EDEFF2` with an amber glyph; the app was rendering
+13px UPPERCASE with tracking in the accent colour. Every notice card built
+since had independently landed on the artboard's shape, so the panel was the
+only holdout.
+
+The cause was five copies of one title treatment in the CSS. There is now one
+grouped selector, and `.attention-panel` also joined the notice family it sits
+in: 12px corners like `.release-card` and `.dispute-alert`, one even 1px
+border instead of a 3px left rail (which no other card has, and the artboard
+does not either), and `--accent-soft` rather than a flat card background.
+
+**What to look at:** the treasurer's Home with something in the queue, and the
+same screen caught up (green variant), on both frames. `cardFamily` in
+`tests/smoke.js` measures the computed styles, so a regression fails a check —
+but it cannot judge whether the result reads *well*, which is this pass's call.
+
+The two radii in the card family are deliberate: 18px for structural surfaces
+that hold content (`.round`, `.fund-total`, `.stat-tile`, `.menu-list`), 12px
+for notices that make a statement. A finding that they should be unified is a
+design decision, not a defect.
 
 ---
 

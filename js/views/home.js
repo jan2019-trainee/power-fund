@@ -21,7 +21,7 @@ window.PFViews.home = function (ctx) {
     formatDateTime, overdueRows, activityTimeLabel, isWide, identityLocked,
     payoutOwner, pesoWhole, myUnconfirmedPayout, receiptAckRound, receiptAckNote,
     payoutDateText, canSwapTurns, myIncomingSwaps, myOutgoingSwap, memberName,
-    roundRecipient
+    roundRecipient, disputedPayouts, myDisputedPayout, disputeRound, disputeNote
   } = ctx;
   // Cycles due so far — the denominator behind each member's standing ring.
   // Set when the pinned action renders, so the view can reserve room for it.
@@ -291,14 +291,45 @@ window.PFViews.home = function (ctx) {
     const p = myUnconfirmedPayout;
     const amt = p.amount != null ? Number(p.amount) : C.GOAL_PER_ROUND;
     const open = receiptAckRound === Number(p.round_number);
-    html += `<div class="ack-card">
-      <p class="ack-title">${icon("wallet", 16)}<span>Your Round ${
-      p.round_number
-    } payout has been released</span></p>
+    const disputing = disputeRound === Number(p.round_number);
+    const reported = !!p.disputed_at;
+    // THE TREASURER'S PROOF, shown where the question is asked. A receipt is
+    // REQUIRED at release, so it is almost always here — and asking somebody
+    // to sign for ₱30,000 while the evidence sits two taps away on another
+    // screen is the gap this closes. Same lightbox as every other proof.
+    const receiptBtn = p.receipt_url
+      ? `<button type="button" class="ack-receipt" onclick="PowerFund.openLightbox('${inlineArg(
+          p.receipt_url
+        )}')">${icon("sheet", 14)}<span>View the treasurer's receipt</span></button>`
+      : `<p class="ack-noreceipt">${icon(
+          "alert",
+          13
+        )}<span>No receipt was attached to this release.</span></p>`;
+
+    html += `<div class="ack-card${reported ? " reported" : ""}">
+      <p class="ack-title">${icon(
+        reported ? "alert" : "wallet",
+        16
+      )}<span>Your Round ${p.round_number} payout ${
+      reported ? "is reported as not arrived" : "has been released"
+    }</span></p>
       <p class="ack-note"><b>${C.peso(amt)}</b>${
       p.released_on ? ` on ${payoutDateText(p.released_on)}` : ""
-    } — did it arrive? Confirming puts it on the record, so nobody has to
-        remember later.</p>
+    }${
+      reported
+        ? ` — the treasurer has been told. If it turns up, say so and this
+            clears itself.`
+        : ` — did it arrive? Confirming puts it on the record, so nobody has to
+            remember later.`
+    }</p>
+      ${
+        reported && p.disputed_note
+          ? `<p class="ack-yournote">You said: “${escapeHtml(
+              p.disputed_note
+            )}”</p>`
+          : ""
+      }
+      ${receiptBtn}
       ${
         open
           ? `<div class="ack-panel">
@@ -315,9 +346,39 @@ window.PFViews.home = function (ctx) {
                  }>${busy ? "Saving…" : "Confirm receipt"}</button>
                </div>
              </div>`
+          : disputing
+          ? `<div class="ack-panel">
+               <label class="ack-label" for="dispute-note">What are you seeing? <span class="ack-optional">optional</span></label>
+               <input id="dispute-note" class="text-input ack-input" type="text" maxlength="120"
+                      placeholder="e.g. nothing in GCash as of today"
+                      value="${escapeHtml(disputeNote)}"
+                      oninput="PowerFund.setDisputeNote(this.value)">
+               <p class="ack-once">This tells the treasurer and shows on the round. It
+                 doesn't stop the fund, and you can withdraw it if the money turns up.</p>
+               <div class="ack-btns">
+                 <button type="button" class="modal-btn-secondary" onclick="PowerFund.cancelDispute()">Cancel</button>
+                 <button type="button" class="modal-btn-primary dispute-go" onclick="PowerFund.submitDispute()" ${
+                   busy ? "disabled" : ""
+                 }>${busy ? "Sending…" : "Report it"}</button>
+               </div>
+             </div>`
           : `<button type="button" class="ack-cta" onclick="PowerFund.openReceiptAck(${
               p.round_number
-            })">${icon("check", 15)}<span>Yes, I received it</span></button>`
+            })">${icon("check", 15)}<span>${
+              reported ? "It arrived after all" : "Yes, I received it"
+            }</span></button>
+             ${
+               reported
+                 ? `<button type="button" class="ack-withdraw" onclick="PowerFund.withdrawDispute(${
+                     p.round_number
+                   })" ${busy ? "disabled" : ""}>Withdraw my report</button>`
+                 : `<button type="button" class="ack-no" onclick="PowerFund.openDispute(${
+                     p.round_number
+                   })">${icon(
+                     "alert",
+                     14
+                   )}<span>No — it hasn't arrived</span></button>`
+             }`
       }
     </div>`;
   }
@@ -446,7 +507,7 @@ window.PFViews.home = function (ctx) {
   // CTA needs a payCycle that no longer exists. Say it is finished.
   if (allDone) {
     html += `<div class="attention-panel caught-up fund-complete-panel">
-      <p class="attention-title">${icon("check", 15)}<span>Fund complete</span></p>
+      <p class="attention-title">${icon("check", 16)}<span>Fund complete</span></p>
       <p class="attention-caught-up-note">All ${C.TOTAL_ROUNDS} rounds collected and paid out — ${C.peso(
       C.TARGET_AMOUNT
     )} in total. Nothing is outstanding.</p>
@@ -508,12 +569,12 @@ window.PFViews.home = function (ctx) {
       // (is it clear, or did it fail to load?), and a caught-up queue is
       // the normal state most days.
       html += `<div class="attention-panel caught-up">
-        <p class="attention-title">${icon("check", 15)}<span>All caught up</span></p>
+        <p class="attention-title">${icon("check", 16)}<span>All caught up</span></p>
         <p class="attention-caught-up-note">No payments waiting for review, nothing overdue, and no payout to release right now.</p>
       </div>`;
     } else {
       html += `<div class="attention-panel">
-        <p class="attention-title">${icon("alert", 15)}<span>Needs your attention</span></p>`;
+        <p class="attention-title">${icon("alert", 16)}<span>Needs your attention</span></p>`;
 
       // 1) pending review queue
       if (batches.length) {
@@ -679,6 +740,75 @@ window.PFViews.home = function (ctx) {
     }
   }
   S.release = section();
+
+  /*
+   * A DISPUTED PAYOUT — "it never arrived" (migration 014).
+   *
+   * The highest-priority thing on any screen in this app. Money that has left
+   * the fund and cannot be accounted for outranks a funded round waiting to
+   * send and a proof waiting to be checked, both of which are orderly. It is
+   * rendered LAST here and placed FIRST in the compose order below.
+   *
+   * Shown to EVERYONE, not just the treasurer. The fund is transparent by
+   * design and this is the group's problem — and the recipient's own card
+   * already says it, so hiding it from the other three would make the
+   * treasurer the only one who could see a ₱30,000 gap.
+   *
+   * It BLOCKS NOTHING — the owner's decision, and the same reasoning as the
+   * receipt not being a gate. The fund keeps collecting.
+   */
+  // NOT the viewer's OWN report. Their .ack-card above already says it, and
+  // carries the two actions — so rendering this as well printed the same fact
+  // twice with the payout-QR nudge wedged between the copies. Caught in a
+  // capture, which is the second time that shape of duplication has only
+  // shown up in a screenshot.
+  const othersDisputes = (disputedPayouts || []).filter(
+    (p) =>
+      !myDisputedPayout ||
+      Number(myDisputedPayout.round_number) !== Number(p.round_number)
+  );
+  othersDisputes.forEach((p) => {
+    const who = memberName(p.recipient_member_id) || p.recipient_name || "The recipient";
+    const amt = p.amount != null ? Number(p.amount) : C.GOAL_PER_ROUND;
+    html += `<div class="dispute-alert" role="alert">
+      <p class="dispute-alert-title">${icon("alert", 16)}<span><b>${escapeHtml(
+      who
+    )}</b> reports that the Round ${
+      p.round_number
+    } payout never arrived</span></p>
+      <p class="dispute-alert-body"><b>${C.peso(amt)}</b>${
+      p.released_on ? ` was recorded as released on ${payoutDateText(p.released_on)}` : ""
+    }, and ${escapeHtml(who)} has not received it.${
+      p.disputed_note ? ` <span class="dispute-alert-why">“${escapeHtml(p.disputed_note)}”</span>` : ""
+    }</p>
+      <p class="dispute-alert-fine">Reported ${activityTimeLabel(
+        p.disputed_at
+      )}. The fund keeps collecting — this is a record, not a hold.${
+        unlocked
+          ? " Undo release returns the round to Payout Pending so you can send it again."
+          : ""
+      }</p>
+      <div class="dispute-alert-btns">
+        ${
+          p.receipt_url
+            ? `<button type="button" class="dispute-alert-receipt" onclick="PowerFund.openLightbox('${inlineArg(
+                p.receipt_url
+              )}')">${icon("sheet", 14)}<span>View receipt</span></button>`
+            : ""
+        }
+        ${
+          // Undo Release is the treasurer's real remedy: it returns the round
+          // to Payout Pending so it can be sent again, and clears the report
+          // with it. Offered here rather than only on Rounds, because this is
+          // where they are looking.
+          unlocked
+            ? `<button type="button" class="dispute-alert-undo" onclick="PowerFund.unmarkPayoutReleased(${p.round_number})">Undo release</button>`
+            : ""
+        }
+      </div>
+    </div>`;
+  });
+  S.disputes = section();
 
   // Fund balance renders here — after "Needs your attention" for a
   // treasurer, and simply here (there's nothing before it) for a member.
@@ -1006,6 +1136,10 @@ window.PFViews.home = function (ctx) {
       // header, ahead of the balance card. For a treasurer the queue and a
       // ready payout outrank the personal card; for a member there is no queue
       // and their own status IS the lead.
+      // Money that left the fund and cannot be accounted for leads every
+      // screen — ahead of the rejected card, a funded round and the review
+      // queue, all of which are orderly by comparison.
+      S.disputes +
       S.dayOne +
       S.rejected +
       (unlocked ? S.release + S.attention : "") +
@@ -1170,7 +1304,7 @@ window.PFViews.home = function (ctx) {
         ${S.fundTotal}${S.hero}${S.roster}${S.roundsLink}${recentPanel}${S.prevRounds}
       </div>
       <aside class="home-rail">
-        ${S.rejected}${unlocked ? `${S.release}${S.attention}` : ""}${
+        ${S.disputes}${S.rejected}${unlocked ? `${S.release}${S.attention}` : ""}${
           S.receiptAck
         }${S.swaps}${S.myStatus}${S.complete}${S.payoutNudge}${overview}${quick}
       </aside>

@@ -88,7 +88,10 @@ create table payouts (
   recipient_name text, receipt_url text, released_by text,
   -- migration 012. Hand-stubbed like every other column here; the migration's
   -- own `alter table` is what adds them in a real deployment.
-  received_at timestamptz, received_note text);
+  received_at timestamptz, received_note text,
+  -- migration 014. The exclusive CHECK is NOT stubbed: 014 adds it itself, and
+  -- stubbing it here would hide a migration that failed to.
+  disputed_at timestamptz, disputed_note text);
 alter table payouts enable row level security;
 -- pf_accept_swap() logs the agreement here, inside the same transaction, so a
 -- swap can never be unrecorded. Columns as of 006/007.
@@ -126,14 +129,21 @@ insert into cycles (id, cycle_number, due_date) values
 --   the column pinning has to be tested against (the treasurer may legitimately
 --   change an amount, so testing pinning as the treasurer proves nothing).
 -- Round 3 -> not released.
+-- receipt_url is POPULATED: the release flow requires a receipt, and leaving
+-- it null made "a reporter may not delete the treasurer's receipt" vacuous —
+-- setting null to null changes nothing, so the pinning never fired and the
+-- check passed against a guard that did not protect it.
 insert into payouts (round_number, released, released_on, amount,
-                     recipient_member_id, recipient_name, released_by) values
+                     recipient_member_id, recipient_name, released_by,
+                     receipt_url) values
  (1, true, '2026-09-20', 30000,
-  '11111111-0000-0000-0000-000000000001', 'Regine', 'Regine'),
+  '11111111-0000-0000-0000-000000000001', 'Regine', 'Regine',
+  'receipts/r1.png'),
  (2, true, '2027-03-20', 30000,
-  '11111111-0000-0000-0000-000000000002', 'Sarah', 'Regine'),
- (3, false, null, null, null, null, null),
- (4, false, null, null, null, null, null);
+  '11111111-0000-0000-0000-000000000002', 'Sarah', 'Regine',
+  'receipts/r2.png'),
+ (3, false, null, null, null, null, null, null),
+ (4, false, null, null, null, null, null, null);
 -- Round 5 deliberately has NO payouts row, so pf_round_released()'s
 -- coalesce-to-false path is exercised rather than assumed.
 SQL
@@ -148,6 +158,7 @@ mig, repo, work = (pathlib.Path(p) for p in sys.argv[1:4])
 lock  = (mig / "011_rls_lockdown.sql").read_text()
 guard = (mig / "010_auth_helpers_and_secrets.sql").read_text()
 ack   = (mig / "012_payout_receipt_confirmation.sql").read_text()
+disp  = (mig / "014_payout_disputes.sql").read_text()
 swap  = (mig / "013_turn_swaps.sql").read_text()
 schema = (repo / "supabase" / "schema.sql").read_text()
 def cut(s, start, end):
@@ -179,7 +190,10 @@ def cut(s, start, end):
     # four functions and the amended guard) because the pieces only work
     # together — and its `create or replace` of pf_members_guard deliberately
     # lands AFTER 010's above, which is the real deployment order.
-    + cut(swap, '-- 1) The unique constraint', 'commit;'))
+    + cut(swap, '-- 1) The unique constraint', 'commit;')
+    # 014: disputes. Applied AFTER 012, which is the real deployment order —
+    # its guard is a `create or replace` over 012's and must win.
+    + cut(disp, '-- 1) The columns.', 'commit;'))
 # 013 on its own, so the rollback test can re-apply JUST it. Re-applying the
 # concatenated file instead fails on schema.sql's payment_assets_read, which
 # carries no `drop policy if exists` — a failure that says nothing about 013.
@@ -203,7 +217,7 @@ run() {
   # EXPLICITLY rather than treating any ERROR as a denial — that is the
   # dangerous direction, because a typo'd column would then read as
   # "correctly refused". Anything not matched here still lands in ERR: below.
-  if printf '%s' "$out" | grep -qiE "violates row-level security|permission denied|Only the treasurer|only edit your own|can confirm receiving|may only confirm receipt|already confirmed received|has not been released yet|can clear a confirmation"; then
+  if printf '%s' "$out" | grep -qiE "violates row-level security|permission denied|Only the treasurer|only edit your own|can confirm receiving|may only confirm receipt|already confirmed received|has not been released yet|can clear a confirmation|can report this payout as not arrived|may only confirm receipt or report a problem|can withdraw that report|payout_ack_exclusive"; then
     got=DENY
   elif [ "${rows:-x}" = "0" ]; then
     got=DENY   # RLS hides the row: 0 rows and no error. The silent refusal.
@@ -212,6 +226,33 @@ run() {
   else got=OK; fi
   if [ "$got" = "$expect" ]; then printf '  ok   %s\n' "$label"
   else printf '  FAIL %s — expected %s, got %s\n' "$label" "$expect" "$got"; FAILED=1; fi
+}
+
+# swapq <label> <sub> <OK|ERR-substring> <sql>  — COMMITS, unlike run().
+swapq() {
+  local label="$1" sub="$2" expect="$3" sql="$4" out
+  out=$(q -c "begin; set local role authenticated;
+    select set_config('request.jwt.claim.sub','$sub',true); $sql; commit;" 2>&1)
+  if [ "$expect" = "OK" ]; then
+    if printf '%s' "$out" | grep -qiE "ERROR:"; then
+      printf '  FAIL %s — %s\n' "$label" "$(printf '%s' "$out" | grep -oiE 'ERROR:.*' | head -1 | cut -c1-90)"
+      FAILED=1
+    else printf '  ok   %s\n' "$label"; fi
+  else
+    if printf '%s' "$out" | grep -qi "$expect"; then printf '  ok   %s\n' "$label"
+    else
+      printf '  FAIL %s — expected /%s/, got %s\n' "$label" "$expect" \
+        "$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-110)"
+      FAILED=1
+    fi
+  fi
+}
+
+# state <label> <expected> <sql>
+state() {
+  local got; got=$(q -tAc "$3" 2>&1 | tr -d ' ' | tr '\n' ',' | sed 's/,$//')
+  if [ "$got" = "$2" ]; then printf '  ok   %s\n' "$1"
+  else printf '  FAIL %s — expected %s, got %s\n' "$1" "$2" "$got"; FAILED=1; fi
 }
 
 TRE=aaaaaaaa-0000-0000-0000-00000000000a   # Regine, the flagged treasurer
@@ -336,6 +377,79 @@ run "an unreleased payout cannot be confirmed" $TRE DENY \
 run "anon may NOT confirm anything" - DENY \
   "update payouts set received_at = now() where round_number = 2"
 
+echo "payouts — a dispute: \"it never arrived\" (migration 014)"
+# 012 gave the recipient one button. A member whose payout has NOT arrived
+# could only press something untrue or stay silent, and silence reads the same
+# as forgetting. Owner decision: a dispute is flagged loudly and BLOCKS
+# NOTHING.
+run "the recipient may report a payout as not arrived" $MEM OK \
+  "update payouts set disputed_at = now(), disputed_note = 'nothing in GCash'
+     where round_number = 2"
+run "a member may NOT report somebody else's payout" $MEM DENY \
+  "update payouts set disputed_at = now() where round_number = 1"
+run "the TREASURER may not report on a member's behalf" $TRE DENY \
+  "update payouts set disputed_at = now() where round_number = 2"
+run "a login on no member row may not report anything" $GHOST DENY \
+  "update payouts set disputed_at = now() where round_number = 2"
+run "an unreleased payout cannot be disputed" $MEM DENY \
+  "update payouts set disputed_at = now() where round_number = 3"
+# The opposites, which must never both be on record.
+run "a payout already confirmed received may NOT be disputed" $MEM DENY \
+  "update payouts set received_at = now() where round_number = 2;
+   update payouts set disputed_at = now() where round_number = 2"
+run "the CHECK refuses both at once even for the treasurer" $TRE DENY \
+  "update payouts set received_at = now(), disputed_at = now() where round_number = 2"
+# Money arriving late is the ordinary happy ending, and the guard — not the
+# client — is what clears the dispute, so the invariant cannot be broken by a
+# caller that simply forgot.
+swapq "confirming after a dispute clears the dispute" $MEM OK \
+  "update payouts set disputed_at = now(), disputed_note = 'nothing yet'
+     where round_number = 2;
+   update payouts set received_at = now() where round_number = 2"
+# psql renders a concatenated boolean as true/false, not t/f.
+state "...and the row carries the receipt with NO dispute left" "true|false" \
+  "select (received_at is not null) || '|' || (disputed_at is not null)
+     from payouts where round_number = 2"
+state "...and the note went with it" "1" \
+  "select count(*) from payouts where round_number = 2 and disputed_note is null"
+# Reset for the remaining cases (swapq COMMITS).
+q -tAc "update payouts set received_at = null, received_note = null,
+          disputed_at = null, disputed_note = null where round_number = 2" >/dev/null
+# A dispute is a REPORT, not a receipt: the reporter may take it back. This is
+# deliberately unlike received_at, whose clearing is treasurer-only.
+swapq "the reporter may withdraw their own report" $MEM OK \
+  "update payouts set disputed_at = now() where round_number = 2;
+   update payouts set disputed_at = null, disputed_note = null where round_number = 2"
+# Set by the RECIPIENT (the treasurer may not file one), then cleared by the
+# treasurer. My first version filed it as the treasurer and was correctly
+# refused — the setup was wrong, not the rule.
+q -tAc "update payouts set disputed_at = now(), disputed_note = 'x'
+          where round_number = 2" >/dev/null
+swapq "the treasurer may also clear somebody's report" $TRE OK \
+  "update payouts set disputed_at = null, disputed_note = null where round_number = 2"
+state "...and it really is cleared" "1" \
+  "select count(*) from payouts where round_number = 2 and disputed_at is null"
+q -tAc "update payouts set disputed_at = now() where round_number = 2" >/dev/null
+run "another MEMBER may not withdraw somebody else's report" $CLA DENY \
+  "update payouts set disputed_at = null where round_number = 2"
+run "a login on no member row may not clear a report" $GHOST DENY \
+  "update payouts set disputed_at = null where round_number = 2"
+# The pinning still holds on the dispute path — 012's member branch raised
+# whenever received_at was null, which would have refused every dispute write,
+# so the pinning had to be re-checked rather than assumed to still apply.
+run "a reporter may NOT change the amount while reporting" $MEM DENY \
+  "update payouts set disputed_at = now(), amount = 99999 where round_number = 2"
+run "a reporter may NOT redirect the payout while reporting" $MEM DENY \
+  "update payouts set disputed_at = now(), recipient_member_id = '$RID'
+     where round_number = 2"
+run "a reporter may NOT un-release it while reporting" $MEM DENY \
+  "update payouts set disputed_at = now(), released = false where round_number = 2"
+run "a reporter may NOT delete the treasurer's receipt" $MEM DENY \
+  "update payouts set disputed_at = now(), receipt_url = null where round_number = 2"
+run "anon may NOT report anything" - DENY \
+  "update payouts set disputed_at = now() where round_number = 2"
+q -tAc "update payouts set disputed_at = null, disputed_note = null where round_number = 2" >/dev/null
+
 echo "cycles — the payment schedule (Menu -> Payment schedule)"
 CY=22222222-0000-0000-0000-000000000001
 run "treasurer may move a due date" $TRE OK \
@@ -371,33 +485,6 @@ else printf '  FAIL a member may still READ the schedule — saw %s row(s)\n' "$
 # rollback would never reach that check — a swap that left two members at the
 # same position would read as a pass.
 # ===========================================================================
-
-# swapq <label> <sub> <OK|ERR-substring> <sql>  — COMMITS, unlike run().
-swapq() {
-  local label="$1" sub="$2" expect="$3" sql="$4" out
-  out=$(q -c "begin; set local role authenticated;
-    select set_config('request.jwt.claim.sub','$sub',true); $sql; commit;" 2>&1)
-  if [ "$expect" = "OK" ]; then
-    if printf '%s' "$out" | grep -qiE "ERROR:"; then
-      printf '  FAIL %s — %s\n' "$label" "$(printf '%s' "$out" | grep -oiE 'ERROR:.*' | head -1 | cut -c1-90)"
-      FAILED=1
-    else printf '  ok   %s\n' "$label"; fi
-  else
-    if printf '%s' "$out" | grep -qi "$expect"; then printf '  ok   %s\n' "$label"
-    else
-      printf '  FAIL %s — expected /%s/, got %s\n' "$label" "$expect" \
-        "$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-110)"
-      FAILED=1
-    fi
-  fi
-}
-
-# state <label> <expected> <sql>
-state() {
-  local got; got=$(q -tAc "$3" 2>&1 | tr -d ' ' | tr '\n' ',' | sed 's/,$//')
-  if [ "$got" = "$2" ]; then printf '  ok   %s\n' "$1"
-  else printf '  FAIL %s — expected %s, got %s\n' "$1" "$2" "$got"; FAILED=1; fi
-}
 
 echo "turn swaps — the constraint that made this a migration"
 state "member_order's unique constraint is now DEFERRABLE" "t" \

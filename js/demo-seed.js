@@ -55,13 +55,19 @@ window.PF_DEMO_SEED = (function () {
   // demonstrated at all.
   //
   // No emails, because this repo is public and matching by id needs none.
+  // WHO HOLDS THE ROLE, in one place. Every treasurer action in the midfund
+  // story below is attributed from this rather than spelled out, so moving the
+  // role is one edit and cannot leave the activity log describing somebody
+  // else doing the treasurer's job.
+  const TREASURER = "Verdz";
+
   const MEMBERS = ["Regine", "Sarah", "Jan", "Clara", "Verdz"].map((name, i) => ({
     id: uuid(i + 1),
     name: name,
     member_order: i + 1,
     email: null,
     auth_user_id: "demo-user-" + (i + 1),
-    is_treasurer: name === "Jan", // the person giving the demo
+    is_treasurer: name === TREASURER, // the person giving the demo
     avatar_url: null,
     payout_bank: i < 3 ? "GCash" : null,
     payout_account_name: i < 3 ? name + " " + "SDGJ"[i] + "." : null,
@@ -156,7 +162,7 @@ window.PF_DEMO_SEED = (function () {
       amount: 30000,
       recipient_member_id: M(1),
       recipient_name: "Regine",
-      released_by: "Jan",
+      released_by: TREASURER,
       receipt_url: "assets/gcash-qr.jpg", // stands in for a receipt photo
       received_at: at(-96),
       received_note: "GCash, received in full — thanks!",
@@ -167,7 +173,7 @@ window.PF_DEMO_SEED = (function () {
       amount: 30000,
       recipient_member_id: M(2),
       recipient_name: "Sarah",
-      released_by: "Jan",
+      released_by: TREASURER,
       receipt_url: "assets/gcash-qr.jpg",
       // THE DISPUTE (014) — the newest thing to show, and the one screen
       // the live fund will hopefully never be in.
@@ -206,12 +212,17 @@ window.PF_DEMO_SEED = (function () {
     for (let m = 1; m <= 5; m++) add(m, c, 2);
   }
   // Round 3, collecting. Cycle 13 is past due, cycle 14 is not.
+  //
+  // The REJECTED claim is deliberately not the treasurer's. Verdz holds the
+  // role, so parking it on them would have the treasurer refusing their own
+  // payment — which the app permits but which reads as a mistake in the demo
+  // rather than as the feature.
   add(1, 13, 2); // Regine paid
   add(2, 13, 2); // Sarah paid
-  add(3, 13, 2); // Jan (the treasurer) paid
+  add(5, 13, 2); // Verdz — the treasurer, who pays in like everyone else
   add(4, 13, 1); // Clara: in review — gives the treasurer a queue to work
-  add(5, 13, 3, {
-    // Verdz: refused, with a reason. Cycle 13 IS past due, so this reads red
+  add(3, 13, 3, {
+    // Jan: refused, with a reason. Cycle 13 IS past due, so this reads red
     // rather than as a refused advance.
     proof_url: "assets/gcash-qr.jpg",
     rejection_note: "Screenshot is cut off — can't see the amount or the date",
@@ -240,10 +251,10 @@ window.PF_DEMO_SEED = (function () {
 
   const ACTIVITY_LOG = MODE !== "midfund" ? [] : [
     { id: uuid(800), message: "Sarah reported that the Round 2 payout has not arrived — Nothing in GCash as of today", created_at: at(-2, 9), event_type: "payout", amount: null, ref_status: null, member_id: M(2), round_number: 2 },
-    { id: uuid(801), message: "Jan rejected Verdz's cycle 13 claim — \"Screenshot is cut off\"", created_at: at(-1, 16), event_type: "payment", amount: 1000, ref_status: 3, member_id: M(5), round_number: 3 },
+    { id: uuid(801), message: TREASURER + " rejected Jan's cycle 13 claim — \"Screenshot is cut off\"", created_at: at(-1, 16), event_type: "payment", amount: 1000, ref_status: 3, member_id: M(3), round_number: 3 },
     { id: uuid(802), message: "Jan asked Clara to swap turns — Round 3 ↔ Round 4", created_at: at(-1, 20), event_type: "admin", amount: null, ref_status: null, member_id: M(3), round_number: 3 },
     { id: uuid(803), message: "Payout released — Round 2 (Sarah) · ₱30,000.00", created_at: at(-6, 14), event_type: "payout", amount: -30000, ref_status: null, member_id: M(2), round_number: 2 },
-    { id: uuid(804), message: "Jan confirmed Clara's cycle 13 as sent — ₱1,000.00", created_at: at(-3, 11), event_type: "payment", amount: 1000, ref_status: 1, member_id: M(4), round_number: 3 },
+    { id: uuid(804), message: TREASURER + " confirmed Clara's cycle 13 as sent — ₱1,000.00", created_at: at(-3, 11), event_type: "payment", amount: 1000, ref_status: 1, member_id: M(4), round_number: 3 },
     { id: uuid(805), message: "Regine confirmed receiving ₱30,000.00 for Round 1 — GCash, received in full", created_at: at(-96, 12), event_type: "payout", amount: null, ref_status: null, member_id: M(1), round_number: 1 },
     { id: uuid(806), message: "Treasurer started Round 3", created_at: at(-30, 8), event_type: "admin", amount: null, ref_status: null, member_id: null, round_number: 3 },
   ];
@@ -256,8 +267,9 @@ window.PF_DEMO_SEED = (function () {
     qr_code_url: null, // falls back to QR_IMAGE_URL
     qr_updated_at: null,
     qr_bank: "GCash",
-    qr_account_name: "Jan N.",
-    qr_account_number: "0917 555 0003",
+    // The fund's collecting account belongs to whoever holds the role.
+    qr_account_name: TREASURER + " R.",
+    qr_account_number: "0917 555 0005",
   };
 
   return {

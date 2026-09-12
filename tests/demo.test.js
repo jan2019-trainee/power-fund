@@ -328,6 +328,38 @@ check(
   rejCycle.due_date < today,
   rejCycle.due_date
 );
+// WHO HOLDS THE ROLE is one constant in the seed, and the story has to follow
+// it. Moving the role and leaving the log describing somebody else doing the
+// treasurer's job is the failure this guards against.
+const tre = mid.members.find((m) => m.is_treasurer);
+check(
+  "midfund: every released payout is released_by the flagged treasurer",
+  mid.payouts.filter((p) => p.released).every((p) => p.released_by === tre.name),
+  mid.payouts.filter((p) => p.released).map((p) => p.released_by).join(",")
+);
+check(
+  "midfund: the treasurer-side log entries name the flagged treasurer",
+  mid.activity_log.filter((e) => new RegExp("^" + tre.name + " ").test(e.message)).length >= 2,
+  mid.activity_log
+    .filter((e) => /rejected|confirmed .*as sent/.test(e.message))
+    .map((e) => e.message.split(" ")[0])
+    .join(",")
+);
+check(
+  "midfund: the REJECTED claim is not the treasurer's own",
+  rej.member_id !== tre.id,
+  (mid.members.find((m) => m.id === rej.member_id) || {}).name + " (treasurer is " + tre.name + ")"
+);
+check(
+  "midfund: the fund's collecting account belongs to the treasurer",
+  new RegExp(tre.name).test(mid.app_settings.qr_account_name || ""),
+  mid.app_settings.qr_account_name
+);
+check(
+  "empty: the demo opens as the flagged treasurer",
+  /is_treasurer\)/.test(demo) && /ensureSelection/.test(demo),
+  (empty.members.find((m) => m.is_treasurer) || {}).name
+);
 
 // ---- THE SHAPE of an object argument, which the signature table cannot see
 //

@@ -11,12 +11,16 @@ AUTH_MODE: "optional"   DEMO_MODE: true   DEMO_SEED: "empty"   (js/config.js)
 Open it like the normal app. A gold bar sits at the top of every screen:
 
 ```
-DEMO   as [ Jan (treasurer) ▾ ]   [Reset]
+DEMO   as [ Verdz (treasurer) ▾ ]   [Reset]
 ```
 
 - **The dropdown switches member.** That is the whole point of this branch —
   pick Regine, Sarah, Jan, Clara or Verdz and the app reloads as that person.
   No Google account, nobody's password, no sign-in.
+- **Verdz holds the treasurer role**, and the demo opens as them. To move it,
+  change `TREASURER` in `js/demo-seed.js` — one constant, which every
+  treasurer action in the mid-fund story is attributed from, so the activity
+  log cannot end up describing somebody else doing the job.
 - **Treasurer PIN is `1234`.** Master PIN is `9999`.
 - **Reset** puts the demo back to its starting state.
 
@@ -58,7 +62,7 @@ than late.
 You build the story live, which is the better walkthrough:
 
 1. **As any member** — *Record my payment — ₱1,000*, attach a screenshot, send.
-2. **Switch to Jan** in the DEMO bar, unlock with `1234`, open *Needs your
+2. **Switch to Verdz** in the DEMO bar, unlock with `1234`, open *Needs your
    attention* and confirm it. The round moves to ₱1,000 / ₱30,000.
 3. Keep going: pay the other four, watch the battery fill, release the payout
    to Regine with a receipt, then switch to Regine and confirm it arrived — or
@@ -74,11 +78,16 @@ For showing a screen without first producing the state behind it.
 | **Round 2** | Paid out to Sarah · receipt attached · **Sarah disputes it** — "nothing in GCash" |
 | **Round 3** | Collecting · 3 confirmed, 1 in review, 1 **rejected** with a reason, one paid ahead |
 | **Round 4** | Not started · Jan has an open **turn-swap request** out to Clara |
+| **Cycle 13** | Verdz (treasurer) confirmed · Clara in review · **Jan rejected** with a reason |
 
-Worth driving, and who to be: **Jan** (the dispute leads the screen; unlock for
-the review queue), **Sarah** (her own dispute card — *It arrived after all* or
-*Withdraw my report*), **Clara** (accept Jan's swap; the payout order really
-moves), **Verdz** (the rejected claim and *Resubmit*).
+Worth driving, and who to be: **Verdz** (the dispute leads the screen; unlock
+for the review queue), **Sarah** (her own dispute card — *It arrived after all*
+or *Withdraw my report*), **Clara** (accept Jan's swap; the payout order really
+moves), **Jan** (the rejected claim and *Resubmit*).
+
+The rejected claim is deliberately **not** the treasurer's own — the app allows
+it, but a treasurer refusing their own payment reads as a mistake in the demo
+rather than as the feature.
 
 ### The schedules differ on purpose
 

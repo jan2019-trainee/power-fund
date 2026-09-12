@@ -3136,6 +3136,134 @@ async function extraTreasurer(browser, errors) {
   await solo.close();
 }
 
+/** Who received round N: the RECORD, not the current position.
+ *
+ *  `payouts.recipient_member_id` is stamped at release and the roster can move
+ *  afterwards — a turn swap or a treasurer reorder. For a released round the
+ *  two then disagree, and reading the position credits somebody who never got
+ *  the money while telling the real recipient they are still owed. Reported
+ *  from the captures: "Round 1 — Regine" sat over a record reading "Payout
+ *  released to Sarah".
+ *
+ *  The fixture forces the divergence: round 1 is released to SARAH while
+ *  REGINE holds position 1.
+ */
+async function releasedRecipient(browser, errors) {
+  const page = await browser.newPage({ viewport: { width: 430, height: 1100 } });
+  page.on("pageerror", (e) => errors.push(`recipient: ${e}`));
+  const members = M.MEMBERS;
+  const paidOut = members[1]; // Sarah — the recorded recipient of round 1
+  const atPos1 = members[0];  // Regine — whoever sits at position 1 now
+  const payouts = M.PAYOUTS.map((p) =>
+    p.round_number === 1
+      ? {
+          ...p,
+          released: true,
+          released_on: "2026-09-20",
+          amount: 30000,
+          recipient_member_id: paidOut.id,
+          recipient_name: paidOut.name,
+        }
+      : p
+  );
+  // Every cycle of round 1 confirmed, so it is genuinely funded and released
+  // rather than carrying a shortfall that would change the copy.
+  const contributions = M.CONTRIBUTIONS.filter((c) => c.status === 2).concat(
+    [5, 6].flatMap((cycleNumber) =>
+      members.slice(4).map((m, i) => ({
+        id: `77777777-0000-0000-0000-00000000000${cycleNumber}${i}`,
+        cycle_id: M.CYCLES[cycleNumber - 1].id,
+        member_id: m.id,
+        status: 2,
+        amount: 1000,
+        proof_url: null,
+        paid_at: "2026-09-14T00:00:00Z",
+      }))
+    )
+  );
+  await serve(page, { ...M.TABLE_DATA, payouts, contributions });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2000);
+
+  // THE PREMISE, asserted rather than assumed: the two really do disagree in
+  // this fixture. Without this the checks below could pass because the names
+  // happen to match.
+  check(
+    "recipient/the fixture really does diverge (record vs position)",
+    paidOut.id !== atPos1.id && atPos1.member_order === 1,
+    `${paidOut.name} recorded, ${atPos1.name} at position ${atPos1.member_order}`
+  );
+
+  await page.locator(".tab-item", { hasText: "Rounds" }).click();
+  await page.waitForTimeout(700);
+  const head = await page.locator(".round-head, .round").first().innerText();
+  check(
+    "recipient/the Rounds header names who RECEIVED it, not who sits there now",
+    new RegExp(paidOut.name).test(head) && !new RegExp(atPos1.name).test(head),
+    head.replace(/\n+/g, " | ").slice(0, 120)
+  );
+
+  // Insights bars cover all five rounds, released ones included.
+  await page.locator(".tab-item", { hasText: "Insights" }).click();
+  await page.waitForTimeout(700);
+  const bar = await page
+    .locator(".round-bar-row")
+    .first()
+    .innerText()
+    .catch(() => "");
+  check(
+    "recipient/the Insights per-round bar agrees with the record",
+    new RegExp(paidOut.name).test(bar) && !new RegExp(atPos1.name).test(bar),
+    bar.replace(/\n+/g, " | ") || "(no .round-bar-row rendered)"
+  );
+
+  // "· received the payout" on each member's own round summary. Members is a
+  // DESKTOP nav item (on the phone it is a Home drill-down), so this widens
+  // rather than hunting for the See-all link — and on desktop the record
+  // lives in the DETAIL PANE beside the list, not folded into the row
+  // (memberRow suppresses its panel when isWide, or it would print twice).
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await page.waitForTimeout(500);
+  await page.locator(".tab-item", { hasText: "Members" }).click();
+  await page.waitForTimeout(700);
+  // The "Paid out" TAG, which is what memberStanding() also keys the ring off.
+  // Read from the row itself, not from whichever panel happens to be open —
+  // the accordion closes the previous one, so `.first()` was always reading
+  // somebody else's and found nothing.
+  const tagged = [];
+  const credited = [];
+  const rowCount = await page.locator(".member-row-wrap").count();
+  check(
+    "recipient/the premise: the Members roster rendered its rows",
+    rowCount === M.MEMBERS.length,
+    `${rowCount} of ${M.MEMBERS.length}`
+  );
+  for (let i = 0; i < rowCount; i++) {
+    const row = page.locator(".member-row-wrap").nth(i);
+    const name = await row.locator(".member-row-name").innerText();
+    if (/Paid out/i.test(await row.locator(".member-row").innerText())) tagged.push(name);
+    await row.locator(".member-row").click();
+    await page.waitForTimeout(300);
+    const panel = await page
+      .locator(".members-detail")
+      .first()
+      .innerText()
+      .catch(() => "");
+    if (/received the payout/i.test(panel)) credited.push(name);
+  }
+  check(
+    "recipient/only the recorded recipient is tagged Paid out",
+    tagged.length === 1 && tagged[0] === paidOut.name,
+    JSON.stringify(tagged) + ` (expected only ${paidOut.name})`
+  );
+  check(
+    "recipient/only the recorded recipient is credited with the payout",
+    credited.length === 1 && credited[0] === paidOut.name,
+    JSON.stringify(credited) + ` (expected only ${paidOut.name})`
+  );
+  await page.close();
+}
+
 /** Turn swaps — *palit ng turno* (migration 013).
  *
  *  Two properties carry this feature, and neither is visual:
@@ -5856,6 +5984,7 @@ async function bootFailure(browser) {
   await polishPass(browser, errors);
   await receiptAck(browser, errors);
   await swapTurns(browser, errors);
+  await releasedRecipient(browser, errors);
   await entryAnimation(browser, errors);
   await signInPrompt(browser, errors);
   await onboarding(browser, errors);

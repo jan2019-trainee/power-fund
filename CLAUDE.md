@@ -1274,6 +1274,51 @@ it must not be possible for the order to move and the record to be missing.
   one arrow around the other — the conventional shape, and illegible at the
   14px it renders at. Measured in a capture, not guessed.
 
+### Who received round N: the RECORD, not the position
+
+Reported from the captures, and the owner confirmed it matters ("it's about
+who received 30k"). The accordion header read **"Round 1 — Regine"** over a
+release record saying **"Payout released to Sarah"**.
+
+`payouts.recipient_member_id` is stamped at release (`markPayoutReleased`
+snapshots it, deliberately, "so the history stays correct even if members are
+later renamed, reordered, or removed"). The roster can then move — a turn swap
+or a treasurer reorder — and for a RELEASED round the position and the record
+disagree. Reading the position credits somebody who never got the ₱30,000 and
+tells the real recipient they are still owed.
+
+**`roundRecipient(round)`** is now the single answer: the payout row's
+recipient when there is one, the member at that position otherwise. **Six
+sites** were reading the position; four of them are money statements:
+
+- the Rounds accordion header (the reported one)
+- the Insights "Collected per round" bars
+- the desktop Home rounds strip
+- `doUnmarkPayoutReleased()`'s activity-log entry — **for money that actually
+  moved**, and the log is the only record left afterwards
+- `members.js`'s "· received the payout" line
+- and **`memberPayout(memberId)`** replaced
+  `getPayout(m.member_order).released` in FIVE places, which was the sharpest
+  instance: it drives the roster's **"Paid out"** tag and `memberStanding()`'s
+  ring colour, plus the viewer's own *"You received ₱30,000 in Round N"* on
+  the terminal screen and the standing shown in the profile and photo sheets.
+
+**The sites about an UNRELEASED round still read the position, and must.**
+Nothing has been sent, so `member_order` is what will decide: the release card,
+the Release Payout sheet, `copyPayoutReminder()`, `markPayoutReleased()` (which
+is how the record gets stamped in the first place), the Home hero recipient,
+`autoSelectMember()`, the prev-pending cards and onboarding's "This round".
+`memberPayout()` is the exception there — onboarding's "Paid out" word is
+about a released round even inside that loop.
+
+`payoutRecipientName(payout)` is unchanged and still prefers the snapshotted
+`recipient_name`: that one renders the historical record line, where the name
+as it was at release is the right thing.
+
+Four smoke checks force the divergence (round 1 released to Sarah while Regine
+holds position 1) and all four fail against the old reads — printing
+"Round 1 — Regine" and `["Regine"]`, which is the reported bug exactly.
+
 ## Migrations
 
 Run in the Supabase SQL editor, in order. `006` also needs a one-off
@@ -1322,13 +1367,12 @@ and one sign-in each. Without that, a member hits the `unknown` dead-end with
 no way into the app at all. `AUTH_MODE` is now `"required"`; all five are
 linked.
 
-`012_payout_receipt_confirmation.sql` — `payouts.received_at` /
-`.received_note`, the `payouts_recipient_ack` policy and `pf_payouts_guard()`.
-**Not applied yet.** Validated 14/14 on a real Postgres 16 by
+**`012` IS APPLIED** — `012_payout_receipt_confirmation.sql`:
+`payouts.received_at` / `.received_note`, the `payouts_recipient_ack` policy
+and `pf_payouts_guard()`. Validated 14/14 on a real Postgres 16 by
 `tests/sql/run.sh`, which is what caught the two flaws above. Ships with
-`012_rollback.sql`. Until it runs, the confirm button writes a column that
-does not exist and `requireRows()` reports the refusal — it does not silently
-appear to work.
+`012_rollback.sql`. **Received ✓ is live** — a recipient can confirm their own
+payout, and the Rounds accordion says whether it arrived.
 
 **`013` IS APPLIED** — `013_turn_swaps.sql`: the deferrable `member_order`
 constraint, `swap_requests`, `pf_request_swap` / `pf_accept_swap` /

@@ -13,7 +13,7 @@ window.PFViews.rounds = function (ctx) {
   const {
     members, rounds, curCycle, allDone, curRound, ROUND_PILL, state,
     unlocked, openRound, escapeHtml, inlineArg, icon, getPayout,
-    payoutRecipientName, payoutDateText, C, isWide, undoPaidTarget, payCycle,
+    payoutRecipientName, payoutDateText, roundRecipient, C, isWide, undoPaidTarget, payCycle,
     markPaidTarget, myMember
   } = ctx;
   let html = "";
@@ -31,7 +31,12 @@ window.PFViews.rounds = function (ctx) {
 
   // rounds & cycles (the view heading above already names this section)
   for (let r = 1; r <= C.TOTAL_ROUNDS; r++) {
-    const recipient = members.find((m) => m.member_order === r);
+    // roundRecipient, NOT `member_order === r`. This loop covers RELEASED
+    // rounds, and for those the payout row already records who the money went
+    // to — so the position only agrees until somebody swaps turns or the
+    // treasurer reorders. Reading it here is what put "Round 1 — Regine" over
+    // a record saying "Payout released to Sarah".
+    const recipient = roundRecipient(r);
     const { startCycle, endCycle } = C.roundCycleRange(r);
     const roundCollected = C.roundCollected(state.contributions, r);
     const roundPending = C.roundPending(state.contributions, r);

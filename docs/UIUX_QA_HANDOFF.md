@@ -324,7 +324,7 @@ Please check these before filing, they have each been argued out:
 
 ---
 
-## 4b. Two observations I found while testing, and did not change
+## 4b. One observation I found while testing, and did not change
 
 **The destructive-confirm dialog does not focus its PIN field.** Every
 irreversible action (Reset all data, Restore backup, Undo a payout release,
@@ -338,33 +338,42 @@ PIN, and focusing the PIN there would put the cursor in the wrong field of a
 two-step gate. That is a UX call about the shared dialog, which is this pass's
 call to make, not mine. Flagging it as an observation, unrated.
 
-**The round accordion's HEADER names the member at that payout position; the
-release record names the recorded recipient.** They are written from different
-sources — the header from `member_order`, the record from
-`payouts.recipient_member_id` — and normally agree, because release stamps the
-recipient from whoever sits at that position. Reorder the roster *after* a
-release and they diverge: `ack-mobile-received.png` shows "Round 1 — Regine"
-over a record reading "Payout released to **Sarah**" and "Received by
-**Sarah**". That capture's fixture forces the divergence deliberately, to
-prove the new receipt line follows the recorded recipient rather than the
-order — which is the property migration 012's policy depends on.
+---
 
-I did not change the header. It is a pre-existing inconsistency, it is about
-who received ₱30,000 (so a fix is a money-display decision, not a styling
-one), and "name the recorded recipient once a payout exists, the position
-otherwise" is the obvious answer but not mine to take in passing. Flagging it
-as an observation, unrated — and noting that on the live fund the two agree,
-because nobody has reordered a released round.
+## 4c. One finding from the captures, now FIXED
+
+**FIXED (was: the round accordion's header named the member at that payout
+position while the release record named the recorded recipient).** The owner
+confirmed it mattered — it is about who received ₱30,000 — so
+`roundRecipient(round)` now answers from `payouts.recipient_member_id`
+wherever a RELEASED round is being described, and `memberPayout(memberId)`
+replaced the five `getPayout(m.member_order).released` reads that drove the
+roster's "Paid out" tag, the standing ring and a member's own "You received
+₱30,000 in Round N".
+
+Surfaces about an UNRELEASED round deliberately still read the payout
+position, because nothing has been sent and `member_order` is what will
+decide: the release card, the Release Payout sheet, the payout reminder, the
+Home hero, the prev-pending cards and onboarding's "This round". If one of
+those looks wrong, that is a real finding — the two families are meant to
+differ.
+
+Four smoke checks force the divergence — round 1 released to Sarah while
+Regine holds position 1 — and all four fail against the old reads, printing
+"Round 1 — Regine" and `["Regine"]`.
 
 ---
 
 ## 5. Known limits — do not file these against the UI
 
-- **Migration 011 is not applied.** Postgres still permits any write. The
-  permission behaviour you see in the UI is the *intended* model, enforced
-  only client-side for now.
-- **`AUTH_MODE` is `"optional"`.** The `required`-mode screens (the gate and
-  the three dead-ends) need `AUTH_MODE` flipped, or the smoke harness, to see.
+- **Migrations 011, 012 and 013 are all APPLIED.** RLS is enforcing, Received ✓
+  is live, and turn swaps (plus the treasurer's reorder, which had never
+  worked) are live. So a refusal you hit in the UI is the real rule, not a
+  client-side approximation.
+- **`AUTH_MODE` is `"required"`** on the live fund; all five members are
+  linked. `tests/qa-capture.js` and `tests/smoke.js` pin it to something
+  non-gating per page, so a capture's auth state is the harness's choice, not
+  the deployment's.
 - **No approved mockup exists** for anything in §1b. If a finding is "this
   doesn't match the design", for those screens there is no design to match —
   the useful finding is what it *should* look like.

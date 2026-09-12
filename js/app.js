@@ -361,6 +361,61 @@
     return m ? m.name : "—";
   }
 
+  /**
+   * Who receives — or received — round N, as a member ROW.
+   *
+   * Once a payout row carries a `recipient_member_id`, THAT is the answer and
+   * `member_order` is not. The record is stamped at release
+   * (`markPayoutReleased`) and the roster can move afterwards, so for a
+   * released round the two disagree exactly when a swap or a reorder has
+   * happened — and then the position names somebody who never got the money
+   * while the real recipient reads as still owed. It is about who received
+   * ₱30,000, so the record wins.
+   *
+   * A round with NO payout record yet has only its position, which is
+   * correct: nothing has been sent, and member_order is what will decide.
+   * That is why every caller about an unreleased round (the release card, the
+   * Release Payout sheet, the payout reminder, the hero, onboarding) still
+   * reads the position directly and should keep doing so.
+   *
+   * Falls back to the position when a released row's recipient is null — a
+   * pre-004 row the backfill never reached. Those cannot be resolved any
+   * other way.
+   */
+  function roundRecipient(round) {
+    const p = getPayout(round);
+    if (p && p.recipient_member_id) {
+      const m = (state.members || []).find((x) => x.id === p.recipient_member_id);
+      if (m) return m;
+    }
+    return (state.members || []).find((x) => x.member_order === round) || null;
+  }
+
+  /**
+   * The released payout this member ACTUALLY RECEIVED, or null.
+   *
+   * `getPayout(m.member_order).released` was the old test, in five places,
+   * and it asks the wrong question: it reads whether the round at this
+   * member's CURRENT position has been released. Swap turns or reorder after
+   * a release and the member who moved into the released position reads
+   * "Paid out" having received nothing, while the person who actually got the
+   * ₱30,000 reads as still owed — on the roster, in their own status card,
+   * and in `memberStanding()`, which drives the ring colour.
+   *
+   * Answered from the record instead, via roundRecipient(). Returns the ROW
+   * rather than a boolean because a caller that says "You received ₱X in
+   * Round N" needs the amount and the round, and those must come from the
+   * same place as the answer.
+   */
+  function memberPayout(memberId) {
+    for (const p of state.payouts || []) {
+      if (!p || !p.released) continue;
+      const r = roundRecipient(p.round_number);
+      if (r && r.id === memberId) return p;
+    }
+    return null;
+  }
+
   function payoutDateText(when) {
     if (!when) return "";
     // `released_on` is a plain DATE; `received_at` (012) is a timestamptz.
@@ -760,7 +815,10 @@
         // The REAL roster and the REAL round states, not the mockup's names.
         extra: `<div class="ob-panel ob-order">${members
           .map((m) => {
-            const released = getPayout(m.member_order).released;
+            // memberPayout, not the round at their position: after a swap
+            // those differ, and this step would tell somebody they had been
+            // paid out when they had not.
+            const released = !!memberPayout(m.id);
             const isNow = m.member_order === curRound && !released;
             const word = released
               ? "Paid out"
@@ -3161,7 +3219,11 @@
 
   async function doUnmarkPayoutReleased(round) {
     if (busy) return;
-    const recipient = sortedMembers().find((m) => m.member_order === round);
+    // roundRecipient, NOT the position: this round IS released, so the payout
+    // row already records who the money went to. Reading member_order here
+    // would write the wrong name into activity_log for a transfer that
+    // actually happened, and the log is the only record left afterwards.
+    const recipient = roundRecipient(round);
     // The receipt is the only proof a real transfer happened. Undoing the
     // release nulls receipt_url, so capture it BEFORE the write and put it in
     // the activity log — otherwise a reversible-sounding confirmation quietly
@@ -5005,7 +5067,7 @@
     for (let r = 1; r <= C.TOTAL_ROUNDS; r++) {
       const amt = C.roundCollected(contributions, r);
       const pctOfGoal = Math.min(100, (amt / C.GOAL_PER_ROUND) * 100);
-      const recipient = members.find((m) => m.member_order === r);
+      const recipient = roundRecipient(r);
       const full = amt >= C.GOAL_PER_ROUND;
       html += `<div class="round-bar-row">
         <div class="round-bar-label">R${r}<span class="round-bar-name">${
@@ -6052,12 +6114,17 @@
         // message twice and one copy was broken. The fund-level sentence
         // belongs to the green card (js/views/home.js); this one carries the
         // viewer's own result, which no other element states.
-        const mine = getPayout(myMember.member_order);
+        // The payout THIS MEMBER received, read from the record. Their
+        // current position is not it: after a turn swap this sentence named
+        // the wrong round, and on the terminal screen it is the one line
+        // about their own money.
+        const mine = memberPayout(myMember.id);
         const got = mine && mine.amount != null ? mine.amount : C.GOAL_PER_ROUND;
+        const gotRound = mine ? mine.round_number : myMember.member_order;
         myStatus = {
           kind: "done",
           word: "All settled",
-          detail: `You received ${C.peso(got)} in Round ${myMember.member_order}.`,
+          detail: `You received ${C.peso(got)} in Round ${gotRound}.`,
           // "check", not "party" — Menu's "Replay the intro" row already uses
           // the party glyph, and a terminal state sharing an icon with a
           // how-to-use-the-app link teaches nothing. The green card beside it
@@ -6376,7 +6443,8 @@
       // after the feature ships, if the branch is treasurer-only or needs data
       // the fixtures don't have. tests/views.test.js guards against that.
       escapeHtml, inlineArg, icon, memberAvatar, memberStanding, batteryCell,
-      getPayout, payoutRecipientName, payoutDateText, sparkline,
+      getPayout, payoutRecipientName, payoutDateText, roundRecipient,
+      memberPayout, sparkline,
       formatDateTime, overdueRows, activityTimeLabel, C,
     };
 
@@ -7255,7 +7323,7 @@
         const standing = memberStanding(
           me.id,
           C.completedCyclesCount(state.cycles),
-          getPayout(me.member_order).released
+          !!memberPayout(me.id)
         );
         const problem = profileNameProblem();
         html += `<div class="modal-overlay sheet" onclick="if(event.target===this) PowerFund.closeProfileModal()">
@@ -7316,7 +7384,7 @@
         const standing = memberStanding(
           me.id,
           C.completedCyclesCount(state.cycles),
-          getPayout(me.member_order).released
+          !!memberPayout(me.id)
         );
         html += `<div class="modal-overlay sheet" onclick="if(event.target===this) PowerFund.closePhotoSheet()">
           <div class="modal sheet-pay sheet-photo" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">

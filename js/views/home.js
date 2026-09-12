@@ -20,7 +20,8 @@ window.PFViews.home = function (ctx) {
     sparkline, C,
     formatDateTime, overdueRows, activityTimeLabel, isWide, identityLocked,
     payoutOwner, pesoWhole, myUnconfirmedPayout, receiptAckRound, receiptAckNote,
-    payoutDateText, canSwapTurns, myIncomingSwaps, myOutgoingSwap, memberName
+    payoutDateText, canSwapTurns, myIncomingSwaps, myOutgoingSwap, memberName,
+    roundRecipient
   } = ctx;
   // Cycles due so far — the denominator behind each member's standing ring.
   // Set when the pinned action renders, so the view can reserve room for it.
@@ -1110,7 +1111,9 @@ window.PFViews.home = function (ctx) {
         const st = C.roundStatus(state.contributions, rounds, r);
         const amt = C.roundCollected(state.contributions, r);
         const p = Math.min(100, (amt / C.GOAL_PER_ROUND) * 100);
-        const recip = members.find((m) => m.member_order === r);
+        // All five rounds, released ones included — so the payout record is
+        // the authority on who received it, not the current position.
+        const recip = roundRecipient(r);
         const isNow = !allDone && r === curRound;
         return `<div class="home-round-cell ${st}${isNow ? " is-now" : ""}" title="Round ${r}${
           recip ? " — " + escapeHtml(recip.name) : ""

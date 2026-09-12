@@ -52,6 +52,11 @@
       const raw = localStorage.getItem(KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
+        // DEMO_SEED changed since this browser last ran the demo, so the
+        // stored state belongs to the other starting point. Reseed rather than
+        // serve it: otherwise flipping the config appears to do nothing, which
+        // is a confusing thing to discover in front of an audience.
+        if (parsed.mode !== seed.mode) return fresh();
         // A seed that gained a table since this browser last ran the demo
         // must not leave that table undefined — every reader would throw.
         Object.keys(seed).forEach((k) => {
@@ -285,24 +290,44 @@
   function getContributionsForCycle(cycleId) {
     return Promise.resolve(rows("contributions").filter((c) => c.cycle_id === cycleId));
   }
-  function oneContribution(row) {
+  /**
+   * THE INPUT IS CAMELCASE, and js/database.js is what maps it to columns:
+   * `{cycleId, memberId, amount, status, proofUrl, notes}` in, `cycle_id`,
+   * `member_id`, `proof_url` out. Storing the caller's keys raw is what the
+   * first version did, and the result was a row with `cycleId`/`memberId`/
+   * `proofUrl` that nothing downstream could read — the Review Payment sheet
+   * showed "?" for the member, "Cycle undefined", and "No screenshot
+   * attached" for a claim that had one. Found by driving the demo, not by
+   * reading it: the tests compare argument ORDER, and this is the SHAPE of an
+   * object argument.
+   *
+   * `paid_at` is stamped for status 2 only, the same rule as the real one.
+   */
+  function toColumns(r) {
+    return {
+      cycle_id: r.cycleId,
+      member_id: r.memberId,
+      amount: r.amount != null ? r.amount : 1000,
+      status: r.status,
+      proof_url: r.proofUrl != null ? r.proofUrl : null,
+      notes: r.notes != null ? r.notes : null,
+      paid_at: r.status === 2 ? nowIso() : null,
+    };
+  }
+
+  function oneContribution(input) {
+    const row = toColumns(input);
     const existing = db.contributions.find(
       (c) => c.cycle_id === row.cycle_id && c.member_id === row.member_id
     );
     if (existing) {
-      Object.assign(existing, row);
+      // An upsert REPLACES the row, so a resubmission must not keep the old
+      // rejection hanging off it — the real one writes a fresh row.
+      Object.assign(existing, row, { rejection_note: null, rejected_at: null });
       return existing;
     }
     const made = Object.assign(
-      {
-        id: uuid(),
-        amount: 1000,
-        proof_url: null,
-        paid_at: null,
-        created_at: nowIso(),
-        rejection_note: null,
-        rejected_at: null,
-      },
+      { id: uuid(), created_at: nowIso(), rejection_note: null, rejected_at: null },
       row
     );
     db.contributions.push(made);
@@ -516,12 +541,16 @@
     });
   }
 
+  /** Mirrors the real resetAll(): contributions and the activity log go, every
+   *  payout is un-released, and the round lifecycle resets to ROUND 1 STARTED
+   *  — not to nothing. Members, the payout order, the cycle dates and the PIN
+   *  are kept, which is what the confirm dialog promises. */
   function resetAll() {
     db.contributions = [];
     db.activity_log = [];
     db.swap_requests = [];
-    db.payouts = fresh().payouts.map((p) =>
-      Object.assign(p, {
+    db.payouts = db.payouts.map((p) =>
+      Object.assign({}, p, {
         released: false,
         released_on: null,
         amount: null,
@@ -533,8 +562,11 @@
         received_note: null,
         disputed_at: null,
         disputed_note: null,
-        started_at: null,
         note: null,
+        // `r === 1 ? now : null` is what js/database.js does. Nulling this one
+        // too would leave a fund with no started round at all, which is not a
+        // state the app is ever meant to reach.
+        started_at: Number(p.round_number) === 1 ? nowIso() : null,
       })
     );
     save();
@@ -717,7 +749,13 @@
     document.body.insertBefore(bar, document.body.firstChild);
     document.body.classList.add("pf-demo");
 
-    document.getElementById("pf-demo-who").addEventListener("change", function (e) {
+    // Null-guarded: the banner is chrome, and chrome must never be what takes
+    // the app down. (It is also what lets tests/demo.test.js load this file
+    // against a stub document.)
+    const who = document.getElementById("pf-demo-who");
+    const reset = document.getElementById("pf-demo-reset");
+    if (!who || !reset) return;
+    who.addEventListener("change", function (e) {
       try {
         localStorage.setItem("pf_my_member_id", e.target.value);
       } catch (err) {}
@@ -728,7 +766,7 @@
       // like the switch silently failed.
       location.reload();
     });
-    document.getElementById("pf-demo-reset").addEventListener("click", function () {
+    reset.addEventListener("click", function () {
       // Confirmed: somebody mid-walkthrough should not lose the state they
       // were talking about to a stray tap.
       if (!window.confirm("Put the demo back to its starting state?")) return;

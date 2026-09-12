@@ -3,7 +3,7 @@
 Branch **`demo/group-walkthrough`**. Not for deploying over the real app.
 
 ```
-AUTH_MODE: "optional"     DEMO_MODE: true      (js/config.js)
+AUTH_MODE: "optional"   DEMO_MODE: true   DEMO_SEED: "empty"   (js/config.js)
 ```
 
 ## How to use it
@@ -45,28 +45,52 @@ That last part matters: Received ✓, reporting a payout as not arrived, My
 payout details and turn swaps are all gated on a linked account, so with auth
 off they render inert — you could show them but never drive them.
 
-## What the starting state is set up to show
+## Two starting states — `DEMO_SEED` in `js/config.js`
 
-Chosen so the whole feature set is reachable without setting anything up
-(`js/demo-seed.js`). Dates are relative to the day you open it, so nothing
-reads as stale.
+### `"empty"` — day one (the default)
+
+Members, the 30-cycle schedule and round 1 started. That is it, and it is
+exactly what `supabase/seed.sql` leaves behind for a brand-new fund. Home says
+*"Your fund just started"*, the whole fund reads ₱0 of ₱150,000, and **nothing
+is overdue** — cycle 1 falls a few days out, so the first payment is due rather
+than late.
+
+You build the story live, which is the better walkthrough:
+
+1. **As any member** — *Record my payment — ₱1,000*, attach a screenshot, send.
+2. **Switch to Jan** in the DEMO bar, unlock with `1234`, open *Needs your
+   attention* and confirm it. The round moves to ₱1,000 / ₱30,000.
+3. Keep going: pay the other four, watch the battery fill, release the payout
+   to Regine with a receipt, then switch to Regine and confirm it arrived — or
+   report that it did not.
+
+### `"midfund"` — everything already reachable
+
+For showing a screen without first producing the state behind it.
 
 | | |
 | --- | --- |
 | **Round 1** | Paid out to Regine · receipt attached · **confirmed received** |
 | **Round 2** | Paid out to Sarah · receipt attached · **Sarah disputes it** — "nothing in GCash" |
-| **Round 3** | Collecting · 3 confirmed, 1 in review, 1 **rejected** with a reason, and one member paid ahead |
+| **Round 3** | Collecting · 3 confirmed, 1 in review, 1 **rejected** with a reason, one paid ahead |
 | **Round 4** | Not started · Jan has an open **turn-swap request** out to Clara |
 
-Some things worth driving, and who to be:
+Worth driving, and who to be: **Jan** (the dispute leads the screen; unlock for
+the review queue), **Sarah** (her own dispute card — *It arrived after all* or
+*Withdraw my report*), **Clara** (accept Jan's swap; the payout order really
+moves), **Verdz** (the rejected claim and *Resubmit*).
 
-- **Jan** — the dispute leads the screen; unlock with `1234` for the review
-  queue, then confirm Clara's claim. Undo release & re-send is on the dispute.
-- **Sarah** — her own dispute card: *It arrived after all* or *Withdraw my
-  report*, and *View the treasurer's receipt*.
-- **Clara** — Jan's swap request, with Accept / Decline. Accepting really does
-  move the payout order.
-- **Verdz** — the rejected claim, with the treasurer's reason and *Resubmit*.
+### The schedules differ on purpose
+
+`"midfund"` sits thirteen cycles in, so its dates run into the past. Reusing
+those for an empty fund would open the demo with **thirteen overdue cycles
+across five members** — sixty-five red chips on a fund where nobody has done
+anything wrong. `"empty"` generates forward from the next 15th-or-month-end at
+least two days out instead.
+
+Changing `DEMO_SEED` takes effect on the next load: the store notices the mode
+no longer matches and reseeds itself, so you do not have to remember to press
+Reset.
 
 ## What is NOT real here
 
@@ -87,12 +111,24 @@ node tests/demo.test.js      # the demo layer agrees with the real one
 ```
 
 `js/database.js` exports 53 functions and the demo has to match all of them,
-by name *and* by argument order. Two were wrong in the first draft
-(`uploadMemberPayoutQr` and `uploadMemberAvatar` both take the **file** first),
-and `pinStatus()` returned the column names instead of `hasTreasurer` /
-`hasMaster` — which reads as "no PIN is set", the one thing `js/database.js`
-says never to get wrong. That check exists because eyeballing 53 signatures is
-how those got in.
+by name, by argument order *and* by the shape of what they take. Four things
+were wrong before that file existed:
+
+- `uploadMemberPayoutQr` and `uploadMemberAvatar` both take the **file** first,
+  and the demo had them reversed — every upload would have failed mid-demo with
+  "choose an image file".
+- `pinStatus()` returned the column names instead of `hasTreasurer` /
+  `hasMaster`, which reads as *"no PIN is set"* — the one thing
+  `js/database.js` says never to get wrong.
+- `addActivityLog`'s second argument is the app's `{type, amount, refStatus,
+  memberId, round}`, not column names, so every logged entry arrived untyped
+  and unattributed.
+- **Contributions come in as camelCase** — `{cycleId, memberId, proofUrl}` —
+  and `js/database.js` is what maps them to columns. The demo stored the
+  caller's keys raw, so Review Payment showed `?` for the member, *"Cycle
+  undefined"*, and *"No screenshot attached"* for a claim that had one. The
+  argument-order table could not see that, so the test now **runs** the layer
+  against a stub window and checks what it actually stored.
 
 ## If you want a demo on a real database instead
 

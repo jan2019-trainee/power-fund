@@ -89,4 +89,24 @@ window.APP_CONFIG = {
   // of the app exists so nobody in the room mistakes it for the live fund.
   // ===================================================================
   DEMO_MODE: true,
+
+  // Which starting state the demo opens on.
+  //
+  //   "empty"    DAY ONE, and the default. Members, the 30-cycle schedule and
+  //              round 1 started — what supabase/seed.sql leaves behind — and
+  //              nothing else. Build the story live: pay a cycle as one
+  //              member, switch to the treasurer in the DEMO bar, confirm it.
+  //   "midfund"  Arrives with every feature already reachable: a confirmed
+  //              payout, a DISPUTED one, a claim in review, a rejection with a
+  //              reason, a pending turn swap. For showing a screen without
+  //              first producing the state behind it.
+  //
+  // The SCHEDULE differs between them on purpose. "midfund" sits 13 cycles in,
+  // so its dates run into the past; reusing those for an empty fund would open
+  // the demo with thirteen overdue cycles across five members. "empty"
+  // generates forward from the next 15th-or-month-end at least two days out.
+  //
+  // Switching this needs the demo's stored data cleared — press Reset in the
+  // DEMO bar, which reseeds from whatever this now says.
+  DEMO_SEED: "empty",
 };

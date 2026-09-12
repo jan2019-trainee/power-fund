@@ -48,6 +48,9 @@ them as new design.** Where they borrow, they borrow
 | **Transfer treasurer role** | Menu → Security → Transfer treasurer role (admin only) |
 | **Payment schedule** | Menu → Group → Payment schedule (admin only) |
 | **No-treasurer-PIN confirm** | A PIN-gated action on a fund with no treasurer PIN |
+| **Received ✓** (payout receipt confirmation) | Home, signed in as the member a released payout was sent to |
+| **Swap my turn** (*palit ng turno*) | Menu → General → Swap my turn, signed in as a member whose round is not paid out |
+| **Swap request received** | Home, signed in as the member somebody asked |
 
 ---
 
@@ -99,6 +102,87 @@ The 30 due dates, editable from the app for the first time. Borrows the
 - Reachable only by a Google-verified treasurer. A PIN-unlocked member must
   not see the row — and `PowerFund.openScheduleModal()` from the console must
   do nothing for them.
+
+### Received ✓ — the payout's second side (new design — no mockup)
+
+Migration 012. The payout record was entirely one-sided — released, amount,
+recipient, receipt, released_by are all the treasurer's — while a member's
+₱1,000 contribution needs a proof screenshot AND the treasurer's confirmation.
+This is the recipient saying the money arrived. **It protects the treasurer
+most**, so read it as a receipt rather than as a chore.
+
+- **Reach it:** sign in as the member whose released round has no
+  `received_at`. In the fixtures that is round 1; point
+  `recipient_member_id` at whoever your session owns.
+- **Green, not amber.** Deliberate: the amber family on Home already means
+  "the fund's money needs something doing about it". Money arriving for *you*
+  is not that, and a fund that never gets the tap is not broken.
+- **Two taps.** The card shows one button; it opens an inline panel with an
+  optional one-line note and Confirm / Cancel. Not a modal — the whole point
+  is that it costs one look and one press.
+- **States:** offered · panel open · saving · the record line afterwards ·
+  the database refusing it.
+- **The record line is read by the whole group**, on the Rounds accordion:
+  "Awaiting Sarah's confirmation that it arrived." before, "Received by Sarah
+  on <date> — <note>" after. An absence has to read as an absence.
+- **A round stays *Completed* while unconfirmed.** The money genuinely left.
+  This is a receipt, not a gate — one member forgetting to tap must not freeze
+  the fund. If that reads wrong on screen, it is a copy finding, not a
+  lifecycle one.
+- **The gate is being the RECIPIENT** — neither `unlocked` nor
+  `isTreasurerAccount()`, and never the who-am-I preference. A different axis
+  from every other permission in the app, enforced by 012's policy on
+  `recipient_member_id`. The treasurer cannot acknowledge on a member's
+  behalf, by design: a receipt somebody else can sign is not a receipt.
+  `PowerFund.openReceiptAck(1)` from the console must do nothing for anyone
+  else.
+- **Once only.** There is no un-acknowledging; only the treasurer can clear
+  it, and only by Undo Release, which clears the whole release.
+
+### Turn swaps — *palit ng turno* (new design — no mockup)
+
+Migration 013. Two members trade payout positions. **Both of the rules below
+are owner decisions, not UX choices** — a finding that would change either is
+a product question, not a fix:
+
+- **Both members agree and it applies.** The treasurer is not a step and
+  deliberately *cannot* accept on their behalf.
+- **A round that is collecting may still be swapped.** Only a RELEASED round
+  is refused, in both directions and for the treasurer too.
+
+- **Reach it:** Menu → General → **Swap my turn** as a linked member whose
+  round is not paid out. The incoming ask is on the counterparty's Home.
+  Captures: `swap-{mobile,desktop}-{incoming,waiting}`, `swap-mobile-ask`,
+  `swap-mobile-ask-picked`.
+- **Purple for the incoming ask**, deliberate: it is the "waiting on a person"
+  family (`.my-status-pending`, `.acct-pill.wait`, Insights "In review"), not
+  amber (which here means the fund's money needs something doing) and not
+  green (nothing has happened yet).
+- **The outgoing card is deliberately quiet.** The viewer has already acted;
+  it exists so they can see the request went somewhere and withdraw it.
+- **States:** nobody chosen (Send disabled) · chosen, with both sides of the
+  trade spelled out · an amber warning that a new ask withdraws the one
+  already out · incoming ask · waiting on an answer · a **stale** answer,
+  which is a successful call that moved nothing and must read as a failure ·
+  a database without 013, where the whole feature is absent rather than
+  offered.
+- **"Accept swap" is the amber primary.** Amber is the app's money-movement
+  colour and accepting does change who receives ₱30,000 — but it is the one
+  place a member presses amber without sending money, so say if it reads
+  wrong.
+- **Only LINKED members are offered as counterparties**, because
+  `pf_accept_swap` keys on the account — an unlinked member could never
+  answer. Not a bug if somebody is missing from the picker.
+- `PowerFund.acceptSwap(id)` from the console must do nothing for anyone but
+  the member who was asked, the treasurer included.
+
+### The treasurer's Reorder payout order — now actually works
+
+Worth re-testing rather than assuming, because **it never worked before**:
+`member_order` is `unique` and the app wrote the swap as two sequential
+updates, so the first always collided. The arrow now calls one RPC. Check that
+an arrow tap really reorders, that the end arrows stay disabled, and that a
+paid-out round refuses with a reason rather than a raw database error.
 
 ### Sign-in / first-run prompt
 - **Skippable vs not.** `optional` shows **Not now**; `required` must not.
@@ -240,7 +324,7 @@ Please check these before filing, they have each been argued out:
 
 ---
 
-## 4b. One observation I found while testing, and did not change
+## 4b. Two observations I found while testing, and did not change
 
 **The destructive-confirm dialog does not focus its PIN field.** Every
 irreversible action (Reset all data, Restore backup, Undo a payout release,
@@ -253,6 +337,24 @@ change, but *Reset all data* deliberately makes you type `RESET` **before** the
 PIN, and focusing the PIN there would put the cursor in the wrong field of a
 two-step gate. That is a UX call about the shared dialog, which is this pass's
 call to make, not mine. Flagging it as an observation, unrated.
+
+**The round accordion's HEADER names the member at that payout position; the
+release record names the recorded recipient.** They are written from different
+sources — the header from `member_order`, the record from
+`payouts.recipient_member_id` — and normally agree, because release stamps the
+recipient from whoever sits at that position. Reorder the roster *after* a
+release and they diverge: `ack-mobile-received.png` shows "Round 1 — Regine"
+over a record reading "Payout released to **Sarah**" and "Received by
+**Sarah**". That capture's fixture forces the divergence deliberately, to
+prove the new receipt line follows the recorded recipient rather than the
+order — which is the property migration 012's policy depends on.
+
+I did not change the header. It is a pre-existing inconsistency, it is about
+who received ₱30,000 (so a fix is a money-display decision, not a styling
+one), and "name the recorded recipient once a payout exists, the position
+otherwise" is the obvious answer but not mine to take in passing. Flagging it
+as an observation, unrated — and noting that on the live fund the two agree,
+because nobody has reordered a released round.
 
 ---
 

@@ -1045,6 +1045,235 @@ tracking the toast's identity the way `runCountUps()` tracks `countedValues`,
 rather than reusing `pf-anim` — gating a toast on a screen change would stop a
 NEW toast animating in, which is the case that matters.
 
+## "Received ✓" — the payout's missing second side (migration 012)
+
+Found by asking what the payout record does NOT say. `released`, `amount`,
+`recipient_member_id`, `recipient_name`, `receipt_url`, `released_by` — every
+column on `payouts` is the **treasurer's** word. Meanwhile a member's ₱1,000
+contribution needs a proof screenshot AND the treasurer's confirmation. The
+largest single transfer in the fund, ₱30,000, had nobody on record saying it
+arrived. Category: **New Feature**, and **no approved mockup exists** — the
+design has no auth and no recipient-side anything. Flagged for UI/UX QA as new
+design.
+
+**It protects the treasurer most.** "I sent it" versus "I never got it" is the
+one dispute this app cannot currently settle, and the treasurer is the one
+holding the other four people's money when it happens.
+
+### The gate is a NEW AXIS: being the recipient
+
+Not `unlocked`, not `isTreasurerAccount()`, not `verifiedTreasurer()` — every
+other permission in the app is about the treasurer, and this one is not.
+
+- **`myUnconfirmedPayout()` matches on `recipient_member_id`, not on
+  `member_order`.** 012's policy is `recipient_member_id = pf_member_id()`, and
+  the roster can be reordered after a release — which is exactly when the
+  payout ORDER and the recorded recipient disagree. Keying the button off the
+  order would offer it to whoever currently sits at position N. A null
+  recipient (a pre-004 row the backfill never reached) is refused by that
+  policy for everyone, so it correctly offers the button to nobody.
+- **`editableMember()`, a LINKED ACCOUNT — never `pf_my_member_id`.** Same rule
+  as the payout QR, for the same reason: that preference is unverified and
+  per-device, so honouring it would let anyone with the site URL close the one
+  record that says somebody else's ₱30,000 arrived.
+- Checked in `openReceiptAck` AND `confirmReceiptAck` — both are exported on
+  `PowerFund`, so the absent card is not the gate.
+
+### Six decisions worth not undoing
+
+- **No `received_by` column. Its absence IS the integrity property.** There is
+  only one person who may set `received_at`, enforced in Postgres, so a second
+  column naming them could only ever disagree with the policy or restate it.
+- **`received_at` is stamped SERVER-SIDE** (`new.received_at := now()` in the
+  guard). The client does not choose when the money arrived.
+- **A round stays *Completed* while unconfirmed.** The money genuinely left.
+  This is a receipt, not a gate — one member forgetting to tap must not freeze
+  the fund or reopen a round. The record line says what is true instead.
+- **Acknowledge ONCE.** No un-acknowledging; only the treasurer can clear it,
+  and only via Undo Release, which clears the whole release
+  (`doUnmarkPayoutReleased()` now clears `received_at`/`received_note` too —
+  otherwise a re-release would arrive pre-confirmed).
+- **The treasurer cannot acknowledge on a member's behalf.** A receipt somebody
+  else can sign is not a receipt. The guard refuses it explicitly, and a test
+  asserts that direction.
+- **The activity entry carries NO amount.** The money moved at release and was
+  logged there; a figure here would make a release-and-confirm read as ₱60,000
+  leaving the fund — the same bug `doUnmarkPayoutReleased`'s comment describes.
+  It does name the member (`memberId`), because the log is read by all five.
+
+### Two real design flaws the SQL suite caught
+
+Neither was findable in the browser — the smoke harness mocks the network.
+
+- **My first guard forbade the treasurer setting `received_at` at all**, on the
+  reasoning that confirming receipt is the member's act. But in this fund the
+  treasurer IS a member with a payout round, so Jan could never confirm their
+  own ₱30,000. The rule is **"only the recipient"**, which is a different
+  statement from "not the treasurer".
+- **`is distinct from` could not detect a second confirm.** `now()` returns the
+  same value throughout one transaction, so `new.received_at is distinct from
+  old.received_at` was FALSE on a re-confirm — the update fell straight through
+  to the member branch, where `received_note` was unpinned and therefore
+  editable. The set-branch is `new.received_at is not null and old.received_at
+  is null`, and the member branch refuses outright once `old.received_at` is
+  set.
+
+### And one the smoke output caught, by printing it
+
+The record line read **"Received by Sarah on Invalid Date"**. `payoutDateText`
+fed everything through `C.parseDueDate()`, which appends `"T00:00:00"` — right
+for `released_on` (a plain `date`) and fatal for `received_at` (a
+`timestamptz`). It branches on the shape now. The check that printed it was
+passing: it asserted the name and the note but not the date, so the assertion
+was tightened to name the formatted day and reject `Invalid`.
+
+### UI
+
+- **Home, green, above `S.myStatus` and below `S.attention`.** Green and not
+  amber deliberately: the amber family on Home means "the fund's money needs
+  something doing about it", and money arriving for *you* is not that.
+- **Two taps, inline, not a modal** — one button opens a panel with an optional
+  one-line note and Confirm / Cancel. The note is the only free text, capped at
+  120 characters.
+- **The record line on the Rounds accordion is shown to EVERYONE**: "Awaiting
+  Sarah's confirmation that it arrived." before, "Received by Sarah on <date>
+  — <note>" after. "Did Sarah actually get it?" is the group's question, not
+  the treasurer's, and an absence has to read as an absence rather than as
+  nothing at all.
+- Both `received_at` and `received_note` are in the backup and restored.
+
+## Turn swaps — *palit ng turno* (migration 013)
+
+Two members agree to trade payout positions. The mockups have **no swap flow
+at all** and explicitly scope post-setup member actions to EditMemberNames +
+ReorderPayout (`canvas.json`, `gap5-no-member-changes-notes`), so this is a
+**New Feature beyond the design** — flagged for UI/UX QA as new design, not a
+port.
+
+### The bug this started as
+
+**"Reorder payout order" had never worked.** `members.member_order` is
+`not null unique` (`schema.sql`), and the app swapped a pair with two
+sequential single-row updates. The first one always collides:
+
+```
+update members set member_order = 2 where id = <A>;
+ERROR:  duplicate key value violates unique constraint "members_member_order_key"
+DETAIL:  Key (member_order)=(2) already exists.
+```
+
+A single `case` statement fails **identically** — Postgres checks a
+non-deferrable unique constraint per ROW, not per statement. Verified on a
+real Postgres 16 before writing any code. Three things had to line up for this
+to survive: the smoke harness mocks the network; the reorder test rendered the
+screen and **never clicked an arrow**; and `tests/sql/run.sh`'s stub of
+`members` had **omitted the `unique`** that `schema.sql` declares. The stub now
+carries it, the test clicks the arrow, and a check asserts the two-write form
+still collides — so nobody can "simplify" the RPC away.
+
+So the swap flow is not an addition on top of a working reorder. Fixing the
+reorder IS the first half of it, and both halves now go through the same
+deferred-constraint statement inside a function.
+
+### The two product decisions, taken by the owner
+
+Put to them rather than invented, per rule 9 — both are money-and-permissions
+calls.
+
+- **Both members agree, then it applies.** A member asks, the counterparty
+  accepts, and the order moves. The treasurer is **not a step**, and
+  `pf_accept_swap` refuses them explicitly: a swap neither member agreed to is
+  the thing this flow exists to prevent. The treasurer sees it in the roster
+  and the activity log.
+- **A round that is COLLECTING may be swapped.** "I need mine this month, take
+  mine next month" is what *palit ng turno* is for; refusing it would remove
+  the reason the feature exists. The money collected stays with the round —
+  only who receives it changes.
+
+**RELEASED is the one refusal**, both directions, and for the treasurer too. A
+member whose round is paid out has had their ₱30,000; moving them to a later
+round would pay them twice and leave the other member with nothing. Checked at
+request time AND again at accept time, because a round can be released in
+between.
+
+### The gate is a new axis, again
+
+Not `unlocked`, not `isTreasurerAccount()` — **being one of the two members**.
+`canSwapTurns()` combines a linked account (`editableMember()`, never
+`localStorage.pf_my_member_id`), a database carrying 013, a round of your own
+left to trade, and at least one counterparty who could answer. Every handler is
+checked as well as every row, because they are exported on `PowerFund`.
+
+**Only LINKED members are offered as counterparties.** `pf_accept_swap` keys on
+`pf_member_id()`, so asking an unlinked member produces a request nobody can
+answer — worse than no button. The treasurer's reorder is the route for those.
+
+### Three things in the migration worth not undoing
+
+- **The unique constraint is looked up BY DEFINITION**, not assumed to be
+  called `members_member_order_key`. `schema.sql` declares it inline, so the
+  name is Postgres's own choice and a hand-built database may differ —
+  dropping the wrong constraint would be silent and bad.
+- **`from_round` / `to_round` are stored as they were WHEN ASKED**, and
+  re-checked on accept. The order can change in between (another swap lands,
+  or the treasurer reorders), and a request that then applied would trade
+  different rounds than the two people agreed to. That request is **stale**.
+- **The stale branch RETURNS rather than raising, and that is the point.** My
+  first version marked the row stale and then raised — which **rolled back the
+  very row it had just marked**, leaving it `pending` with an Accept button
+  that could never work and the partial unique index still occupied. It is the
+  one refusal here that has to PERSIST something, so it cannot be an
+  exception. `acceptSwap()` in `js/app.js` therefore checks `status` and
+  reports a stale answer as a failure: a successful call that moved nothing
+  must not read as "Turns swapped". Caught by `tests/sql/run.sh`.
+
+### The guard exemption, and why it is a GUC
+
+`pf_members_guard()` pins `member_order` for anyone who is not the treasurer,
+and the trigger fires even for a security-definer caller — `pf_is_treasurer()`
+inside it reads the CALLER's `auth.uid()`. So without an exemption,
+`pf_accept_swap` would be refused *"Only the treasurer can change the payout
+order"* for the ordinary member it exists to serve.
+
+Signalled by `pf.swap_ok`, a **transaction-local** GUC that only
+`pf_accept_swap` sets, with every other column pinned — exactly the shape of
+010's claim exemption, whose comment already argues this. A browser cannot set
+it: PostgREST exposes only functions in the public schema, and `set_config`
+lives in `pg_catalog`. Transaction-local so it cannot leak into the next
+request on a pooled connection; a test asserts it does not survive the
+transaction, and three more assert the exemption loosened nothing else.
+
+### Logged in the database, not by the app
+
+`pf_accept_swap` and `pf_swap_order` both write their `activity_log` entry
+inside the same transaction. A swap is the one write that moves everybody's
+turn, and the log is the only place the group can see that it was mutual — so
+it must not be possible for the order to move and the record to be missing.
+`moveMember()` no longer logs; doing both would double the entry.
+
+### UI (no approved mockup)
+
+- **Home, purple** for an incoming ask — the same family as every other
+  "waiting on a person" surface (`.my-status-pending`, `.acct-pill.wait`, the
+  Insights "In review" slice). Not amber: amber here means the fund's money
+  needs something doing about it, and the fund is fine either way. Not green:
+  nothing has happened yet.
+- **The outgoing side is deliberately quiet** — a plain card, because the
+  viewer has already acted and is waiting on somebody else. Without it a
+  member who has asked has no way to tell whether the request went anywhere,
+  and no way to withdraw it.
+- **Menu → General → Swap my turn**, beside My Payout QR Code, with the same
+  sign-in-first fallback row.
+- The sheet spells out **both sides** of the trade before Send, names who can
+  accept, and says both members keep paying every cycle either way — the thing
+  somebody would reasonably worry about.
+- **One live request per member.** 013's partial unique index enforces it and
+  `pf_request_swap` supersedes the old one; the sheet warns in amber before the
+  press, because a new ask withdraws the one already out.
+- The `swap` icon is **two straight opposing arrows**. The first version curved
+  one arrow around the other — the conventional shape, and illegible at the
+  14px it renders at. Measured in a capture, not guessed.
+
 ## Migrations
 
 Run in the Supabase SQL editor, in order. `006` also needs a one-off
@@ -1092,6 +1321,29 @@ What `required` actually needs is **every member linked** — an address on file
 and one sign-in each. Without that, a member hits the `unknown` dead-end with
 no way into the app at all. `AUTH_MODE` is now `"required"`; all five are
 linked.
+
+`012_payout_receipt_confirmation.sql` — `payouts.received_at` /
+`.received_note`, the `payouts_recipient_ack` policy and `pf_payouts_guard()`.
+**Not applied yet.** Validated 14/14 on a real Postgres 16 by
+`tests/sql/run.sh`, which is what caught the two flaws above. Ships with
+`012_rollback.sql`. Until it runs, the confirm button writes a column that
+does not exist and `requireRows()` reports the refusal — it does not silently
+appear to work.
+
+**`013` IS APPLIED** — `013_turn_swaps.sql`: the deferrable `member_order`
+constraint, `swap_requests`, `pf_request_swap` / `pf_accept_swap` /
+`pf_decline_swap` / `pf_cancel_swap` / `pf_swap_order`, and the amended members
+guard. Validated on a real Postgres 16 by `tests/sql/run.sh` (31 assertions,
+including the rollback), which caught the stale-branch bug above. Ships with
+`013_rollback.sql`, which deliberately leaves the constraint DEFERRABLE —
+making it deferrable takes nothing away, and reverting it would re-break the
+plain two-write swap.
+
+**So "Reorder payout order" works for the first time**, and turn swaps are
+live. Worth knowing which way the two features degrade if 013 is ever rolled
+back: `getSwapRequests()` answers `[]`, `swapsAvailable()` goes false and the
+swap flow is simply not offered, while the treasurer's reorder names the
+migration rather than failing with a raw constraint error.
 
 Every migration from 010 on is wrapped in `begin; … commit;`. Not decoration:
 without it a `raise` in 011's preflight aborted one statement and psql
@@ -1535,6 +1787,12 @@ bash tests/sql/run.sh         # RLS on a real Postgres 16. no browser
 python3 -m http.server 8791 & # then:
 PF_CHROMIUM=/opt/pw-browsers/chromium-1194/chrome-linux/chrome node tests/smoke.js
 ```
+
+A fifth lesson, from 013: **the harness's own stub had drifted from
+`schema.sql`.** `members.member_order` is declared `unique` there and was not
+in the stub, which is the single reason this suite could not see that the
+app's pair swap had never worked. When adding a column or a constraint to
+`schema.sql`, add it to the stub in the same change.
 
 `tests/sql/run.sh` is the only suite that can see an RLS policy at all — the
 smoke harness mocks the network. It stands up a throwaway PostgreSQL 16

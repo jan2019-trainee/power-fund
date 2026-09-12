@@ -238,6 +238,19 @@
    * you are already on. See --pf-entry in css/style.css. */
   let animateEntry = true;
 
+  /* "Received ✓" — the recipient acknowledging their own payout (migration
+   * 012). Which round's inline panel is open, and the optional note. Two taps
+   * on purpose: this writes a financial record, so it is not one accidental
+   * press, the same reasoning as the undo-paid and mark-paid panels. */
+  let receiptAckRound = null;
+  let receiptAckNote = "";
+
+  /* Turn swaps (013). `swapTarget` is the member being asked; the note is
+   * optional and free text, capped at 120 characters. */
+  let swapModalOpen = false;
+  let swapTarget = "";
+  let swapNote = "";
+
   let scheduleModalOpen = false;
   let scheduleValues = {};
   /* The last VALID date seen for each cycle, which is what a shift measures
@@ -306,6 +319,14 @@
     return [...state.members].sort((a, b) => a.member_order - b.member_order);
   }
 
+  /** A member's current name by id, or "" — for surfaces that hold an id and
+   *  need the name beside it (a swap request names two members). Read from
+   *  the roster rather than snapshotted, so a rename is reflected. */
+  function memberName(id) {
+    const m = state && state.members && state.members.find((x) => x.id === id);
+    return m ? m.name : "";
+  }
+
   /** The fund's display name — settings first, falling back to the product
    *  name. Sidebar, header and the share text all read this, so a renamed fund
    *  cannot show two different names on one screen or paste the wrong one into
@@ -340,9 +361,16 @@
     return m ? m.name : "—";
   }
 
-  function payoutDateText(released_on) {
-    if (!released_on) return "";
-    return C.formatDate(C.parseDueDate(released_on));
+  function payoutDateText(when) {
+    if (!when) return "";
+    // `released_on` is a plain DATE; `received_at` (012) is a timestamptz.
+    // parseDueDate() appends "T00:00:00", which turns a full timestamp into
+    // an Invalid Date — it rendered as literally "on Invalid Date" on the
+    // record line, which is how this was caught.
+    const d = /^\d{4}-\d{2}-\d{2}$/.test(String(when))
+      ? C.parseDueDate(when)
+      : new Date(when);
+    return isNaN(d.getTime()) ? "" : C.formatDate(d);
   }
 
   /**
@@ -1889,7 +1917,11 @@
   // Reorder members (payout order)
   // ===================================================================
   async function moveMember(memberId, direction) {
-    if (!unlocked || busy) return;
+    // GATED ON THE TREASURER ACCOUNT, not on `unlocked`. The PIN is shared
+    // with all five by design, and 013's pf_swap_order checks
+    // pf_is_treasurer() — so a PIN-gated arrow offers the other four a button
+    // Postgres refuses. Same correction the money actions already had.
+    if (moneyWritesRefused() || !unlocked || busy) return;
     const sorted = sortedMembers();
     const idx = sorted.findIndex((m) => m.id === memberId);
     const swapIdx = idx + direction;
@@ -1900,15 +1932,191 @@
     busy = true;
     render();
     try {
-      await window.DB.updateMemberOrder([
-        { id: a.id, member_order: b.member_order },
-        { id: b.id, member_order: a.member_order },
-      ]);
-      await logActivity(
-        `Payout order: ${a.name} swapped positions with ${b.name}`,
-        { type: "admin" }
-      );
+      // One RPC. Two sequential updates cannot work — member_order is UNIQUE,
+      // so the first write always collides. See DB.swapMemberOrder.
+      await window.DB.swapMemberOrder(a.id, b.id);
+      // NOT logged here: pf_swap_order writes the activity entry inside the
+      // same transaction, so the reorder can never end up unrecorded.
       await reload();
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+
+  // ===================================================================
+  // Turn swaps — *palit ng turno* (migration 013)
+  //
+  // Two members agree to trade payout positions. A PRODUCT DECISION taken by
+  // the owner: the two people whose money moves are the two who decide, so
+  // the treasurer is not a step — and deliberately cannot accept on their
+  // behalf, which is the thing this flow exists to prevent.
+  //
+  // Gated on `editableMember()` — a LINKED ACCOUNT, never
+  // `localStorage.pf_my_member_id`. The order decides who receives ₱30,000
+  // and when; an unverified per-device preference must not be able to move it.
+  // ===================================================================
+
+  /** Every swap request, freshest first. [] on a database without 013. */
+  function swapRequests() {
+    return (state && state.swapRequests) || [];
+  }
+
+  /** My own pending ask, or null. One at a time — 013's partial unique index
+   *  enforces it, and pf_request_swap supersedes the old one. */
+  function myOutgoingSwap() {
+    const me = editableMember();
+    if (!me) return null;
+    return (
+      swapRequests().find(
+        (r) => r.status === "pending" && r.from_member_id === me.id
+      ) || null
+    );
+  }
+
+  /** Requests waiting on MY answer. */
+  function myIncomingSwaps() {
+    const me = editableMember();
+    if (!me) return [];
+    return swapRequests().filter(
+      (r) => r.status === "pending" && r.to_member_id === me.id
+    );
+  }
+
+  /** Who I may ask: a linked member on a round that has not been paid out,
+   *  and not me. Unlinked members are excluded because pf_accept_swap needs
+   *  them to be able to answer — an unanswerable request is worse than no
+   *  button, and the treasurer's reorder is the route for those. */
+  function swapCandidates() {
+    const me = editableMember();
+    if (!me || !state) return [];
+    return sortedMembers().filter(
+      (m) =>
+        m.id !== me.id &&
+        !!m.auth_user_id &&
+        !roundIsReleased(m.member_order)
+    );
+  }
+
+  function roundIsReleased(round) {
+    const p = getPayout(round);
+    return !!(p && p.released);
+  }
+
+  /** Can this viewer use the flow at all? Both halves matter: a linked
+   *  account (the permission) and a database carrying 013 (the capability).
+   *  A member whose own round is already paid out has nothing to trade. */
+  function canSwapTurns() {
+    const me = editableMember();
+    return (
+      !!me &&
+      window.DB.swapsAvailable() &&
+      !roundIsReleased(me.member_order) &&
+      swapCandidates().length > 0
+    );
+  }
+
+  function openSwapModal() {
+    if (!canSwapTurns()) return; // exported on PowerFund; the absent row is not the gate
+    swapModalOpen = true;
+    swapTarget = "";
+    swapNote = "";
+    render();
+  }
+  function closeSwapModal() {
+    swapModalOpen = false;
+    swapTarget = "";
+    swapNote = "";
+    render();
+  }
+  function setSwapTarget(v) {
+    swapTarget = v;
+    render();
+  }
+  function setSwapNote(v) {
+    swapNote = v; // no render: it would eat the caret
+  }
+
+  async function submitSwapRequest() {
+    if (busy || !canSwapTurns() || !swapTarget) return;
+    const target = (state.members || []).find((m) => m.id === swapTarget);
+    if (!target) return;
+    const note = swapNote.trim();
+    busy = true;
+    render();
+    try {
+      await window.DB.requestSwap(target.id, note);
+      swapModalOpen = false;
+      swapTarget = "";
+      swapNote = "";
+      await reload();
+      showSuccess(`Asked ${target.name}. They'll see it on their Home screen.`);
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+
+  async function acceptSwap(requestId) {
+    const mine = myIncomingSwaps().find((r) => r.id === requestId);
+    // Exported on PowerFund, so a disabled button is not the gate.
+    if (busy || !mine) return;
+    busy = true;
+    render();
+    try {
+      const row = await window.DB.acceptSwap(requestId);
+      await reload();
+      // STALE is a successful call that moved NOTHING — the payout order
+      // changed between the ask and the answer, so accepting would have
+      // traded different rounds than the two of them agreed. It comes back
+      // as a row rather than an exception (see DB.acceptSwap), so reporting
+      // it as a success would be a lie.
+      if (row && row.status === "stale") {
+        showError(
+          "The payout order changed since that was asked, so nothing moved — " +
+            "ask again if you still want to swap."
+        );
+      } else {
+        showSuccess("Turns swapped. The payout order is updated for both of you.");
+      }
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+
+  async function declineSwap(requestId) {
+    const mine = myIncomingSwaps().find((r) => r.id === requestId);
+    if (busy || !mine) return;
+    busy = true;
+    render();
+    try {
+      await window.DB.declineSwap(requestId);
+      await reload();
+      showSuccess("Declined. Nothing changed.");
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+
+  async function cancelSwap(requestId) {
+    const mine = myOutgoingSwap();
+    if (busy || !mine || mine.id !== requestId) return;
+    busy = true;
+    render();
+    try {
+      await window.DB.cancelSwap(requestId);
+      await reload();
+      showSuccess("Request withdrawn.");
     } catch (e) {
       showError(e.message);
     } finally {
@@ -2101,6 +2309,8 @@
         recipient_name: p.recipient_name, //  } migration 004
         receipt_url: p.receipt_url, //  /
         released_by: p.released_by, // /
+        received_at: p.received_at, // } migration 012 — the recipient's
+        received_note: p.received_note, // } acknowledgement
       })),
       activityLog: (state.activityLog || []).map((a) => ({
         message: a.message,
@@ -2852,6 +3062,103 @@
     });
   }
 
+  // ===================================================================
+  // "Received ✓" — the recipient confirms their own payout (migration 012)
+  //
+  // The payout record was entirely one-sided: released / amount / recipient /
+  // receipt / released_by are all the treasurer's. Nothing said the member
+  // actually GOT the money, while a member's ₱1,000 contribution needs a proof
+  // screenshot AND the treasurer's confirmation. This is the payout's missing
+  // second side, and it protects the treasurer most.
+  //
+  // NOT gated on isTreasurerAccount() or on `unlocked` — it is gated on BEING
+  // THE RECIPIENT, which is a different axis from every other permission in
+  // the app. 012's guard enforces it in Postgres; these are the same rule so
+  // nobody is offered a button that will be refused.
+  // ===================================================================
+
+  /** The payout this viewer may acknowledge right now, or null.
+   *  A LINKED ACCOUNT only (`editableMember()`), never the per-device
+   *  who-am-I preference: that preference is unverified, so honouring it would
+   *  let anyone with the site URL acknowledge somebody else's ₱30,000 and
+   *  close the one record that says the money arrived. */
+  function myUnconfirmedPayout() {
+    const me = editableMember();
+    if (!me || !state || !state.payouts) return null;
+    // Matched on `recipient_member_id`, NOT on member_order. 012's policy is
+    // `recipient_member_id = pf_member_id()`, so keying the button off the
+    // payout ORDER would offer it to whoever currently sits at position N —
+    // and the roster can be reordered after a release, which is precisely
+    // when the two disagree. A null recipient (a pre-004 row the backfill
+    // never reached) is refused by that policy for everyone, so it correctly
+    // offers the button to nobody rather than to the wrong person.
+    const p = (state.payouts || []).find(
+      (x) => x && x.recipient_member_id && x.recipient_member_id === me.id
+    );
+    if (!p || !p.released || p.received_at) return null;
+    // `received_at` is absent on a database without 012; undefined and null
+    // both mean "not confirmed", and the write will simply fail until the
+    // migration lands rather than silently appearing to work.
+    return p;
+  }
+
+  function openReceiptAck(round) {
+    const mine = myUnconfirmedPayout();
+    // Exported on PowerFund, so the absent card is not the gate.
+    if (!mine || Number(mine.round_number) !== Number(round)) return;
+    receiptAckRound = Number(round);
+    receiptAckNote = "";
+    render();
+  }
+  function cancelReceiptAck() {
+    receiptAckRound = null;
+    receiptAckNote = "";
+    render();
+  }
+  function setReceiptAckNote(v) {
+    receiptAckNote = v;
+  }
+
+  async function confirmReceiptAck() {
+    if (busy || receiptAckRound == null) return;
+    const round = receiptAckRound;
+    const mine = myUnconfirmedPayout();
+    if (!mine || Number(mine.round_number) !== round) return cancelReceiptAck();
+    const me = editableMember();
+    const note = receiptAckNote.trim();
+    receiptAckRound = null;
+    receiptAckNote = "";
+    busy = true;
+    render();
+    try {
+      await window.DB.confirmPayoutReceived(round, note);
+      // The amount that was actually released, read from the record rather
+      // than assumed from the goal — same rule doUnmarkPayoutReleased uses.
+      const amt = mine.amount != null ? Number(mine.amount) : C.GOAL_PER_ROUND;
+      await logActivity(
+        `${(me && me.name) || "The recipient"} confirmed receiving ${C.peso(
+          amt
+        )} for Round ${round}` + (note ? ` — ${note}` : ""),
+        {
+          type: "payout",
+          // NO amount. The money moved at release and was logged there; this
+          // is an acknowledgement, not a second transaction. Logging a figure
+          // would make a release-and-confirm read as ₱60,000 leaving the fund,
+          // which is the bug doUnmarkPayoutReleased's comment describes.
+          memberId: me ? me.id : null,
+          round: round,
+        }
+      );
+      await reload();
+      showSuccess("Thanks — that payout is confirmed received.");
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+
   async function doUnmarkPayoutReleased(round) {
     if (busy) return;
     const recipient = sortedMembers().find((m) => m.member_order === round);
@@ -2882,6 +3189,11 @@
           recipient_name: null,
           receipt_url: null,
           released_by: null,
+          // Or a re-released payout would carry the PREVIOUS recipient's
+          // confirmation. 012's guard lets the treasurer clear one precisely
+          // so this can happen; a member cannot.
+          received_at: null,
+          received_note: null,
         });
       } catch (e) {
         console.warn("Payout accountability fields not cleared:", e.message);
@@ -3778,6 +4090,13 @@
     home: '<path d="M4 11.5 12 4l8 7.5"/><path d="M6 10v9a1 1 0 0 0 1 1h3v-6h4v6h3a1 1 0 0 0 1-1v-9"/>',
     rounds:
       '<path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/>',
+    // Two arrows trading places — a swap. NOT the `rounds` glyph, which is
+    // also circular arrows: reusing it would put the Rounds tab's icon on a
+    // payout-order action.
+    // Two straight opposing arrows. The earlier version curved one arrow
+    // around the other, which is the conventional shape and illegible at the
+    // 14px this renders at — measured in a capture, not guessed.
+    swap: '<path d="M3 8h14"/><path d="M14 5l3 3-3 3"/><path d="M21 16H7"/><path d="M10 13l-3 3 3 3"/>',
     members:
       '<circle cx="9" cy="8" r="3.2"/><path d="M2.8 20.2c.5-3.6 3-5.6 6.2-5.6s5.7 2 6.2 5.6"/><circle cx="17.3" cy="8.6" r="2.4"/><path d="M15.9 14.3c2.3.5 4 2.3 4.3 5.4"/>',
     activity:
@@ -4052,6 +4371,8 @@
     animateEntry = true; // a real screen change — this is what it is for
     undoPaidTarget = null;
     markPaidTarget = null;
+    receiptAckRound = null;
+    swapModalOpen = false;
     currentView = view;
     render();
     // A new screen starts at its top. render() replaces innerHTML but leaves
@@ -5339,6 +5660,7 @@
       shareModalOpen ||
       editNamesModalOpen ||
       scheduleModalOpen ||
+      swapModalOpen ||
       memberAccountsModalOpen ||
       transferRoleModalOpen ||
       reorderModalOpen ||
@@ -5371,6 +5693,7 @@
     if (restoreState && restoreState.phase !== "working") return closeRestoreState();
     if (reorderModalOpen) return closeReorderModal();
     if (editNamesModalOpen) return closeEditNamesModal();
+    if (swapModalOpen) return closeSwapModal();
     if (scheduleModalOpen) return closeScheduleModal();
     if (memberAccountsModalOpen) return closeMemberAccountsModal();
     if (transferRoleModalOpen) return closeTransferRole();
@@ -6006,6 +6329,16 @@
       hasTreasurerPin: hasTreasurerPin(),
       moneyRefused: moneyWritesRefused(),
       MONEY_REFUSED_NOTE,
+      myUnconfirmedPayout: myUnconfirmedPayout(),
+      receiptAckRound,
+      receiptAckNote,
+      // Turn swaps (013). Passed as VALUES, already resolved: the views
+      // cannot see this closure, and canSwapTurns() combines a linked
+      // account, a database carrying 013, and having a round left to trade.
+      canSwapTurns: canSwapTurns(),
+      myIncomingSwaps: myIncomingSwaps(),
+      myOutgoingSwap: myOutgoingSwap(),
+      memberName,
       // Accounts (migration 008). The mode drives whether Menu shows an
       // Account group at all; the email is what "Signed in as ..." prints.
       authMode: AUTH_MODE,
@@ -7160,6 +7493,69 @@
     // Checked here as well as in the menu row: the open* handlers are exported
     // on PowerFund, so anyone can reach them from a console and the render
     // must never take the caller's word for it.
+    // ---- Swap my turn (*palit ng turno*, migration 013) ----------------
+    // Checked against canSwapTurns() here as well as on the Menu row:
+    // openSwapModal is exported on PowerFund, so the render must never take
+    // the caller's word for it. NO APPROVED MOCKUP — new design; it borrows
+    // the established .modal treatment the way Edit member names does.
+    if (swapModalOpen && canSwapTurns()) {
+      const me = editableMember();
+      const cands = swapCandidates();
+      const picked = cands.find((m) => m.id === swapTarget) || null;
+      const outgoing = myOutgoingSwap();
+      html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeSwapModal()">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <h3 id="dlg-title">Swap my turn</h3>
+          <p class="modal-sub">You are <b>Round ${
+            me.member_order
+          }</b>. Ask someone to trade turns with you — nothing moves until they
+            say yes.</p>
+          ${
+            outgoing
+              ? `<p class="swap-supersede">${icon("alert", 13)}<span>You already
+                   asked <b>${escapeHtml(
+                     memberName(outgoing.to_member_id)
+                   )}</b>. Sending a new request withdraws that one.</span></p>`
+              : ""
+          }
+          <label class="field-label" for="swap-who">Trade with</label>
+          <select id="swap-who" class="text-input" onchange="PowerFund.setSwapTarget(this.value)">
+            <option value="">Choose a member…</option>
+            ${cands
+              .map(
+                (m) => `<option value="${inlineArg(m.id)}"${
+                  m.id === swapTarget ? " selected" : ""
+                }>${escapeHtml(m.name)} — Round ${m.member_order}</option>`
+              )
+              .join("")}
+          </select>
+          ${
+            picked
+              ? `<p class="swap-preview">${icon("swap", 14)}<span>You would
+                   take <b>Round ${picked.member_order}</b> and
+                   <b>${escapeHtml(picked.name)}</b> would take
+                   <b>Round ${me.member_order}</b>.</span></p>`
+              : ""
+          }
+          <label class="field-label" for="swap-why">Why? <span class="ack-optional">optional</span></label>
+          <input id="swap-why" class="text-input" type="text" maxlength="120"
+                 placeholder="e.g. hospital bill this month"
+                 value="${escapeHtml(swapNote)}"
+                 oninput="PowerFund.setSwapNote(this.value)">
+          <p class="swap-note">Only <b>${escapeHtml(
+            (picked && picked.name) || "the member you ask"
+          )}</b> can accept this — not the treasurer. Both of you keep paying
+            every cycle either way; only who receives which round changes.</p>
+          <div class="modal-actions">
+            <button class="modal-btn-secondary" onclick="PowerFund.closeSwapModal()">Cancel</button>
+            <button class="modal-btn-primary" onclick="PowerFund.submitSwapRequest()" ${
+              !swapTarget || busy ? "disabled" : ""
+            }>${busy ? "Sending…" : "Send request"}</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
     if (memberAccountsModalOpen && isTreasurerAccount()) {
       const ordered = sortedMembers();
       const r = signInReadiness();
@@ -8063,6 +8459,18 @@
       editNamesValues[id] = v;
       refreshEditNamesValidity();
     },
+    openReceiptAck,
+    cancelReceiptAck,
+    confirmReceiptAck,
+    openSwapModal,
+    closeSwapModal,
+    setSwapTarget,
+    setSwapNote,
+    submitSwapRequest,
+    acceptSwap,
+    declineSwap,
+    cancelSwap,
+    setReceiptAckNote,
     openScheduleModal,
     closeScheduleModal,
     setScheduleShift,

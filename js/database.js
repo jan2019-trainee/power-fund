@@ -148,17 +148,155 @@ window.DB = (function () {
     unwrap(await client.from("members").delete().eq("id", id), "Couldn't delete member");
   }
 
-  /** updates: [{ id, member_order }, ...] — used by the reorder arrows. */
-  async function updateMemberOrder(updates) {
-    for (const u of updates) {
-      const res = await client
-        .from("members")
-        .update({ member_order: u.member_order })
-        .eq("id", u.id)
-        .select();
-      unwrap(res, "Couldn't change payout order");
-      requireRows(res, "Couldn't change payout order");
+  /**
+   * Swap two members' payout positions (the reorder arrows, and the treasurer
+   * half of *palit ng turno*).
+   *
+   * AN RPC, NOT TWO UPDATES, and that is not a style preference.
+   * `members.member_order` is `not null unique`, so the obvious
+   * implementation — which this replaced — could never work:
+   *
+   *   update members set member_order = 2 where id = <A>;
+   *   ERROR:  duplicate key value violates unique constraint
+   *
+   * The first of the two writes always collides while the other member still
+   * holds the value. A single `case` statement fails identically: Postgres
+   * checks a non-deferrable unique constraint per ROW, not per statement. So
+   * "Reorder payout order" had never worked against a real database — the
+   * smoke harness mocks the network, so no browser test could see it.
+   * Migration 013 makes the constraint deferrable and does the swap inside
+   * `pf_swap_order`, where it is one atomic statement.
+   */
+  async function swapMemberOrder(aId, bId) {
+    const res = await client.rpc("pf_swap_order", { _a: aId, _b: bId });
+    if (res.error) {
+      if (missingFunction(res.error, "pf_swap_order")) {
+        throw new Error(
+          "Reordering the payout order needs a database update. Run " +
+            "supabase/migrations/013_turn_swaps.sql in the Supabase SQL editor, " +
+            "then reload."
+        );
+      }
+      // The function raises its own refusals ("already been paid out", "Only
+      // the treasurer…"), and they are written to be read by a person. Pass
+      // them through rather than replacing them with a generic failure.
+      throw new Error(res.error.message || "Couldn't change payout order.");
     }
+    return res.data;
+  }
+
+  // ===================================================================
+  // Turn swaps — *palit ng turno* (migration 013)
+  //
+  // Every transition is an RPC because accepting writes the OTHER member's
+  // row, which 011's members_self_write policy and 010's guard both correctly
+  // refuse to an ordinary member. The permission lives in one validated
+  // function instead of in a policy loose enough to be misused.
+  // ===================================================================
+
+  /** 42883 = undefined_function; PGRST202 = PostgREST could not find it. */
+  function missingFunction(error, name) {
+    if (!error) return false;
+    return (
+      error.code === "42883" ||
+      error.code === "PGRST202" ||
+      new RegExp(name + "|does not exist|Could not find the function", "i").test(
+        error.message || ""
+      )
+    );
+  }
+
+  // Cached per session the way pinPath is: without it a pre-013 database logs
+  // a browser 404 on every load AND every 30-second poll.
+  let swapsPath = null; // null (unknown) | "on" | "absent"
+
+  /**
+   * Pending and recently-resolved swap requests.
+   *
+   * Returns [] rather than throwing when the table is absent, because this is
+   * loaded on every poll and a fund that has not run 013 must still work —
+   * the feature is simply not offered. A REAL failure still throws.
+   */
+  async function getSwapRequests() {
+    if (swapsPath === "absent") return [];
+    const res = await client
+      .from("swap_requests")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(30);
+    if (res.error) {
+      const msg = res.error.message || "";
+      if (
+        res.error.code === "42P01" ||
+        res.error.code === "PGRST205" ||
+        /swap_requests|relation .* does not exist|Could not find the table/i.test(msg)
+      ) {
+        swapsPath = "absent";
+        return [];
+      }
+      return unwrap(res, "Couldn't load swap requests");
+    }
+    swapsPath = "on";
+    return res.data || [];
+  }
+
+  /** True once a load has proved 013 is applied. Drives whether the UI offers
+   *  the feature at all — never a promise that a given swap will succeed. */
+  function swapsAvailable() {
+    return swapsPath !== "absent";
+  }
+
+  async function swapRpc(fn, args, whatFailed) {
+    const res = await client.rpc(fn, args);
+    if (res.error) {
+      if (missingFunction(res.error, fn)) {
+        swapsPath = "absent";
+        throw new Error(
+          "Turn swaps need a database update. Run " +
+            "supabase/migrations/013_turn_swaps.sql in the Supabase SQL editor, " +
+            "then reload."
+        );
+      }
+      throw new Error(res.error.message || whatFailed);
+    }
+    // Every one of these returns the request row. An empty answer means RLS
+    // hid it rather than raising — the same silent refusal requireRows()
+    // exists for on the money writes.
+    const row = Array.isArray(res.data) ? res.data[0] : res.data;
+    if (!row) {
+      throw new Error(
+        whatFailed + " — the database refused it. Only the two members in a " +
+          "swap can act on it, and only while it is still pending."
+      );
+    }
+    return row;
+  }
+
+  function requestSwap(toMemberId, note) {
+    return swapRpc(
+      "pf_request_swap",
+      { _to_member: toMemberId, _note: note || null },
+      "Couldn't send that swap request"
+    );
+  }
+
+  /**
+   * Accept a swap. Returns the request row.
+   *
+   * The caller MUST check `status`: a request the payout order has outrun
+   * comes back `"stale"` with nothing moved, rather than raising. That is
+   * deliberate in the migration — a raise would roll back the very row it had
+   * just marked stale, leaving it pending with an Accept button that can
+   * never work.
+   */
+  function acceptSwap(id) {
+    return swapRpc("pf_accept_swap", { _request: id }, "Couldn't accept that swap");
+  }
+  function declineSwap(id) {
+    return swapRpc("pf_decline_swap", { _request: id }, "Couldn't decline that swap");
+  }
+  function cancelSwap(id) {
+    return swapRpc("pf_cancel_swap", { _request: id }, "Couldn't cancel that request");
   }
 
   // ===================================================================
@@ -660,6 +798,37 @@ window.DB = (function () {
   }
 
   /**
+   * The RECIPIENT confirms they received their payout (migration 012).
+   *
+   * `received_at` is sent as a marker only — pf_payouts_guard() overwrites it
+   * with now() server-side, because a client-chosen timestamp on a financial
+   * acknowledgement is worthless as evidence. The value here just has to be
+   * non-null so the guard sees a confirmation being made.
+   *
+   * requireRows(), not `.single()`: the guard refuses somebody else's payout
+   * by RAISING, but RLS refuses a row that is not yours by HIDING it — the
+   * reply is [] with no error. Without this a member tapping Confirm on a
+   * round that is not theirs would be told it worked.
+   */
+  async function confirmPayoutReceived(roundNumber, note) {
+    const res = await client
+      .from("payouts")
+      .update({
+        received_at: new Date().toISOString(),
+        received_note: (note || "").trim() || null,
+      })
+      .eq("round_number", roundNumber)
+      .select();
+    unwrap(res, "Couldn't confirm the payout");
+    return requireRows(
+      res,
+      "Couldn't confirm the payout",
+      "the database refused it. Only the member the payout was sent to can " +
+        "confirm receiving it, and only once."
+    );
+  }
+
+  /**
    * Mark a round as "started" (its payouts row gets a started_at timestamp).
    * The `.is("started_at", null)` guard makes this safe to call twice — a
    * second call updates zero rows, so a round can never be started twice.
@@ -933,7 +1102,7 @@ window.DB = (function () {
   // Bulk: load everything, reset, backup/restore
   // ===================================================================
   async function loadEverything(activityLimit) {
-    const [members, cycles, contributions, payouts, activityLog, settings] =
+    const [members, cycles, contributions, payouts, activityLog, settings, swapRequests] =
       await Promise.all([
         getMembers(),
         getCycles(),
@@ -941,12 +1110,16 @@ window.DB = (function () {
         getPayouts(),
         getActivityLog(activityLimit || 30),
         getSettings(),
+        // Returns [] on a database without 013 rather than failing the whole
+        // load. A pending swap is somebody waiting on an answer, so it has to
+        // arrive with the poll, not on opening a screen.
+        getSwapRequests(),
       ]);
     // Which PINs exist, without the digits (migration 010). Loaded here so the
     // PIN screens can choose between "Create a PIN" and "Enter your PIN"
     // without a second round trip on every render.
     const pins = await pinStatus();
-    return { members, cycles, contributions, payouts, activityLog, settings, pins };
+    return { members, cycles, contributions, payouts, activityLog, settings, pins, swapRequests };
   }
 
   /**
@@ -1179,6 +1352,12 @@ window.DB = (function () {
         if (p.recipient_name !== undefined) extra.recipient_name = p.recipient_name || null;
         if (p.receipt_url !== undefined) extra.receipt_url = p.receipt_url || null;
         if (p.released_by !== undefined) extra.released_by = p.released_by || null;
+        // Migration 012. A v1/v2 file has neither key, so those rows keep
+        // whatever is on the row rather than being nulled — the same rule the
+        // v1 member-row restore follows.
+        if (p.received_at !== undefined) extra.received_at = p.received_at || null;
+        if (p.received_note !== undefined)
+          extra.received_note = p.received_note || null;
         if (!Object.keys(extra).length) continue;
         const res = await client
           .from("payouts")
@@ -1408,7 +1587,13 @@ window.DB = (function () {
     updateMember,
     unlinkMemberAccount,
     deleteMember,
-    updateMemberOrder,
+    swapMemberOrder,
+    getSwapRequests,
+    swapsAvailable,
+    requestSwap,
+    acceptSwap,
+    declineSwap,
+    cancelSwap,
     getCycles,
     updateCycleDueDates,
     getContributions,
@@ -1428,6 +1613,7 @@ window.DB = (function () {
     deletePaymentAsset,
     getPayouts,
     updatePayout,
+    confirmPayoutReceived,
     startRound,
     getActivityLog,
     addActivityLog,

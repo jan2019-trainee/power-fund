@@ -294,6 +294,24 @@ window.PFViews.rounds = function (ctx) {
                           )} short.</span></p>`
                  }
                  ${
+                   // THE RECIPIENT'S SIDE (migration 012). Visible to everyone,
+                   // because "did Sarah actually get it?" is the group's
+                   // question, not just the treasurer's — and an absence shows
+                   // as an absence rather than as nothing at all.
+                   payout.received_at
+                     ? `<p class="payout-received">${icon("check", 13)}<span>Received by
+                          <b>${escapeHtml(payoutRecipientName(payout))}</b> on
+                          ${payoutDateText(payout.received_at)}${
+                         payout.received_note
+                           ? ` — ${escapeHtml(payout.received_note)}`
+                           : ""
+                       }</span></p>`
+                     : `<p class="payout-awaiting">${icon("clock", 13)}<span>Awaiting
+                          <b>${escapeHtml(
+                            payoutRecipientName(payout)
+                          )}</b>'s confirmation that it arrived.</span></p>`
+                 }
+                 ${
                    unlocked
                      ? `<button class="reset-btn" onclick="PowerFund.unmarkPayoutReleased(${r})">Undo Release</button>`
                      : ""

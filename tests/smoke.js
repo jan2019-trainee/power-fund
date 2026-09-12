@@ -3136,6 +3136,635 @@ async function extraTreasurer(browser, errors) {
   await solo.close();
 }
 
+/** Turn swaps — *palit ng turno* (migration 013).
+ *
+ *  Two properties carry this feature, and neither is visual:
+ *
+ *  1. THE ORDER MOVES BY ONE RPC, never by two updates. `member_order` is
+ *     UNIQUE, so the two-write swap the app used to do always collided on the
+ *     first write — "Reorder payout order" had never worked. The old test
+ *     rendered the screen and never clicked an arrow, which is how that
+ *     survived, so the arrow is clicked here.
+ *  2. ONLY THE COUNTERPARTY MAY ACCEPT. The treasurer deliberately cannot,
+ *     and every handler is exported on PowerFund, so an absent button is not
+ *     the gate.
+ */
+async function swapTurns(browser, errors) {
+  // Everyone signed in, with DISTINCT ids — one per person, as real logins
+  // are — and FAKE_USER_ID on the member this session owns. rosterWithEmails()
+  // links nobody, and swapCandidates() requires a linked counterparty (an
+  // unlinked member could never answer), so leaving the others null made the
+  // feature correctly disappear and the first version of these checks failed
+  // on my fixture rather than on the code.
+  const linked = (i) => {
+    const m = rosterWithEmails();
+    m.forEach((x, j) => {
+      x.auth_user_id =
+        j === i ? FAKE_USER_ID : `9999999${j}-0000-0000-0000-00000000000${j}`;
+    });
+    return m;
+  };
+  // Rounds 1 and 2 released, 3-5 not: Jan (order 3), Clara (4) and Verdz (5)
+  // are the members with a turn left to trade.
+  const payouts = M.PAYOUTS.map((p) =>
+    p.round_number <= 2
+      ? { ...p, released: true, released_on: "2026-09-20", amount: 30000 }
+      : { ...p, released: false, released_on: null }
+  );
+
+  /** Route the table AND the four RPCs, recording every call. */
+  async function withSwapApi(page, rows, opts) {
+    const o = opts || {};
+    const calls = [];
+    await page.route("**/rest/v1/rpc/**", (r) => {
+      const fn = new URL(r.request().url()).pathname.split("/").pop();
+      let body = {};
+      try { body = JSON.parse(r.request().postData() || "{}"); } catch (e) {}
+      calls.push({ fn, body });
+      if (o.answers && o.answers[fn] !== undefined) {
+        const a = o.answers[fn];
+        if (a && a.error) {
+          return r.fulfill({ status: 400, contentType: "application/json",
+                             body: JSON.stringify({ message: a.error }) });
+        }
+        return r.fulfill({ status: 200, contentType: "application/json",
+                           body: JSON.stringify(a) });
+      }
+      // Anything unrouted 404s the way real PostgREST does — answering with
+      // 200 [] would hide a missing-migration path.
+      return r.fulfill({ status: 404, contentType: "application/json",
+        body: JSON.stringify({ code: "42883",
+          message: `Could not find the function public.${fn}` }) });
+    });
+    await page.route("**/rest/v1/swap_requests**", (r) =>
+      r.fulfill({ status: 200, contentType: "application/json",
+                  body: JSON.stringify(rows) }));
+    return calls;
+  }
+
+  // ---- the incoming ask, on the counterparty's Home ----------------------
+  const page = await browser.newPage({ viewport: { width: 430, height: 1100 } });
+  page.on("pageerror", (e) => errors.push(`swap: ${e}`));
+  const members = linked(3); // Clara, order 4, is signed in
+  const req = {
+    id: "55555555-0000-0000-0000-000000000001",
+    from_member_id: members[2].id, // Jan, order 3
+    to_member_id: members[3].id,   // Clara, order 4
+    from_round: 3,
+    to_round: 4,
+    status: "pending",
+    note: "hospital bill this month",
+    created_at: new Date().toISOString(),
+    resolved_at: null,
+  };
+  await serve(page, { ...M.TABLE_DATA, members, payouts, swap_requests: [req] });
+  const calls = await withSwapApi(page, [req], {
+    answers: { pf_accept_swap: [{ ...req, status: "accepted" }] },
+  });
+  await withAuthMode(page, "required", { signedIn: true, email: "clara@example.com" });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
+
+  const ask = await page.locator(".swap-ask").first().innerText().catch(() => "");
+  check(
+    "swap/the counterparty is asked, by name and by round",
+    /Jan/.test(ask) && /Round 4/.test(ask) && /Round 3/.test(ask),
+    ask || "(no .swap-ask rendered)"
+  );
+  check(
+    "swap/the reason they gave is shown",
+    /hospital bill/.test(ask),
+    ask.slice(0, 120)
+  );
+  check(
+    "swap/it says the treasurer cannot answer for them",
+    /treasurer cannot accept it for you/i.test(ask),
+    ask.slice(0, 200)
+  );
+  check(
+    "swap/Accept and Decline are both offered",
+    (await page.locator(".swap-ask-btns button").count()) === 2
+  );
+
+  await page.locator(".swap-ask-btns .modal-btn-primary").click();
+  await page.waitForTimeout(1500);
+  const accept = calls.find((c) => c.fn === "pf_accept_swap");
+  check(
+    "swap/accepting calls pf_accept_swap with that request",
+    !!accept && accept.body._request === req.id,
+    accept ? JSON.stringify(accept.body) : `(no call; ${calls.map((c) => c.fn)})`
+  );
+  await page.close();
+
+  // ---- a STALE answer is a success that moved nothing --------------------
+  // The migration returns the row marked stale rather than raising, because a
+  // raise would roll back the very marking it had just written. So the app
+  // must read `status` — reporting this as a success would be a lie.
+  const stale = await browser.newPage({ viewport: { width: 430, height: 1100 } });
+  stale.on("pageerror", (e) => errors.push(`swap-stale: ${e}`));
+  const m2 = linked(3);
+  const req2 = { ...req, from_member_id: m2[2].id, to_member_id: m2[3].id };
+  await serve(stale, { ...M.TABLE_DATA, members: m2, payouts, swap_requests: [req2] });
+  const sc = await withSwapApi(stale, [req2], {
+    answers: { pf_accept_swap: [{ ...req2, status: "stale" }] },
+  });
+  await withAuthMode(stale, "required", { signedIn: true, email: "clara@example.com" });
+  await stale.goto(BASE, { waitUntil: "domcontentloaded" });
+  await stale.waitForTimeout(2500);
+  await stale.locator(".swap-ask-btns .modal-btn-primary").click();
+  // Waited for an OUTCOME, not for a selector and not for a fixed delay.
+  // acceptSwap awaits reload() before raising either toast, and a fixed sleep
+  // landed while the handler was still in flight — so the "not a success"
+  // assertion below passed because NOTHING had rendered yet, in both
+  // directions. Waiting on ".toast-stack" was no better: it resolves on the
+  // element, which appears before the branch that fills it is reached. A
+  // check that passes because it was early is not a check, so this waits
+  // until one of the two possible answers is actually on the page.
+  // CAPTURED IN-PAGE, at the moment an outcome appears, rather than polled
+  // from the test side. acceptSwap awaits reload() before raising either
+  // toast, so a fixed sleep landed mid-flight and both assertions passed on
+  // an empty page; and reading the text after a waitForFunction resolved was
+  // no better, because the success toast auto-dismisses and the read lost the
+  // race to it. This resolves on the first outcome and keeps the string.
+  const outcome = await stale.evaluate(
+    () =>
+      new Promise((done) => {
+        const t0 = Date.now();
+        const tick = () => {
+          const err = document.querySelector(".save-error-banner");
+          const ok = document.querySelector(".toast .toast-text");
+          if (err) return done({ err: err.innerText, ok: null });
+          if (ok) return done({ err: null, ok: ok.innerText });
+          if (Date.now() - t0 > 15000) return done({ err: null, ok: null });
+          setTimeout(tick, 60);
+        };
+        tick();
+      })
+  );
+  check(
+    "swap/the stale tap did reach pf_accept_swap",
+    sc.some((c) => c.fn === "pf_accept_swap"),
+    sc.map((c) => c.fn).join(",") || "(none)"
+  );
+  check(
+    "swap/a stale accept is reported as nothing having moved",
+    /order changed/i.test(outcome.err || "") && /nothing moved/i.test(outcome.err || ""),
+    JSON.stringify(outcome)
+  );
+  // The other half, and the one that matters: it must not read as a swap that
+  // happened. `outcome` holds whichever toast came FIRST, so a success here
+  // is a success the app actually showed.
+  check(
+    "swap/...and is NOT reported as a swap that happened",
+    !/swapped/i.test(outcome.ok || ""),
+    JSON.stringify(outcome)
+  );
+  await stale.close();
+
+  // ---- who may NOT answer ------------------------------------------------
+  const other = await browser.newPage({ viewport: { width: 430, height: 1100 } });
+  other.on("pageerror", (e) => errors.push(`swap-other: ${e}`));
+  const m3 = rosterWithEmails();
+  m3[0].auth_user_id = FAKE_USER_ID; // Regine: the flagged TREASURER
+  const req3 = { ...req, from_member_id: m3[2].id, to_member_id: m3[3].id };
+  await serve(other, { ...M.TABLE_DATA, members: m3, payouts, swap_requests: [req3] });
+  const oc = await withSwapApi(other, [req3], {
+    answers: { pf_accept_swap: [{ ...req3, status: "accepted" }] },
+  });
+  await withAuthMode(other, "required", { signedIn: true, email: "regine@example.com" });
+  await other.goto(BASE, { waitUntil: "domcontentloaded" });
+  await other.waitForTimeout(2500);
+  check(
+    "swap/the TREASURER is not shown somebody else's ask",
+    (await other.locator(".swap-ask").count()) === 0
+  );
+  // Exported on PowerFund, so the absent card is not the gate.
+  await other.evaluate((id) => {
+    window.PowerFund.acceptSwap(id);
+    window.PowerFund.declineSwap(id);
+    window.PowerFund.cancelSwap(id);
+  }, req3.id);
+  await other.waitForTimeout(1200);
+  check(
+    "swap/and the treasurer's exported handlers all refuse",
+    oc.filter((c) => /swap/.test(c.fn)).length === 0,
+    oc.map((c) => c.fn).join(",") || "(none)"
+  );
+  await other.close();
+
+  // ---- the requester's own side -----------------------------------------
+  const mine = await browser.newPage({ viewport: { width: 430, height: 1100 } });
+  mine.on("pageerror", (e) => errors.push(`swap-mine: ${e}`));
+  const m4 = linked(2); // Jan, order 3, is the requester
+  const req4 = { ...req, from_member_id: m4[2].id, to_member_id: m4[3].id };
+  await serve(mine, { ...M.TABLE_DATA, members: m4, payouts, swap_requests: [req4] });
+  const mc = await withSwapApi(mine, [req4], {
+    answers: { pf_cancel_swap: [{ ...req4, status: "cancelled" }] },
+  });
+  await withAuthMode(mine, "required", { signedIn: true, email: "jan@example.com" });
+  await mine.goto(BASE, { waitUntil: "domcontentloaded" });
+  await mine.waitForTimeout(2500);
+  const waiting = await mine.locator(".swap-waiting").first().innerText().catch(() => "");
+  check(
+    "swap/the requester sees who they are waiting on",
+    /Waiting for/.test(waiting) && /Clara/.test(waiting),
+    waiting || "(no .swap-waiting rendered)"
+  );
+  check(
+    "swap/the requester is NOT offered their own Accept button",
+    (await mine.locator(".swap-ask").count()) === 0
+  );
+  await mine.locator(".swap-withdraw").click();
+  await mine.waitForTimeout(1200);
+  check(
+    "swap/withdrawing calls pf_cancel_swap",
+    mc.some((c) => c.fn === "pf_cancel_swap" && c.body._request === req4.id),
+    mc.map((c) => c.fn).join(",") || "(none)"
+  );
+  await mine.close();
+
+  // ---- asking: the sheet, and who may be asked --------------------------
+  const ask2 = await browser.newPage({ viewport: { width: 430, height: 1100 } });
+  ask2.on("pageerror", (e) => errors.push(`swap-ask: ${e}`));
+  const m5 = linked(2); // Jan, order 3 — rounds 1-2 are paid out
+  m5[4].auth_user_id = null; // Verdz has never signed in
+  await serve(ask2, { ...M.TABLE_DATA, members: m5, payouts, swap_requests: [] });
+  const ac = await withSwapApi(ask2, [], {
+    answers: { pf_request_swap: [{ ...req, from_member_id: m5[2].id, to_member_id: m5[3].id }] },
+  });
+  await withAuthMode(ask2, "required", { signedIn: true, email: "jan@example.com" });
+  await ask2.goto(BASE, { waitUntil: "domcontentloaded" });
+  await ask2.waitForTimeout(2500);
+  await ask2.locator(".tab-item", { hasText: "Menu" }).click();
+  await ask2.waitForTimeout(600);
+  check(
+    "swap/Menu offers Swap my turn to a linked member",
+    (await ask2.locator(".menu-row", { hasText: "Swap my turn" }).count()) === 1
+  );
+  await ask2.locator(".menu-row", { hasText: "Swap my turn" }).click();
+  await ask2.waitForTimeout(600);
+  const opts = await ask2.locator("#swap-who option").allInnerTexts();
+  // Rounds 1 and 2 are PAID OUT, so Regine and Sarah cannot trade — 013
+  // refuses it, and offering them would be a button that fails. Verdz has
+  // never signed in and so could never answer.
+  check(
+    "swap/only members who can actually trade are offered",
+    !opts.some((o) => /Regine|Sarah|Verdz|Jan/.test(o)) &&
+      opts.some((o) => /Clara/.test(o)),
+    opts.join(" | ")
+  );
+  check(
+    "swap/Send is disabled until somebody is chosen",
+    (await ask2.locator(".modal .modal-btn-primary").isDisabled()) === true
+  );
+  await ask2.locator("#swap-who").selectOption(m5[3].id);
+  await ask2.waitForTimeout(400);
+  const prev = await ask2.locator(".swap-preview").first().innerText().catch(() => "");
+  check(
+    "swap/the sheet spells out both sides of the trade",
+    /Round 4/.test(prev) && /Clara/.test(prev) && /Round 3/.test(prev),
+    prev || "(no .swap-preview rendered)"
+  );
+  await ask2.locator("#swap-why").fill("need mine early");
+  await ask2.locator(".modal .modal-btn-primary").click();
+  await ask2.waitForTimeout(1500);
+  const sent = ac.find((c) => c.fn === "pf_request_swap");
+  check(
+    "swap/sending names the member and carries the reason",
+    !!sent && sent.body._to_member === m5[3].id && sent.body._note === "need mine early",
+    sent ? JSON.stringify(sent.body) : `(no call; ${ac.map((c) => c.fn)})`
+  );
+  await ask2.close();
+
+  // ---- a member on a PAID-OUT round has nothing to trade ----------------
+  const done = await browser.newPage({ viewport: { width: 430, height: 1100 } });
+  done.on("pageerror", (e) => errors.push(`swap-done: ${e}`));
+  const m6 = linked(1); // Sarah, order 2 — released
+  await serve(done, { ...M.TABLE_DATA, members: m6, payouts, swap_requests: [] });
+  const dc = await withSwapApi(done, []);
+  await withAuthMode(done, "required", { signedIn: true, email: "sarah@example.com" });
+  await done.goto(BASE, { waitUntil: "domcontentloaded" });
+  await done.waitForTimeout(2500);
+  await done.locator(".tab-item", { hasText: "Menu" }).click();
+  await done.waitForTimeout(600);
+  check(
+    "swap/a member already paid out is not offered the row",
+    (await done.locator(".menu-row", { hasText: "Swap my turn" }).count()) === 0
+  );
+  await done.evaluate(() => window.PowerFund.openSwapModal());
+  await done.waitForTimeout(500);
+  check(
+    "swap/and openSwapModal refuses them",
+    (await done.locator("#swap-who").count()) === 0 &&
+      !dc.some((c) => c.fn === "pf_request_swap")
+  );
+  await done.close();
+
+  // ---- THE ORIGINAL BUG: the treasurer's reorder arrow -------------------
+  // It must call pf_swap_order, and must NOT write two PATCHes — member_order
+  // is UNIQUE, so the first of two would always collide. No browser test had
+  // ever clicked this arrow, which is how it shipped broken.
+  const tre = await browser.newPage({ viewport: { width: 430, height: 1100 } });
+  tre.on("pageerror", (e) => errors.push(`swap-reorder: ${e}`));
+  const m7 = rosterWithEmails();
+  m7[0].auth_user_id = FAKE_USER_ID;
+  await serve(tre, {
+    ...M.TABLE_DATA,
+    members: m7,
+    payouts: M.PAYOUTS.map((p) => ({ ...p, released: false, released_on: null })),
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234" },
+  });
+  const tc = await withSwapApi(tre, [], { answers: { pf_swap_order: m7 } });
+  const patches = [];
+  await tre.route("**/rest/v1/members**", (r) => {
+    const rq = r.request();
+    if (rq.method() !== "GET") patches.push({ method: rq.method(), body: rq.postData() });
+    return r.fulfill({ status: 200, contentType: "application/json",
+                       body: JSON.stringify(m7) });
+  });
+  await withAuthMode(tre, "required", { signedIn: true, email: "regine@example.com" });
+  await tre.goto(BASE, { waitUntil: "domcontentloaded" });
+  await tre.waitForTimeout(2500);
+  await unlockTreasurer(tre);
+  await tre.locator(".tab-item", { hasText: "Menu" }).click();
+  await tre.waitForTimeout(600);
+  await tre.locator(".menu-row", { hasText: "Reorder payout order" }).click();
+  await tre.waitForTimeout(600);
+  // The second row's "move up" arrow: a real swap with the row above it.
+  await tre.locator(".reorder-row").nth(1).locator("button").first().click();
+  await tre.waitForTimeout(1500);
+  check(
+    "swap/the reorder arrow calls pf_swap_order with both members",
+    tc.some(
+      (c) => c.fn === "pf_swap_order" && c.body._a === m7[1].id && c.body._b === m7[0].id
+    ),
+    JSON.stringify(tc.map((c) => [c.fn, c.body]))
+  );
+  check(
+    "swap/and writes NO member_order PATCH (which would always collide)",
+    !patches.some((w) => /member_order/.test(w.body || "")),
+    JSON.stringify(patches)
+  );
+  await tre.close();
+
+  // ---- a fund that has not run 013 -------------------------------------
+  // The table 404s the way real PostgREST does. The feature must be absent
+  // rather than offered and failing.
+  const old = await browser.newPage({ viewport: { width: 430, height: 1100 } });
+  old.on("pageerror", (e) => errors.push(`swap-pre013: ${e}`));
+  const m8 = linked(2);
+  await serve(old, { ...M.TABLE_DATA, members: m8, payouts, swap_requests: [] });
+  await old.route("**/rest/v1/swap_requests**", (r) =>
+    r.fulfill({ status: 404, contentType: "application/json",
+      body: JSON.stringify({ code: "42P01",
+        message: 'relation "public.swap_requests" does not exist' }) }));
+  await withAuthMode(old, "required", { signedIn: true, email: "jan@example.com" });
+  await old.goto(BASE, { waitUntil: "domcontentloaded" });
+  await old.waitForTimeout(2500);
+  check(
+    "swap/a fund without migration 013 still loads",
+    (await old.locator(".battery-hero, .home-grid, .view-head").count()) > 0 &&
+      (await old.locator(".boot-fail, .no-connection").count()) === 0
+  );
+  await old.locator(".tab-item", { hasText: "Menu" }).click();
+  await old.waitForTimeout(600);
+  check(
+    "swap/...and is not offered a feature its database cannot do",
+    (await old.locator(".menu-row", { hasText: "Swap my turn" }).count()) === 0
+  );
+  await old.close();
+}
+
+/** "Received ✓" — the recipient confirming their own payout arrived
+ *  (migration 012). NO approved mockup; the behaviour is what is asserted.
+ *
+ *  The property that matters is the GATE: it is neither `unlocked` nor
+ *  `isTreasurerAccount()` but BEING THE RECIPIENT, a different axis from
+ *  every other permission in the app — and 012's policy keys on
+ *  `recipient_member_id`, so the UI must agree with Postgres or it offers a
+ *  button that is refused.
+ */
+async function receiptAck(browser, errors) {
+  // Sarah (index 1) is the recipient AND the signed-in account. Regine
+  // (index 0) is the flagged treasurer, so this also proves the card is not
+  // a treasurer surface.
+  const roster = () => {
+    const m = rosterWithEmails();
+    m[1].auth_user_id = FAKE_USER_ID;
+    return m;
+  };
+  const payoutsTo = (member, receivedAt) =>
+    M.PAYOUTS.map((p) =>
+      p.round_number === 1
+        ? {
+            ...p,
+            released: true,
+            released_on: "2026-09-20",
+            amount: 30000,
+            recipient_member_id: member.id,
+            recipient_name: member.name,
+            received_at: receivedAt || null,
+            received_note: receivedAt ? "GCash, received in full" : null,
+          }
+        : p
+    );
+
+  // ---- the recipient's own view -------------------------------------------
+  const page = await browser.newPage({ viewport: { width: 430, height: 1000 } });
+  page.on("pageerror", (e) => errors.push(`receipt-ack: ${e}`));
+  const members = roster();
+  const payouts = payoutsTo(members[1]);
+  await serve(page, { ...M.TABLE_DATA, members, payouts });
+  const writes = [];
+  await page.route("**/rest/v1/payouts**", (r) => {
+    const req = r.request();
+    // Fulfilled, never continued: this route is registered AFTER serve()'s
+    // catch-all so it wins, and continue() would go to the real static server.
+    if (req.method() === "GET") {
+      return r.fulfill({
+        status: 200, contentType: "application/json", body: JSON.stringify(payouts),
+      });
+    }
+    let body = {};
+    try { body = JSON.parse(req.postData() || "{}"); } catch (e) {}
+    writes.push({ url: req.url(), body });
+    // A real PATCH answers with the updated row; requireRows() treats [] as a
+    // refusal, so answering "[]" here would test the error path instead.
+    return r.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([{ round_number: 1, ...body }]),
+    });
+  });
+  const logs = [];
+  await page.route("**/rest/v1/activity_log**", (r) => {
+    const req = r.request();
+    if (req.method() !== "GET") {
+      try { logs.push(JSON.parse(req.postData() || "{}")); } catch (e) {}
+    }
+    return r.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(req.method() === "GET" ? M.ACTIVITY_LOG : []),
+    });
+  });
+  await withAuthMode(page, "required", { signedIn: true, email: "sarah@example.com" });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
+
+  check(
+    "receipt-ack/the recipient is offered the card",
+    (await page.locator(".ack-card .ack-cta").count()) === 1,
+    await page.locator(".ack-card").count() + " ack-card(s)"
+  );
+  // It must not open the panel on arrival — the note is optional and the tap
+  // is the deliberate act.
+  check(
+    "receipt-ack/the panel is closed until asked for",
+    (await page.locator(".ack-panel").count()) === 0
+  );
+
+  await page.locator(".ack-card .ack-cta").click();
+  await page.waitForTimeout(400);
+  check(
+    "receipt-ack/tapping opens the note panel",
+    (await page.locator(".ack-panel .ack-input").count()) === 1
+  );
+  await page.locator(".ack-panel .ack-input").fill("GCash, received in full");
+  await page.locator(".ack-panel .modal-btn-primary").click();
+  await page.waitForTimeout(1500);
+
+  const patch = writes.find((w) => w.body && "received_at" in w.body);
+  check(
+    "receipt-ack/confirming writes received_at for that round only",
+    !!patch && /round_number=eq\.1/.test(patch.url),
+    patch ? patch.url : "(no PATCH captured)"
+  );
+  check(
+    "receipt-ack/the note is carried, and nothing else is touched",
+    !!patch &&
+      patch.body.received_note === "GCash, received in full" &&
+      Object.keys(patch.body).sort().join(",") === "received_at,received_note",
+    patch ? JSON.stringify(patch.body) : "(none)"
+  );
+  // The activity entry carries NO amount: the money moved at release and was
+  // logged there. A figure here would make a release-and-confirm read as
+  // ₱60,000 leaving the fund — the same bug doUnmarkPayoutReleased avoids.
+  const entry = logs.find((l) => l && /confirmed receiving/i.test(l.message || ""));
+  check(
+    "receipt-ack/the log names the member and carries NO amount",
+    !!entry &&
+      /Sarah/.test(entry.message) &&
+      (entry.amount === null || entry.amount === undefined) &&
+      Number(entry.round_number) === 1,
+    entry ? JSON.stringify(entry) : `(no entry; ${logs.length} logged)`
+  );
+  await page.close();
+
+  // ---- somebody who is NOT the recipient ----------------------------------
+  const other = await browser.newPage({ viewport: { width: 430, height: 1000 } });
+  other.on("pageerror", (e) => errors.push(`receipt-ack-other: ${e}`));
+  const m2 = rosterWithEmails();
+  m2[1].auth_user_id = FAKE_USER_ID; // Sarah is signed in...
+  const payouts2 = payoutsTo(m2[3]); // ...Clara was paid
+  await serve(other, { ...M.TABLE_DATA, members: m2, payouts: payouts2 });
+  const otherWrites = [];
+  await other.route("**/rest/v1/payouts**", (r) => {
+    const req = r.request();
+    if (req.method() === "GET") {
+      return r.fulfill({
+        status: 200, contentType: "application/json", body: JSON.stringify(payouts2),
+      });
+    }
+    otherWrites.push(req.url());
+    return r.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await withAuthMode(other, "required", { signedIn: true, email: "sarah@example.com" });
+  await other.goto(BASE, { waitUntil: "domcontentloaded" });
+  await other.waitForTimeout(2500);
+  check(
+    "receipt-ack/a non-recipient is not offered the card",
+    (await other.locator(".ack-card").count()) === 0
+  );
+  // openReceiptAck and confirmReceiptAck are exported on PowerFund, so the
+  // absent card is not the gate. Both handlers must refuse.
+  await other.evaluate(() => {
+    window.PowerFund.openReceiptAck(1);
+    window.PowerFund.confirmReceiptAck();
+  });
+  await other.waitForTimeout(1200);
+  check(
+    "receipt-ack/the exported handlers refuse a non-recipient",
+    (await other.locator(".ack-panel").count()) === 0 && otherWrites.length === 0,
+    `${otherWrites.length} write(s) attempted`
+  );
+  await other.close();
+
+  // ---- the record line, which the whole group reads -----------------------
+  const rec = await browser.newPage({ viewport: { width: 430, height: 1000 } });
+  rec.on("pageerror", (e) => errors.push(`receipt-ack-record: ${e}`));
+  const m3 = rosterWithEmails();
+  await serve(rec, { ...M.TABLE_DATA, members: m3, payouts: payoutsTo(m3[1]) });
+  await withAuthMode(rec, "off");
+  await rec.goto(BASE, { waitUntil: "domcontentloaded" });
+  await rec.waitForTimeout(1800);
+  await rec.locator(".tab-item", { hasText: "Rounds" }).click();
+  await rec.waitForTimeout(600);
+  await rec.locator(".round-head, .round").first().click().catch(() => {});
+  await rec.waitForTimeout(500);
+  const awaiting = await rec.locator(".payout-awaiting").first().innerText().catch(() => "");
+  check(
+    "receipt-ack/an unconfirmed payout says so, by name",
+    /Awaiting/.test(awaiting) && /Sarah/.test(awaiting),
+    awaiting || "(no .payout-awaiting rendered)"
+  );
+  check(
+    "receipt-ack/and shows no received line yet",
+    (await rec.locator(".payout-received").count()) === 0
+  );
+  await rec.close();
+
+  const done = await browser.newPage({ viewport: { width: 430, height: 1000 } });
+  done.on("pageerror", (e) => errors.push(`receipt-ack-done: ${e}`));
+  const m4 = rosterWithEmails();
+  m4[1].auth_user_id = FAKE_USER_ID;
+  await serve(done, {
+    ...M.TABLE_DATA,
+    members: m4,
+    payouts: payoutsTo(m4[1], "2026-09-21T04:00:00Z"),
+  });
+  await withAuthMode(done, "required", { signedIn: true, email: "sarah@example.com" });
+  await done.goto(BASE, { waitUntil: "domcontentloaded" });
+  await done.waitForTimeout(2500);
+  check(
+    "receipt-ack/an acknowledged payout is not offered again",
+    (await done.locator(".ack-card").count()) === 0
+  );
+  await done.locator(".tab-item", { hasText: "Rounds" }).click();
+  await done.waitForTimeout(600);
+  await done.locator(".round-head, .round").first().click().catch(() => {});
+  await done.waitForTimeout(500);
+  const got = await done.locator(".payout-received").first().innerText().catch(() => "");
+  check(
+    // The date is asserted POSITIVELY, not just as "some text": `received_at`
+    // is a timestamptz where `released_on` is a plain date, and the shared
+    // formatter appended "T00:00:00" to it — this line read "on Invalid Date"
+    // while a laxer version of this check passed.
+    "receipt-ack/the record names who confirmed it, when, and their note",
+    /Received by/.test(got) &&
+      /Sarah/.test(got) &&
+      /Sep 21, 2026/.test(got) &&
+      !/Invalid/.test(got) &&
+      /received in full/.test(got),
+    got || "(no .payout-received rendered)"
+  );
+  check(
+    "receipt-ack/and drops the awaiting line",
+    (await done.locator(".payout-awaiting").count()) === 0
+  );
+  await done.close();
+}
+
 /** The entry animation marks a SCREEN CHANGE, not a render.
  *
  *  render() reassigns innerHTML, so every element is new every time and every
@@ -5225,6 +5854,8 @@ async function bootFailure(browser) {
   await tabletBand(browser, errors);
   await fundCompleteOrder(browser, errors);
   await polishPass(browser, errors);
+  await receiptAck(browser, errors);
+  await swapTurns(browser, errors);
   await entryAnimation(browser, errors);
   await signInPrompt(browser, errors);
   await onboarding(browser, errors);

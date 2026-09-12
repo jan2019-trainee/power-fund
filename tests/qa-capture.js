@@ -705,6 +705,137 @@ async function tabs(page, prefix, list) {
     }
   }
 
+  // "Received ✓" (migration 012) — NEW DESIGN, no mockup. Needs a LINKED
+  // ACCOUNT and a released payout pointed at that member, so it was
+  // unreachable to every earlier capture the way My-payout-details was.
+  console.log("\nReceived ✓ — the recipient's payout acknowledgement");
+  {
+    const acct = withAccounts(midFund, 1); // Sarah: linked, not the treasurer
+    const ackData = {
+      ...acct.data,
+      // Round 1 released TO SARAH and unacknowledged. Pointed by
+      // recipient_member_id, which is what the app and 012's policy both key
+      // off — not by payout order.
+      payouts: acct.data.payouts.map((p) =>
+        p.round_number === 1
+          ? {
+              ...p,
+              released: true,
+              released_on: "2026-09-20",
+              amount: 30000,
+              recipient_member_id: acct.me.id,
+              recipient_name: acct.me.name,
+              received_at: null,
+              received_note: null,
+            }
+          : p
+      ),
+    };
+    for (const [label, vp] of [["mobile", MOBILE], ["desktop", DESKTOP]]) {
+      p = await open(browser, ackData, vp, null, {
+        authMode: "optional",
+        signedInAs: acct.me,
+      });
+      await shot(p, `ack-${label}-offered`, "Received ✓ card on Home — the recipient's own released payout");
+      if (await p.locator(".ack-cta").count()) {
+        await p.locator(".ack-cta").click();
+        await p.waitForTimeout(500);
+        await shot(p, `ack-${label}-panel`, "The note panel — one optional line, Confirm / Cancel");
+      }
+      // The record line the whole group reads, before anyone has confirmed.
+      await p.locator(".tab-item, .sidebar-item", { hasText: "Rounds" }).first().click();
+      await p.waitForTimeout(600);
+      await p.locator(".round-head, .round").first().click().catch(() => {});
+      await p.waitForTimeout(500);
+      await shot(p, `ack-${label}-awaiting`, "Rounds — \"Awaiting Sarah's confirmation that it arrived\"");
+      await p.close();
+    }
+    // ...and after.
+    const doneData = {
+      ...ackData,
+      payouts: ackData.payouts.map((p) =>
+        p.round_number === 1
+          ? { ...p, received_at: "2026-09-21T04:00:00Z", received_note: "GCash, received in full" }
+          : p
+      ),
+    };
+    p = await open(browser, doneData, MOBILE, null, {
+      authMode: "optional",
+      signedInAs: acct.me,
+    });
+    await p.locator(".tab-item", { hasText: "Rounds" }).first().click();
+    await p.waitForTimeout(600);
+    await p.locator(".round-head, .round").first().click().catch(() => {});
+    await p.waitForTimeout(500);
+    await shot(p, "ack-mobile-received", "Rounds — \"Received by Sarah on <date> — <note>\"; no card on Home");
+    await p.close();
+  }
+
+  // Turn swaps (013) — NEW DESIGN, no mockup. Needs two LINKED members with
+  // unreleased rounds, which no earlier capture had.
+  console.log("\nTurn swaps — palit ng turno");
+  {
+    // Everyone signed in, with DISTINCT ids, and FAKE_USER_ID on whichever
+    // member the shot is taken AS. Building the roster per viewer matters:
+    // the first version set FAKE_USER_ID only on the object passed to
+    // signedInAs and left the ROSTER row carrying another id, so the
+    // requester's page resolved to somebody else and the "waiting" capture
+    // photographed the incoming card instead.
+    const swRoster = (meIndex) =>
+      withAccounts(midFund, meIndex).data.members.map((m, i) => ({
+        ...m,
+        auth_user_id:
+          i === meIndex ? FAKE_USER_ID : `9999999${i}-0000-0000-0000-00000000000${i}`,
+      }));
+    // Rounds 1-2 paid out, so only Jan (3), Clara (4) and Verdz (5) have a
+    // turn left to trade — which is what pf_request_swap allows.
+    const swPayouts = midFund.payouts.map((p) =>
+      p.round_number <= 2
+        ? { ...p, released: true, released_on: "2026-09-20", amount: 30000 }
+        : { ...p, released: false, released_on: null }
+    );
+    const sw = { data: { ...midFund, members: swRoster(3), payouts: swPayouts } };
+    const pending = {
+      id: "55555555-0000-0000-0000-000000000001",
+      from_member_id: sw.data.members[2].id, // Jan, order 3
+      to_member_id: sw.data.members[3].id,   // Clara, order 4
+      from_round: 3, to_round: 4, status: "pending",
+      note: "hospital bill this month",
+      created_at: new Date().toISOString(), resolved_at: null,
+    };
+    for (const [label, vp] of [["mobile", MOBILE], ["desktop", DESKTOP]]) {
+      // The INCOMING ask, on the counterparty's Home.
+      p = await open(browser, { ...sw.data, swap_requests: [pending] }, vp, null, {
+        authMode: "optional", signedInAs: sw.data.members[3],
+      });
+      await shot(p, `swap-${label}-incoming`, "Home — another member asks to trade turns (Accept / Decline)");
+      await p.close();
+      // The OUTGOING side, on the REQUESTER's own page — its own roster, so
+      // Jan's row is the one carrying this session's login.
+      const asJan = swRoster(2);
+      p = await open(
+        browser,
+        { ...sw.data, members: asJan, swap_requests: [pending] },
+        vp,
+        null,
+        { authMode: "optional", signedInAs: asJan[2] }
+      );
+      await shot(p, `swap-${label}-waiting`, "Home — waiting on an answer, with Withdraw request");
+      await p.close();
+    }
+    // The request sheet, empty and then filled in.
+    p = await open(browser, { ...sw.data, swap_requests: [] }, MOBILE, null, {
+      authMode: "optional", signedInAs: sw.data.members[3],
+    });
+    await p.evaluate(() => window.PowerFund.openSwapModal());
+    await p.waitForTimeout(600);
+    await shot(p, "swap-mobile-ask", "Swap my turn — nobody chosen yet, Send disabled");
+    await p.evaluate((id) => window.PowerFund.setSwapTarget(id), sw.data.members[2].id);
+    await p.waitForTimeout(600);
+    await shot(p, "swap-mobile-ask-picked", "Swap my turn — both sides of the trade spelled out");
+    await p.close();
+  }
+
   console.log("\nOnboarding — first run, both frames");
   for (const [label, vp] of [["mobile", MOBILE], ["desktop", DESKTOP]]) {
     p = await open(browser, midFund, vp, null, { fresh: true });

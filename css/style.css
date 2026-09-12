@@ -4272,6 +4272,240 @@ body:not(.pf-anim) {
 .release-card-title .icon { color: var(--accent); flex-shrink: 0; }
 .release-card-note { margin: 0 0 11px; font-size: 12.8px; color: var(--text-muted); line-height: 1.5; }
 
+/* -------------------------------------------------------------------------
+   "Received ✓" — the recipient confirming their own payout arrived
+   (migration 012). NO approved mockup: new design, flagged for UI/UX QA.
+
+   GREEN, not amber. This is the one card on Home that says money arrived for
+   YOU, and the amber family here already means "something needs doing about
+   the fund's money" (.release-card, the attention panel). The action is a
+   receipt, not a chore — and a fund that never gets the tap is not broken,
+   which is why this must not read as a warning.
+   ------------------------------------------------------------------------- */
+.ack-card {
+  background: var(--success-soft);
+  border: 1px solid var(--success);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.ack-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 5px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 14.5px;
+  color: var(--text-primary);
+}
+.ack-title .icon { color: var(--success); flex-shrink: 0; }
+.ack-note {
+  margin: 0 0 11px;
+  font-size: 12.8px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.ack-note b { color: var(--text-primary); }
+
+.ack-cta {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;          /* touch target — see the 899px band notes */
+  padding: 11px 14px;
+  border: none;
+  border-radius: 11px;
+  background: var(--success);
+  color: #08211A;
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+}
+.ack-cta .icon { flex-shrink: 0; }
+.ack-cta:hover { filter: brightness(1.06); }
+
+/* The second tap. Inline rather than a modal: the note is optional and the
+   whole point is that this costs one look and one press. */
+.ack-panel {
+  border-top: 1px solid var(--border);
+  padding-top: 11px;
+}
+.ack-label {
+  display: block;
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.ack-optional { font-weight: 400; color: var(--text-muted); }
+.ack-input { font-size: 13.5px; }
+.ack-once {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+.ack-btns {
+  display: flex;
+  gap: 9px;
+  margin-top: 11px;
+}
+.ack-btns button { flex: 1; min-height: 44px; }
+
+/* The record line on the Rounds accordion, shown to EVERYONE. Muted, not a
+   second attention treatment — it answers "did it arrive?" for the group,
+   and an absence has to read as an absence rather than as nothing at all. */
+.payout-received,
+.payout-awaiting {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  margin: 7px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.payout-received { color: var(--success); }
+.payout-awaiting { color: var(--text-muted); }
+.payout-received b, .payout-awaiting b { color: var(--text-primary); }
+.payout-received .icon, .payout-awaiting .icon { flex: none; margin-top: 2px; }
+
+/* -------------------------------------------------------------------------
+   Turn swaps — *palit ng turno* (migration 013)
+   NO approved mockup: new design, flagged for UI/UX QA.
+
+   The INCOMING ask is purple, the same family as every other "waiting on a
+   person" surface in the app (.my-status-pending, .acct-pill.wait, the
+   Insights "In review" slice). It is not amber: amber here means the fund's
+   money needs something doing about it, and this is a request from a person
+   that the fund is fine either way. Not green either — nothing has happened
+   yet, and green is for money that arrived.
+   ------------------------------------------------------------------------- */
+.swap-ask {
+  background: var(--pending-review-soft);
+  border: 1px solid var(--pending-review);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.swap-ask-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 14.5px;
+  color: var(--text-primary);
+}
+.swap-ask-title .icon { color: var(--pending-review); flex-shrink: 0; }
+.swap-ask-body {
+  margin: 0 0 7px;
+  font-size: 12.8px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+.swap-ask-body b { color: var(--text-primary); }
+.swap-ask-why { color: var(--text-primary); font-style: italic; }
+.swap-ask-fine {
+  margin: 0 0 12px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+.swap-ask-btns { display: flex; gap: 9px; }
+.swap-ask-btns button { flex: 1; min-height: 44px; }
+
+/* The outgoing side: quiet by design. It is not an action for the viewer —
+   they have already acted and are waiting on somebody else — so it gets a
+   plain card rather than a second coloured attention treatment beside the
+   incoming one. */
+.swap-waiting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 11px 14px;
+  margin-bottom: 14px;
+}
+.swap-waiting-line {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  margin: 0;
+  min-width: 0;
+  flex: 1 1 200px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+.swap-waiting-line b { color: var(--text-primary); }
+.swap-waiting-line .icon { flex: none; margin-top: 2px; color: var(--pending-review); }
+.swap-withdraw {
+  flex: none;
+  min-height: 36px;
+  padding: 8px 13px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: 'Inter', sans-serif;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.swap-withdraw:hover:not(:disabled) { color: var(--text-primary); border-color: var(--text-muted); }
+.swap-withdraw:disabled { opacity: 0.5; cursor: default; }
+
+/* The request sheet. */
+.swap-preview,
+.swap-note,
+.swap-supersede {
+  font-size: 12.2px;
+  line-height: 1.5;
+  text-align: left;
+}
+.swap-preview {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 10px 0 0;
+  padding: 9px 11px;
+  border-radius: 9px;
+  background: var(--pending-review-soft);
+  color: var(--text-muted);
+}
+.swap-preview b { color: var(--text-primary); }
+.swap-preview .icon { flex: none; margin-top: 2px; color: var(--pending-review); }
+.swap-note { margin: 10px 0 0; color: var(--text-muted); }
+.swap-note b { color: var(--text-primary); }
+/* Amber: a new request WITHDRAWS the one already out, which the member has to
+   know before pressing Send, not after. */
+.swap-supersede {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 10px 0 0;
+  padding: 9px 11px;
+  border-radius: 9px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.swap-supersede b { color: var(--text-primary); }
+.swap-supersede .icon { flex: none; margin-top: 2px; }
+
+@media (min-width: 900px) {
+  /* On the desktop rail the card is narrower than the phone's full width, so
+     the withdraw button stops sharing a line with the sentence. */
+  .swap-waiting { align-items: flex-start; }
+}
+
 /* Sparkline stand-in before there are two points to draw a line between. */
 .hero-spark-empty { display: flex; flex-direction: column; justify-content: center; }
 .hero-spark-note { margin: 4px 0 0; font-size: 11.5px; color: var(--text-muted); line-height: 1.4; }

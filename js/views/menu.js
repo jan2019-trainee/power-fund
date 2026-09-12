@@ -20,7 +20,7 @@ window.PFViews.menu = function (ctx) {
     members, unlocked, myMember, escapeHtml, icon, memberAvatar, C, hasMasterPin,
     authMode, sessionEmail, identityLocked, signInStatus, isTreasurerAccount,
     hasTreasurerPin, isWide,
-    payoutOwner, maskAccount
+    payoutOwner, maskAccount, canSwapTurns, myOutgoingSwap, memberName
   } = ctx;
 
   /** One tappable settings row. `note` is the quiet second line. */
@@ -231,6 +231,28 @@ window.PFViews.menu = function (ctx) {
           `PowerFund.openMemberDetail('${String(myMember.id).replace(/'/g, "\\'")}')`,
           "Your payments, round by round"
         )
+      );
+    }
+    // Swap my turn (*palit ng turno*, migration 013). NEEDS A LINKED ACCOUNT,
+    // like My Payout QR Code above and for the same reason: this decides who
+    // receives ₱30,000 and when. `canSwapTurns` also requires a database
+    // carrying 013 and a round of your own left to trade, so the row is not
+    // offered where it cannot work. Shown-but-explained rather than hidden
+    // when the only thing missing is the sign-in.
+    if (canSwapTurns) {
+      general.push(
+        row(
+          "swap",
+          "Swap my turn",
+          "PowerFund.openSwapModal()",
+          myOutgoingSwap
+            ? `Waiting for ${memberName(myOutgoingSwap.to_member_id)} to answer`
+            : "Ask another member to trade payout turns"
+        )
+      );
+    } else if (myMember && !payoutOwner && authMode !== "off") {
+      general.push(
+        row("swap", "Swap my turn", "PowerFund.signIn()", "Sign in to trade payout turns")
       );
     }
     general.push(row("share", "Share fund status", "PowerFund.openShareModal()"));

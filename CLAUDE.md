@@ -1142,6 +1142,138 @@ was tightened to name the formatted day and reject `Invalid`.
   nothing at all.
 - Both `received_at` and `received_note` are in the backup and restored.
 
+## Turn swaps — *palit ng turno* (migration 013)
+
+Two members agree to trade payout positions. The mockups have **no swap flow
+at all** and explicitly scope post-setup member actions to EditMemberNames +
+ReorderPayout (`canvas.json`, `gap5-no-member-changes-notes`), so this is a
+**New Feature beyond the design** — flagged for UI/UX QA as new design, not a
+port.
+
+### The bug this started as
+
+**"Reorder payout order" had never worked.** `members.member_order` is
+`not null unique` (`schema.sql`), and the app swapped a pair with two
+sequential single-row updates. The first one always collides:
+
+```
+update members set member_order = 2 where id = <A>;
+ERROR:  duplicate key value violates unique constraint "members_member_order_key"
+DETAIL:  Key (member_order)=(2) already exists.
+```
+
+A single `case` statement fails **identically** — Postgres checks a
+non-deferrable unique constraint per ROW, not per statement. Verified on a
+real Postgres 16 before writing any code. Three things had to line up for this
+to survive: the smoke harness mocks the network; the reorder test rendered the
+screen and **never clicked an arrow**; and `tests/sql/run.sh`'s stub of
+`members` had **omitted the `unique`** that `schema.sql` declares. The stub now
+carries it, the test clicks the arrow, and a check asserts the two-write form
+still collides — so nobody can "simplify" the RPC away.
+
+So the swap flow is not an addition on top of a working reorder. Fixing the
+reorder IS the first half of it, and both halves now go through the same
+deferred-constraint statement inside a function.
+
+### The two product decisions, taken by the owner
+
+Put to them rather than invented, per rule 9 — both are money-and-permissions
+calls.
+
+- **Both members agree, then it applies.** A member asks, the counterparty
+  accepts, and the order moves. The treasurer is **not a step**, and
+  `pf_accept_swap` refuses them explicitly: a swap neither member agreed to is
+  the thing this flow exists to prevent. The treasurer sees it in the roster
+  and the activity log.
+- **A round that is COLLECTING may be swapped.** "I need mine this month, take
+  mine next month" is what *palit ng turno* is for; refusing it would remove
+  the reason the feature exists. The money collected stays with the round —
+  only who receives it changes.
+
+**RELEASED is the one refusal**, both directions, and for the treasurer too. A
+member whose round is paid out has had their ₱30,000; moving them to a later
+round would pay them twice and leave the other member with nothing. Checked at
+request time AND again at accept time, because a round can be released in
+between.
+
+### The gate is a new axis, again
+
+Not `unlocked`, not `isTreasurerAccount()` — **being one of the two members**.
+`canSwapTurns()` combines a linked account (`editableMember()`, never
+`localStorage.pf_my_member_id`), a database carrying 013, a round of your own
+left to trade, and at least one counterparty who could answer. Every handler is
+checked as well as every row, because they are exported on `PowerFund`.
+
+**Only LINKED members are offered as counterparties.** `pf_accept_swap` keys on
+`pf_member_id()`, so asking an unlinked member produces a request nobody can
+answer — worse than no button. The treasurer's reorder is the route for those.
+
+### Three things in the migration worth not undoing
+
+- **The unique constraint is looked up BY DEFINITION**, not assumed to be
+  called `members_member_order_key`. `schema.sql` declares it inline, so the
+  name is Postgres's own choice and a hand-built database may differ —
+  dropping the wrong constraint would be silent and bad.
+- **`from_round` / `to_round` are stored as they were WHEN ASKED**, and
+  re-checked on accept. The order can change in between (another swap lands,
+  or the treasurer reorders), and a request that then applied would trade
+  different rounds than the two people agreed to. That request is **stale**.
+- **The stale branch RETURNS rather than raising, and that is the point.** My
+  first version marked the row stale and then raised — which **rolled back the
+  very row it had just marked**, leaving it `pending` with an Accept button
+  that could never work and the partial unique index still occupied. It is the
+  one refusal here that has to PERSIST something, so it cannot be an
+  exception. `acceptSwap()` in `js/app.js` therefore checks `status` and
+  reports a stale answer as a failure: a successful call that moved nothing
+  must not read as "Turns swapped". Caught by `tests/sql/run.sh`.
+
+### The guard exemption, and why it is a GUC
+
+`pf_members_guard()` pins `member_order` for anyone who is not the treasurer,
+and the trigger fires even for a security-definer caller — `pf_is_treasurer()`
+inside it reads the CALLER's `auth.uid()`. So without an exemption,
+`pf_accept_swap` would be refused *"Only the treasurer can change the payout
+order"* for the ordinary member it exists to serve.
+
+Signalled by `pf.swap_ok`, a **transaction-local** GUC that only
+`pf_accept_swap` sets, with every other column pinned — exactly the shape of
+010's claim exemption, whose comment already argues this. A browser cannot set
+it: PostgREST exposes only functions in the public schema, and `set_config`
+lives in `pg_catalog`. Transaction-local so it cannot leak into the next
+request on a pooled connection; a test asserts it does not survive the
+transaction, and three more assert the exemption loosened nothing else.
+
+### Logged in the database, not by the app
+
+`pf_accept_swap` and `pf_swap_order` both write their `activity_log` entry
+inside the same transaction. A swap is the one write that moves everybody's
+turn, and the log is the only place the group can see that it was mutual — so
+it must not be possible for the order to move and the record to be missing.
+`moveMember()` no longer logs; doing both would double the entry.
+
+### UI (no approved mockup)
+
+- **Home, purple** for an incoming ask — the same family as every other
+  "waiting on a person" surface (`.my-status-pending`, `.acct-pill.wait`, the
+  Insights "In review" slice). Not amber: amber here means the fund's money
+  needs something doing about it, and the fund is fine either way. Not green:
+  nothing has happened yet.
+- **The outgoing side is deliberately quiet** — a plain card, because the
+  viewer has already acted and is waiting on somebody else. Without it a
+  member who has asked has no way to tell whether the request went anywhere,
+  and no way to withdraw it.
+- **Menu → General → Swap my turn**, beside My Payout QR Code, with the same
+  sign-in-first fallback row.
+- The sheet spells out **both sides** of the trade before Send, names who can
+  accept, and says both members keep paying every cycle either way — the thing
+  somebody would reasonably worry about.
+- **One live request per member.** 013's partial unique index enforces it and
+  `pf_request_swap` supersedes the old one; the sheet warns in amber before the
+  press, because a new ask withdraws the one already out.
+- The `swap` icon is **two straight opposing arrows**. The first version curved
+  one arrow around the other — the conventional shape, and illegible at the
+  14px it renders at. Measured in a capture, not guessed.
+
 ## Migrations
 
 Run in the Supabase SQL editor, in order. `006` also needs a one-off
@@ -1197,6 +1329,18 @@ linked.
 `012_rollback.sql`. Until it runs, the confirm button writes a column that
 does not exist and `requireRows()` reports the refusal — it does not silently
 appear to work.
+
+`013_turn_swaps.sql` — the deferrable `member_order` constraint,
+`swap_requests`, `pf_request_swap` / `pf_accept_swap` / `pf_decline_swap` /
+`pf_cancel_swap` / `pf_swap_order`, and the amended members guard.
+**Not applied yet.** Validated on a real Postgres 16 by `tests/sql/run.sh`
+(31 assertions, including the rollback), which caught the stale-branch bug
+above. Ships with `013_rollback.sql`, which deliberately leaves the constraint
+DEFERRABLE — making it deferrable takes nothing away, and reverting it would
+re-break the plain two-write swap. Until 013 runs, `getSwapRequests()` answers
+`[]`, `swapsAvailable()` is false and the feature is simply not offered; the
+treasurer's reorder names the migration rather than failing with a raw
+constraint error.
 
 Every migration from 010 on is wrapped in `begin; … commit;`. Not decoration:
 without it a `raise` in 011's preflight aborted one statement and psql
@@ -1640,6 +1784,12 @@ bash tests/sql/run.sh         # RLS on a real Postgres 16. no browser
 python3 -m http.server 8791 & # then:
 PF_CHROMIUM=/opt/pw-browsers/chromium-1194/chrome-linux/chrome node tests/smoke.js
 ```
+
+A fifth lesson, from 013: **the harness's own stub had drifted from
+`schema.sql`.** `members.member_order` is declared `unique` there and was not
+in the stub, which is the single reason this suite could not see that the
+app's pair swap had never worked. When adding a column or a constraint to
+`schema.sql`, add it to the stub in the same change.
 
 `tests/sql/run.sh` is the only suite that can see an RLS policy at all — the
 smoke harness mocks the network. It stands up a throwaway PostgreSQL 16

@@ -20,7 +20,7 @@ window.PFViews.home = function (ctx) {
     sparkline, C,
     formatDateTime, overdueRows, activityTimeLabel, isWide, identityLocked,
     payoutOwner, pesoWhole, myUnconfirmedPayout, receiptAckRound, receiptAckNote,
-    payoutDateText
+    payoutDateText, canSwapTurns, myIncomingSwaps, myOutgoingSwap, memberName
   } = ctx;
   // Cycles due so far — the denominator behind each member's standing ring.
   // Set when the pinned action renders, so the view can reserve room for it.
@@ -321,6 +321,60 @@ window.PFViews.home = function (ctx) {
     </div>`;
   }
   S.receiptAck = section();
+
+  /* ---- Turn swaps: somebody is waiting on YOUR answer (migration 013) ----
+   *
+   * An incoming request is the most time-sensitive personal item on Home:
+   * another member has asked to trade payout turns and cannot act until you
+   * answer. It sits with the other personal cards, not in the treasurer's
+   * attention queue — the treasurer is deliberately not part of this decision.
+   *
+   * The OUTGOING side renders here too, quietly: without it a member who has
+   * asked has no way to tell whether the request went anywhere, and no way to
+   * withdraw it.
+   *
+   * NO approved mockup — new design, flagged as such for UI/UX QA.
+   */
+  (myIncomingSwaps || []).forEach((r) => {
+    const who = memberName(r.from_member_id) || "A member";
+    html += `<div class="swap-ask">
+      <p class="swap-ask-title">${icon("swap", 16)}<span><b>${escapeHtml(
+      who
+    )}</b> wants to swap turns with you</span></p>
+      <p class="swap-ask-body">They would take <b>Round ${
+        r.to_round
+      }</b> (yours) and you would take <b>Round ${r.from_round}</b>.${
+      r.note ? ` <span class="swap-ask-why">“${escapeHtml(r.note)}”</span>` : ""
+    }</p>
+      <p class="swap-ask-fine">Only you can answer this — the treasurer cannot
+        accept it for you. You both keep paying every cycle either way.</p>
+      <div class="swap-ask-btns">
+        <button type="button" class="modal-btn-secondary" onclick="PowerFund.declineSwap('${inlineArg(
+          r.id
+        )}')" ${busy ? "disabled" : ""}>Decline</button>
+        <button type="button" class="modal-btn-primary" onclick="PowerFund.acceptSwap('${inlineArg(
+          r.id
+        )}')" ${busy ? "disabled" : ""}>${
+      busy ? "Working…" : "Accept swap"
+    }</button>
+      </div>
+    </div>`;
+  });
+  if (myOutgoingSwap) {
+    const r = myOutgoingSwap;
+    html += `<div class="swap-waiting">
+      <p class="swap-waiting-line">${icon("clock", 14)}<span>Waiting for
+        <b>${escapeHtml(
+          memberName(r.to_member_id) || "them"
+        )}</b> to answer your swap request — Round ${r.from_round} ↔ Round ${
+      r.to_round
+    }.</span></p>
+      <button type="button" class="swap-withdraw" onclick="PowerFund.cancelSwap('${inlineArg(
+        r.id
+      )}')" ${busy ? "disabled" : ""}>Withdraw request</button>
+    </div>`;
+  }
+  S.swaps = section();
 
   S.payoutNudge = section();
 
@@ -955,6 +1009,7 @@ window.PFViews.home = function (ctx) {
       S.rejected +
       (unlocked ? S.release + S.attention : "") +
       S.receiptAck +
+      S.swaps +
       S.myStatus +
       // S.complete sits AFTER the personal card for both roles. It used to be
       // pulled to the front for a treasurer by the rule above — but that rule
@@ -1114,7 +1169,7 @@ window.PFViews.home = function (ctx) {
       <aside class="home-rail">
         ${S.rejected}${unlocked ? `${S.release}${S.attention}` : ""}${
           S.receiptAck
-        }${S.myStatus}${S.complete}${S.payoutNudge}${overview}${quick}
+        }${S.swaps}${S.myStatus}${S.complete}${S.payoutNudge}${overview}${quick}
       </aside>
     </div>` +
     S.cta +

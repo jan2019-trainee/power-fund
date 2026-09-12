@@ -104,8 +104,14 @@ const ACTIVITY_LOG = [
 
 const SETTINGS = { id: 1, treasurer_pin: null, qr_code_url: null };
 
+// Migration 013. Empty by default: a pending swap is an attention card on
+// somebody's Home, so leaving one here would front dozens of unrelated checks.
+// The swap tests supply their own.
+const SWAP_REQUESTS = [];
+
 const TABLE_DATA = {
   members: MEMBERS,
+  swap_requests: SWAP_REQUESTS,
   cycles: CYCLES,
   contributions: CONTRIBUTIONS,
   payouts: PAYOUTS,
@@ -128,4 +134,4 @@ async function installMocks(page) {
   await page.route('**/realtime/v1/**', (route) => route.abort());
 }
 
-module.exports = { MEMBERS, CYCLES, PAYOUTS, CONTRIBUTIONS, ACTIVITY_LOG, SETTINGS, TABLE_DATA, installMocks };
+module.exports = { MEMBERS, CYCLES, PAYOUTS, SWAP_REQUESTS, CONTRIBUTIONS, ACTIVITY_LOG, SETTINGS, TABLE_DATA, installMocks };

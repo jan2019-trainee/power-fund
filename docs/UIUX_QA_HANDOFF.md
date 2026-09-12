@@ -49,6 +49,8 @@ them as new design.** Where they borrow, they borrow
 | **Payment schedule** | Menu → Group → Payment schedule (admin only) |
 | **No-treasurer-PIN confirm** | A PIN-gated action on a fund with no treasurer PIN |
 | **Received ✓** (payout receipt confirmation) | Home, signed in as the member a released payout was sent to |
+| **Swap my turn** (*palit ng turno*) | Menu → General → Swap my turn, signed in as a member whose round is not paid out |
+| **Swap request received** | Home, signed in as the member somebody asked |
 
 ---
 
@@ -136,6 +138,51 @@ most**, so read it as a receipt rather than as a chore.
   else.
 - **Once only.** There is no un-acknowledging; only the treasurer can clear
   it, and only by Undo Release, which clears the whole release.
+
+### Turn swaps — *palit ng turno* (new design — no mockup)
+
+Migration 013. Two members trade payout positions. **Both of the rules below
+are owner decisions, not UX choices** — a finding that would change either is
+a product question, not a fix:
+
+- **Both members agree and it applies.** The treasurer is not a step and
+  deliberately *cannot* accept on their behalf.
+- **A round that is collecting may still be swapped.** Only a RELEASED round
+  is refused, in both directions and for the treasurer too.
+
+- **Reach it:** Menu → General → **Swap my turn** as a linked member whose
+  round is not paid out. The incoming ask is on the counterparty's Home.
+  Captures: `swap-{mobile,desktop}-{incoming,waiting}`, `swap-mobile-ask`,
+  `swap-mobile-ask-picked`.
+- **Purple for the incoming ask**, deliberate: it is the "waiting on a person"
+  family (`.my-status-pending`, `.acct-pill.wait`, Insights "In review"), not
+  amber (which here means the fund's money needs something doing) and not
+  green (nothing has happened yet).
+- **The outgoing card is deliberately quiet.** The viewer has already acted;
+  it exists so they can see the request went somewhere and withdraw it.
+- **States:** nobody chosen (Send disabled) · chosen, with both sides of the
+  trade spelled out · an amber warning that a new ask withdraws the one
+  already out · incoming ask · waiting on an answer · a **stale** answer,
+  which is a successful call that moved nothing and must read as a failure ·
+  a database without 013, where the whole feature is absent rather than
+  offered.
+- **"Accept swap" is the amber primary.** Amber is the app's money-movement
+  colour and accepting does change who receives ₱30,000 — but it is the one
+  place a member presses amber without sending money, so say if it reads
+  wrong.
+- **Only LINKED members are offered as counterparties**, because
+  `pf_accept_swap` keys on the account — an unlinked member could never
+  answer. Not a bug if somebody is missing from the picker.
+- `PowerFund.acceptSwap(id)` from the console must do nothing for anyone but
+  the member who was asked, the treasurer included.
+
+### The treasurer's Reorder payout order — now actually works
+
+Worth re-testing rather than assuming, because **it never worked before**:
+`member_order` is `unique` and the app wrote the swap as two sequential
+updates, so the first always collided. The arrow now calls one RPC. Check that
+an arrow tap really reorders, that the end arrows stay disabled, and that a
+paid-out round refuses with a reason rather than a raw database error.
 
 ### Sign-in / first-run prompt
 - **Skippable vs not.** `optional` shows **Not now**; `required` must not.

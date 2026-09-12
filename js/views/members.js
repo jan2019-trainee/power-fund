@@ -90,10 +90,14 @@ function inlineArgSafe(v) {
 function memberRow(m, ctx, cyclesDueSoFar, isWide) {
   const {
     state, rounds, escapeHtml, icon, memberAvatar, memberStanding, getPayout,
-    selectedMemberId, C
+    selectedMemberId, C, memberPayout
   } = ctx;
 
-  const paidOut = getPayout(m.member_order).released;
+  // memberPayout, NOT getPayout(m.member_order): this drives the "Paid out"
+  // tag and memberStanding()'s ring, and the round at a member's current
+  // position is not the round they were paid. After a turn swap the two
+  // differ, and this credited the wrong member with ₱30,000.
+  const paidOut = !!memberPayout(m.id);
   const standing = memberStanding(m.id, cyclesDueSoFar, paidOut);
   const open = selectedMemberId === m.id;
   const curRound = C.currentRound(state.payouts, state.contributions);
@@ -186,7 +190,7 @@ function memberRow(m, ctx, cyclesDueSoFar, isWide) {
  * "Rounds 3–5 — not started".
  */
 function roundSummaries(m, ctx) {
-  const { state, rounds, escapeHtml, C } = ctx;
+  const { state, rounds, escapeHtml, C, roundRecipient } = ctx;
   const curRound = C.currentRound(state.payouts, state.contributions);
   let out = "";
 
@@ -201,7 +205,13 @@ function roundSummaries(m, ctx) {
     }
 
     if (r < curRound) {
-      const gotPayout = getPayoutReleased(rounds, r) && m.member_order === r;
+      // The RECORD decides who received it, not this member's current
+      // position. Gated on released, so the payout row always exists here —
+      // and after a turn swap the position credits the wrong member with
+      // ₱30,000 and tells the real recipient they never got it.
+      const got = roundRecipient(r);
+      const gotPayout =
+        !!got && got.id === m.id && getPayoutReleased(rounds, r);
       out += `<div class="round-line">
         <b>Round ${r}</b> — ${paid} of ${C.CYCLES_PER_ROUND} paid${
         gotPayout ? " · received the payout" : ""
@@ -368,8 +378,13 @@ function payoutDest(m, ctx) {
 
 /** Desktop's right-hand pane: the same record, with room for the numbers. */
 function memberDetail(m, ctx, cyclesDueSoFar) {
-  const { state, unlocked, escapeHtml, memberAvatar, memberStanding, getPayout, C } = ctx;
-  const paidOut = getPayout(m.member_order).released;
+  const { state, unlocked, escapeHtml, memberAvatar, memberStanding, getPayout, C,
+    memberPayout } = ctx;
+  // memberPayout, NOT getPayout(m.member_order): this drives the "Paid out"
+  // tag and memberStanding()'s ring, and the round at a member's current
+  // position is not the round they were paid. After a turn swap the two
+  // differ, and this credited the wrong member with ₱30,000.
+  const paidOut = !!memberPayout(m.id);
   const standing = memberStanding(m.id, cyclesDueSoFar, paidOut);
   const total = C.totalPerMember(state.contributions, m.id);
   const overdue = C.memberOverdueCount(state.contributions, state.cycles, m.id);

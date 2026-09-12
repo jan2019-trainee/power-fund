@@ -52,5 +52,41 @@ window.APP_CONFIG = {
   // 011 is simply a gate in front of rules Postgres is not enforcing yet. So
   // this is the reversible half — flip it back to "optional" and redeploy if
   // anything goes wrong.
-  AUTH_MODE: "required",
+  // ===================================================================
+  // DEMO BRANCH — this is `demo/group-walkthrough`, NOT main.
+  // ===================================================================
+  //
+  // "optional", which IS what was asked for — but it could not have worked
+  // against the live project, and that is worth knowing:
+  //
+  //   * MIGRATION 011 IS APPLIED there, and it revokes `anon` entirely. Every
+  //     policy is `to authenticated`. So "optional" while SIGNED OUT reads
+  //     nothing at all — the demo would be a load error, not an app.
+  //   * "optional" while SIGNED IN sets accountMemberId, which sets
+  //     `identityLocked`. The who-am-I picker is hidden AND
+  //     openWhoAmIPicker() refuses. So you still could not switch member.
+  //
+  // DEMO_MODE closes both: the data never leaves the browser, so there is no
+  // RLS to satisfy; and js/demo-db.js FAKES a session for whichever member the
+  // DEMO bar names, so switching is one dropdown and no Google account.
+  //
+  // Why "optional" and not "off": half the app is gated on a LINKED ACCOUNT —
+  // Received ✓, reporting a payout as not arrived, My payout details, turn
+  // swaps. With auth off those render inert, and the newest half of the app
+  // could be shown but never driven.
+  AUTH_MODE: "optional",
+
+  // ===================================================================
+  // DEMO_MODE — the whole point of this branch.
+  //
+  // true  -> js/demo-db.js REPLACES window.DB with an in-browser store
+  //          (localStorage). No Supabase, no network, no auth. Every member
+  //          is switchable, every action writes, nothing touches the real
+  //          fund's records.
+  // false -> the app is exactly main. The real database, the real rules.
+  //
+  // NEVER merge this branch to main with this true. The banner across the top
+  // of the app exists so nobody in the room mistakes it for the live fund.
+  // ===================================================================
+  DEMO_MODE: true,
 };

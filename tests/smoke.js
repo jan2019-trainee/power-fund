@@ -89,10 +89,16 @@ async function serve(page, data, opts) {
   // Playwright matches the most recently registered route first.
   await page.route("**/js/config.js", async (route) => {
     const res = await route.fetch();
-    const body = (await res.text()).replace(
-      /AUTH_MODE:\s*"[a-z]*"/,
-      'AUTH_MODE: "off"'
-    );
+    // DEMO_MODE is pinned OFF for the same reason AUTH_MODE is pinned: it is a
+    // deploy-time decision, and a test that inherits it stops testing the app.
+    // On the demo branch it ships TRUE, and without this line js/demo-db.js
+    // replaced window.DB — so this whole suite was exercising the demo store
+    // against the demo seed. It surfaced as a strict-mode violation (the demo
+    // seed has BOTH a review queue and an overdue cycle, so `.attention-more`
+    // matched two buttons), which is a lucky way to find out.
+    const body = (await res.text())
+      .replace(/AUTH_MODE:\s*"[a-z]*"/, 'AUTH_MODE: "off"')
+      .replace(/DEMO_MODE:\s*true/, "DEMO_MODE: false");
     return route.fulfill({
       status: 200,
       contentType: "application/javascript",
@@ -1797,10 +1803,15 @@ async function withAuthMode(page, mode, opts) {
   const signedIn = !!(opts && opts.signedIn);
   await page.route("**/js/config.js", async (route) => {
     const res = await route.fetch();
-    const body = (await res.text()).replace(
-      /AUTH_MODE:\s*"[a-z]*"/,
-      `AUTH_MODE: "${mode}"`
-    );
+    // DEMO_MODE pinned off HERE TOO, not only in serve(). This route is
+    // registered later and Playwright matches the most recent first, so
+    // serve()'s pin is overridden — every test that calls withAuthMode() was
+    // therefore running against the demo store. The same shape as the note in
+    // CLAUDE.md: a test that routes config.js by hand gets none of the
+    // defaults and must set them itself.
+    const body = (await res.text())
+      .replace(/AUTH_MODE:\s*"[a-z]*"/, `AUTH_MODE: "${mode}"`)
+      .replace(/DEMO_MODE:\s*true/, "DEMO_MODE: false");
     return route.fulfill({ status: 200, contentType: "application/javascript", body });
   });
   // Nothing should reach the auth endpoints; fail loudly rather than hanging.

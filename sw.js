@@ -21,7 +21,7 @@
  * ------------------------------------------------------------------------- */
 
 /* Bump this string on every deploy that should invalidate the shell cache. */
-const CACHE = "pf-v58";
+const CACHE = "pf-v58-demo1";
 
 const PRECACHE = [
   "/",
@@ -31,6 +31,12 @@ const PRECACHE = [
   "/js/config.js",
   "/js/calculations.js",
   "/js/database.js",
+  // DEMO BRANCH. Precached so a walkthrough works with no signal at all,
+  // which is the likeliest condition for one. Both are inert unless
+  // APP_CONFIG.DEMO_MODE is true, so this costs a normal build two small
+  // files and changes nothing about it.
+  "/js/demo-seed.js",
+  "/js/demo-db.js",
   "/js/views/home.js",
   "/js/views/rounds.js",
   "/js/views/members.js",

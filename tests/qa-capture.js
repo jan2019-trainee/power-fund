@@ -179,10 +179,11 @@ async function serve(page, data, authMode) {
     return route.fulfill({
       status: 200,
       contentType: "application/javascript",
-      body: (await res.text()).replace(
-        /AUTH_MODE:\s*"[a-z]*"/,
-        `AUTH_MODE: "${authMode || "off"}"`
-      ),
+      // DEMO_MODE pinned off for the same reason as AUTH_MODE: a capture must
+      // photograph the app, not the demo build's seed.
+      body: (await res.text())
+        .replace(/AUTH_MODE:\s*"[a-z]*"/, `AUTH_MODE: "${authMode || "off"}"`)
+        .replace(/DEMO_MODE:\s*true/, "DEMO_MODE: false"),
     });
   });
   await page.route("**/rest/v1/**", (route) => {
@@ -1076,8 +1077,12 @@ async function tabs(page, prefix, list) {
       const q = await browser.newPage({ viewport: vp });
       await q.route("**/js/config.js", async (r) => {
         const res = await r.fetch();
+        // Routes config.js by hand, so it gets NEITHER of open()'s pins and
+        // has to set both itself — the demo branch ships DEMO_MODE true.
         return r.fulfill({ status: 200, contentType: "application/javascript",
-          body: (await res.text()).replace(/AUTH_MODE:\s*"[a-z]*"/, 'AUTH_MODE: "off"') });
+          body: (await res.text())
+            .replace(/AUTH_MODE:\s*"[a-z]*"/, 'AUTH_MODE: "off"')
+            .replace(/DEMO_MODE:\s*true/, "DEMO_MODE: false") });
       });
       await q.addInitScript(() => {
         try {

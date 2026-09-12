@@ -33,6 +33,11 @@
   <script src="js/config.js"></script>
   <script src="js/calculations.js"></script>
   <script src="js/database.js"></script>
+  <!-- DEMO BRANCH ONLY (demo/group-walkthrough). Loaded AFTER database.js so
+       demo-db.js can replace window.DB, and BEFORE app.js so the app never
+       sees the real one. Both are inert unless APP_CONFIG.DEMO_MODE is true. -->
+  <script src="js/demo-seed.js"></script>
+  <script src="js/demo-db.js"></script>
   <script src="js/views/home.js"></script>
   <script src="js/views/rounds.js"></script>
   <script src="js/views/members.js"></script>

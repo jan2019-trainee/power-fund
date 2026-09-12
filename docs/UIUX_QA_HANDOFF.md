@@ -48,6 +48,7 @@ them as new design.** Where they borrow, they borrow
 | **Transfer treasurer role** | Menu → Security → Transfer treasurer role (admin only) |
 | **Payment schedule** | Menu → Group → Payment schedule (admin only) |
 | **No-treasurer-PIN confirm** | A PIN-gated action on a fund with no treasurer PIN |
+| **Received ✓** (payout receipt confirmation) | Home, signed in as the member a released payout was sent to |
 
 ---
 
@@ -99,6 +100,42 @@ The 30 due dates, editable from the app for the first time. Borrows the
 - Reachable only by a Google-verified treasurer. A PIN-unlocked member must
   not see the row — and `PowerFund.openScheduleModal()` from the console must
   do nothing for them.
+
+### Received ✓ — the payout's second side (new design — no mockup)
+
+Migration 012. The payout record was entirely one-sided — released, amount,
+recipient, receipt, released_by are all the treasurer's — while a member's
+₱1,000 contribution needs a proof screenshot AND the treasurer's confirmation.
+This is the recipient saying the money arrived. **It protects the treasurer
+most**, so read it as a receipt rather than as a chore.
+
+- **Reach it:** sign in as the member whose released round has no
+  `received_at`. In the fixtures that is round 1; point
+  `recipient_member_id` at whoever your session owns.
+- **Green, not amber.** Deliberate: the amber family on Home already means
+  "the fund's money needs something doing about it". Money arriving for *you*
+  is not that, and a fund that never gets the tap is not broken.
+- **Two taps.** The card shows one button; it opens an inline panel with an
+  optional one-line note and Confirm / Cancel. Not a modal — the whole point
+  is that it costs one look and one press.
+- **States:** offered · panel open · saving · the record line afterwards ·
+  the database refusing it.
+- **The record line is read by the whole group**, on the Rounds accordion:
+  "Awaiting Sarah's confirmation that it arrived." before, "Received by Sarah
+  on <date> — <note>" after. An absence has to read as an absence.
+- **A round stays *Completed* while unconfirmed.** The money genuinely left.
+  This is a receipt, not a gate — one member forgetting to tap must not freeze
+  the fund. If that reads wrong on screen, it is a copy finding, not a
+  lifecycle one.
+- **The gate is being the RECIPIENT** — neither `unlocked` nor
+  `isTreasurerAccount()`, and never the who-am-I preference. A different axis
+  from every other permission in the app, enforced by 012's policy on
+  `recipient_member_id`. The treasurer cannot acknowledge on a member's
+  behalf, by design: a receipt somebody else can sign is not a receipt.
+  `PowerFund.openReceiptAck(1)` from the console must do nothing for anyone
+  else.
+- **Once only.** There is no un-acknowledging; only the treasurer can clear
+  it, and only by Undo Release, which clears the whole release.
 
 ### Sign-in / first-run prompt
 - **Skippable vs not.** `optional` shows **Not now**; `required` must not.
@@ -240,7 +277,7 @@ Please check these before filing, they have each been argued out:
 
 ---
 
-## 4b. One observation I found while testing, and did not change
+## 4b. Two observations I found while testing, and did not change
 
 **The destructive-confirm dialog does not focus its PIN field.** Every
 irreversible action (Reset all data, Restore backup, Undo a payout release,
@@ -253,6 +290,24 @@ change, but *Reset all data* deliberately makes you type `RESET` **before** the
 PIN, and focusing the PIN there would put the cursor in the wrong field of a
 two-step gate. That is a UX call about the shared dialog, which is this pass's
 call to make, not mine. Flagging it as an observation, unrated.
+
+**The round accordion's HEADER names the member at that payout position; the
+release record names the recorded recipient.** They are written from different
+sources — the header from `member_order`, the record from
+`payouts.recipient_member_id` — and normally agree, because release stamps the
+recipient from whoever sits at that position. Reorder the roster *after* a
+release and they diverge: `ack-mobile-received.png` shows "Round 1 — Regine"
+over a record reading "Payout released to **Sarah**" and "Received by
+**Sarah**". That capture's fixture forces the divergence deliberately, to
+prove the new receipt line follows the recorded recipient rather than the
+order — which is the property migration 012's policy depends on.
+
+I did not change the header. It is a pre-existing inconsistency, it is about
+who received ₱30,000 (so a fix is a money-display decision, not a styling
+one), and "name the recorded recipient once a payout exists, the position
+otherwise" is the obvious answer but not mine to take in passing. Flagging it
+as an observation, unrated — and noting that on the live fund the two agree,
+because nobody has reordered a released round.
 
 ---
 

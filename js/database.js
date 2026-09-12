@@ -660,6 +660,37 @@ window.DB = (function () {
   }
 
   /**
+   * The RECIPIENT confirms they received their payout (migration 012).
+   *
+   * `received_at` is sent as a marker only — pf_payouts_guard() overwrites it
+   * with now() server-side, because a client-chosen timestamp on a financial
+   * acknowledgement is worthless as evidence. The value here just has to be
+   * non-null so the guard sees a confirmation being made.
+   *
+   * requireRows(), not `.single()`: the guard refuses somebody else's payout
+   * by RAISING, but RLS refuses a row that is not yours by HIDING it — the
+   * reply is [] with no error. Without this a member tapping Confirm on a
+   * round that is not theirs would be told it worked.
+   */
+  async function confirmPayoutReceived(roundNumber, note) {
+    const res = await client
+      .from("payouts")
+      .update({
+        received_at: new Date().toISOString(),
+        received_note: (note || "").trim() || null,
+      })
+      .eq("round_number", roundNumber)
+      .select();
+    unwrap(res, "Couldn't confirm the payout");
+    return requireRows(
+      res,
+      "Couldn't confirm the payout",
+      "the database refused it. Only the member the payout was sent to can " +
+        "confirm receiving it, and only once."
+    );
+  }
+
+  /**
    * Mark a round as "started" (its payouts row gets a started_at timestamp).
    * The `.is("started_at", null)` guard makes this safe to call twice — a
    * second call updates zero rows, so a round can never be started twice.
@@ -1179,6 +1210,12 @@ window.DB = (function () {
         if (p.recipient_name !== undefined) extra.recipient_name = p.recipient_name || null;
         if (p.receipt_url !== undefined) extra.receipt_url = p.receipt_url || null;
         if (p.released_by !== undefined) extra.released_by = p.released_by || null;
+        // Migration 012. A v1/v2 file has neither key, so those rows keep
+        // whatever is on the row rather than being nulled — the same rule the
+        // v1 member-row restore follows.
+        if (p.received_at !== undefined) extra.received_at = p.received_at || null;
+        if (p.received_note !== undefined)
+          extra.received_note = p.received_note || null;
         if (!Object.keys(extra).length) continue;
         const res = await client
           .from("payouts")
@@ -1428,6 +1465,7 @@ window.DB = (function () {
     deletePaymentAsset,
     getPayouts,
     updatePayout,
+    confirmPayoutReceived,
     startRound,
     getActivityLog,
     addActivityLog,

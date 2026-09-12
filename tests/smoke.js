@@ -3136,6 +3136,236 @@ async function extraTreasurer(browser, errors) {
   await solo.close();
 }
 
+/** "Received ✓" — the recipient confirming their own payout arrived
+ *  (migration 012). NO approved mockup; the behaviour is what is asserted.
+ *
+ *  The property that matters is the GATE: it is neither `unlocked` nor
+ *  `isTreasurerAccount()` but BEING THE RECIPIENT, a different axis from
+ *  every other permission in the app — and 012's policy keys on
+ *  `recipient_member_id`, so the UI must agree with Postgres or it offers a
+ *  button that is refused.
+ */
+async function receiptAck(browser, errors) {
+  // Sarah (index 1) is the recipient AND the signed-in account. Regine
+  // (index 0) is the flagged treasurer, so this also proves the card is not
+  // a treasurer surface.
+  const roster = () => {
+    const m = rosterWithEmails();
+    m[1].auth_user_id = FAKE_USER_ID;
+    return m;
+  };
+  const payoutsTo = (member, receivedAt) =>
+    M.PAYOUTS.map((p) =>
+      p.round_number === 1
+        ? {
+            ...p,
+            released: true,
+            released_on: "2026-09-20",
+            amount: 30000,
+            recipient_member_id: member.id,
+            recipient_name: member.name,
+            received_at: receivedAt || null,
+            received_note: receivedAt ? "GCash, received in full" : null,
+          }
+        : p
+    );
+
+  // ---- the recipient's own view -------------------------------------------
+  const page = await browser.newPage({ viewport: { width: 430, height: 1000 } });
+  page.on("pageerror", (e) => errors.push(`receipt-ack: ${e}`));
+  const members = roster();
+  const payouts = payoutsTo(members[1]);
+  await serve(page, { ...M.TABLE_DATA, members, payouts });
+  const writes = [];
+  await page.route("**/rest/v1/payouts**", (r) => {
+    const req = r.request();
+    // Fulfilled, never continued: this route is registered AFTER serve()'s
+    // catch-all so it wins, and continue() would go to the real static server.
+    if (req.method() === "GET") {
+      return r.fulfill({
+        status: 200, contentType: "application/json", body: JSON.stringify(payouts),
+      });
+    }
+    let body = {};
+    try { body = JSON.parse(req.postData() || "{}"); } catch (e) {}
+    writes.push({ url: req.url(), body });
+    // A real PATCH answers with the updated row; requireRows() treats [] as a
+    // refusal, so answering "[]" here would test the error path instead.
+    return r.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([{ round_number: 1, ...body }]),
+    });
+  });
+  const logs = [];
+  await page.route("**/rest/v1/activity_log**", (r) => {
+    const req = r.request();
+    if (req.method() !== "GET") {
+      try { logs.push(JSON.parse(req.postData() || "{}")); } catch (e) {}
+    }
+    return r.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(req.method() === "GET" ? M.ACTIVITY_LOG : []),
+    });
+  });
+  await withAuthMode(page, "required", { signedIn: true, email: "sarah@example.com" });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
+
+  check(
+    "receipt-ack/the recipient is offered the card",
+    (await page.locator(".ack-card .ack-cta").count()) === 1,
+    await page.locator(".ack-card").count() + " ack-card(s)"
+  );
+  // It must not open the panel on arrival — the note is optional and the tap
+  // is the deliberate act.
+  check(
+    "receipt-ack/the panel is closed until asked for",
+    (await page.locator(".ack-panel").count()) === 0
+  );
+
+  await page.locator(".ack-card .ack-cta").click();
+  await page.waitForTimeout(400);
+  check(
+    "receipt-ack/tapping opens the note panel",
+    (await page.locator(".ack-panel .ack-input").count()) === 1
+  );
+  await page.locator(".ack-panel .ack-input").fill("GCash, received in full");
+  await page.locator(".ack-panel .modal-btn-primary").click();
+  await page.waitForTimeout(1500);
+
+  const patch = writes.find((w) => w.body && "received_at" in w.body);
+  check(
+    "receipt-ack/confirming writes received_at for that round only",
+    !!patch && /round_number=eq\.1/.test(patch.url),
+    patch ? patch.url : "(no PATCH captured)"
+  );
+  check(
+    "receipt-ack/the note is carried, and nothing else is touched",
+    !!patch &&
+      patch.body.received_note === "GCash, received in full" &&
+      Object.keys(patch.body).sort().join(",") === "received_at,received_note",
+    patch ? JSON.stringify(patch.body) : "(none)"
+  );
+  // The activity entry carries NO amount: the money moved at release and was
+  // logged there. A figure here would make a release-and-confirm read as
+  // ₱60,000 leaving the fund — the same bug doUnmarkPayoutReleased avoids.
+  const entry = logs.find((l) => l && /confirmed receiving/i.test(l.message || ""));
+  check(
+    "receipt-ack/the log names the member and carries NO amount",
+    !!entry &&
+      /Sarah/.test(entry.message) &&
+      (entry.amount === null || entry.amount === undefined) &&
+      Number(entry.round_number) === 1,
+    entry ? JSON.stringify(entry) : `(no entry; ${logs.length} logged)`
+  );
+  await page.close();
+
+  // ---- somebody who is NOT the recipient ----------------------------------
+  const other = await browser.newPage({ viewport: { width: 430, height: 1000 } });
+  other.on("pageerror", (e) => errors.push(`receipt-ack-other: ${e}`));
+  const m2 = rosterWithEmails();
+  m2[1].auth_user_id = FAKE_USER_ID; // Sarah is signed in...
+  const payouts2 = payoutsTo(m2[3]); // ...Clara was paid
+  await serve(other, { ...M.TABLE_DATA, members: m2, payouts: payouts2 });
+  const otherWrites = [];
+  await other.route("**/rest/v1/payouts**", (r) => {
+    const req = r.request();
+    if (req.method() === "GET") {
+      return r.fulfill({
+        status: 200, contentType: "application/json", body: JSON.stringify(payouts2),
+      });
+    }
+    otherWrites.push(req.url());
+    return r.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+  });
+  await withAuthMode(other, "required", { signedIn: true, email: "sarah@example.com" });
+  await other.goto(BASE, { waitUntil: "domcontentloaded" });
+  await other.waitForTimeout(2500);
+  check(
+    "receipt-ack/a non-recipient is not offered the card",
+    (await other.locator(".ack-card").count()) === 0
+  );
+  // openReceiptAck and confirmReceiptAck are exported on PowerFund, so the
+  // absent card is not the gate. Both handlers must refuse.
+  await other.evaluate(() => {
+    window.PowerFund.openReceiptAck(1);
+    window.PowerFund.confirmReceiptAck();
+  });
+  await other.waitForTimeout(1200);
+  check(
+    "receipt-ack/the exported handlers refuse a non-recipient",
+    (await other.locator(".ack-panel").count()) === 0 && otherWrites.length === 0,
+    `${otherWrites.length} write(s) attempted`
+  );
+  await other.close();
+
+  // ---- the record line, which the whole group reads -----------------------
+  const rec = await browser.newPage({ viewport: { width: 430, height: 1000 } });
+  rec.on("pageerror", (e) => errors.push(`receipt-ack-record: ${e}`));
+  const m3 = rosterWithEmails();
+  await serve(rec, { ...M.TABLE_DATA, members: m3, payouts: payoutsTo(m3[1]) });
+  await withAuthMode(rec, "off");
+  await rec.goto(BASE, { waitUntil: "domcontentloaded" });
+  await rec.waitForTimeout(1800);
+  await rec.locator(".tab-item", { hasText: "Rounds" }).click();
+  await rec.waitForTimeout(600);
+  await rec.locator(".round-head, .round").first().click().catch(() => {});
+  await rec.waitForTimeout(500);
+  const awaiting = await rec.locator(".payout-awaiting").first().innerText().catch(() => "");
+  check(
+    "receipt-ack/an unconfirmed payout says so, by name",
+    /Awaiting/.test(awaiting) && /Sarah/.test(awaiting),
+    awaiting || "(no .payout-awaiting rendered)"
+  );
+  check(
+    "receipt-ack/and shows no received line yet",
+    (await rec.locator(".payout-received").count()) === 0
+  );
+  await rec.close();
+
+  const done = await browser.newPage({ viewport: { width: 430, height: 1000 } });
+  done.on("pageerror", (e) => errors.push(`receipt-ack-done: ${e}`));
+  const m4 = rosterWithEmails();
+  m4[1].auth_user_id = FAKE_USER_ID;
+  await serve(done, {
+    ...M.TABLE_DATA,
+    members: m4,
+    payouts: payoutsTo(m4[1], "2026-09-21T04:00:00Z"),
+  });
+  await withAuthMode(done, "required", { signedIn: true, email: "sarah@example.com" });
+  await done.goto(BASE, { waitUntil: "domcontentloaded" });
+  await done.waitForTimeout(2500);
+  check(
+    "receipt-ack/an acknowledged payout is not offered again",
+    (await done.locator(".ack-card").count()) === 0
+  );
+  await done.locator(".tab-item", { hasText: "Rounds" }).click();
+  await done.waitForTimeout(600);
+  await done.locator(".round-head, .round").first().click().catch(() => {});
+  await done.waitForTimeout(500);
+  const got = await done.locator(".payout-received").first().innerText().catch(() => "");
+  check(
+    // The date is asserted POSITIVELY, not just as "some text": `received_at`
+    // is a timestamptz where `released_on` is a plain date, and the shared
+    // formatter appended "T00:00:00" to it — this line read "on Invalid Date"
+    // while a laxer version of this check passed.
+    "receipt-ack/the record names who confirmed it, when, and their note",
+    /Received by/.test(got) &&
+      /Sarah/.test(got) &&
+      /Sep 21, 2026/.test(got) &&
+      !/Invalid/.test(got) &&
+      /received in full/.test(got),
+    got || "(no .payout-received rendered)"
+  );
+  check(
+    "receipt-ack/and drops the awaiting line",
+    (await done.locator(".payout-awaiting").count()) === 0
+  );
+  await done.close();
+}
+
 /** The entry animation marks a SCREEN CHANGE, not a render.
  *
  *  render() reassigns innerHTML, so every element is new every time and every
@@ -5225,6 +5455,7 @@ async function bootFailure(browser) {
   await tabletBand(browser, errors);
   await fundCompleteOrder(browser, errors);
   await polishPass(browser, errors);
+  await receiptAck(browser, errors);
   await entryAnimation(browser, errors);
   await signInPrompt(browser, errors);
   await onboarding(browser, errors);

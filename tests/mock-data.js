@@ -25,6 +25,11 @@ const PAYOUTS = [1, 2, 3, 4, 5].map((r) => ({
   recipient_name: r === 1 ? MEMBERS[0].name : null,
   receipt_url: null,
   released_by: null,
+  // Migration 012. Round 1 is released and NOT yet acknowledged, which is the
+  // state the recipient's "Received ✓" card exists for; every other round is
+  // unreleased, so there is nothing to acknowledge.
+  received_at: null,
+  received_note: null,
 }));
 
 // A few confirmed contributions so rounds/members/insights have something real.

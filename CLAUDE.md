@@ -1045,6 +1045,103 @@ tracking the toast's identity the way `runCountUps()` tracks `countedValues`,
 rather than reusing `pf-anim` — gating a toast on a screen change would stop a
 NEW toast animating in, which is the case that matters.
 
+## "Received ✓" — the payout's missing second side (migration 012)
+
+Found by asking what the payout record does NOT say. `released`, `amount`,
+`recipient_member_id`, `recipient_name`, `receipt_url`, `released_by` — every
+column on `payouts` is the **treasurer's** word. Meanwhile a member's ₱1,000
+contribution needs a proof screenshot AND the treasurer's confirmation. The
+largest single transfer in the fund, ₱30,000, had nobody on record saying it
+arrived. Category: **New Feature**, and **no approved mockup exists** — the
+design has no auth and no recipient-side anything. Flagged for UI/UX QA as new
+design.
+
+**It protects the treasurer most.** "I sent it" versus "I never got it" is the
+one dispute this app cannot currently settle, and the treasurer is the one
+holding the other four people's money when it happens.
+
+### The gate is a NEW AXIS: being the recipient
+
+Not `unlocked`, not `isTreasurerAccount()`, not `verifiedTreasurer()` — every
+other permission in the app is about the treasurer, and this one is not.
+
+- **`myUnconfirmedPayout()` matches on `recipient_member_id`, not on
+  `member_order`.** 012's policy is `recipient_member_id = pf_member_id()`, and
+  the roster can be reordered after a release — which is exactly when the
+  payout ORDER and the recorded recipient disagree. Keying the button off the
+  order would offer it to whoever currently sits at position N. A null
+  recipient (a pre-004 row the backfill never reached) is refused by that
+  policy for everyone, so it correctly offers the button to nobody.
+- **`editableMember()`, a LINKED ACCOUNT — never `pf_my_member_id`.** Same rule
+  as the payout QR, for the same reason: that preference is unverified and
+  per-device, so honouring it would let anyone with the site URL close the one
+  record that says somebody else's ₱30,000 arrived.
+- Checked in `openReceiptAck` AND `confirmReceiptAck` — both are exported on
+  `PowerFund`, so the absent card is not the gate.
+
+### Six decisions worth not undoing
+
+- **No `received_by` column. Its absence IS the integrity property.** There is
+  only one person who may set `received_at`, enforced in Postgres, so a second
+  column naming them could only ever disagree with the policy or restate it.
+- **`received_at` is stamped SERVER-SIDE** (`new.received_at := now()` in the
+  guard). The client does not choose when the money arrived.
+- **A round stays *Completed* while unconfirmed.** The money genuinely left.
+  This is a receipt, not a gate — one member forgetting to tap must not freeze
+  the fund or reopen a round. The record line says what is true instead.
+- **Acknowledge ONCE.** No un-acknowledging; only the treasurer can clear it,
+  and only via Undo Release, which clears the whole release
+  (`doUnmarkPayoutReleased()` now clears `received_at`/`received_note` too —
+  otherwise a re-release would arrive pre-confirmed).
+- **The treasurer cannot acknowledge on a member's behalf.** A receipt somebody
+  else can sign is not a receipt. The guard refuses it explicitly, and a test
+  asserts that direction.
+- **The activity entry carries NO amount.** The money moved at release and was
+  logged there; a figure here would make a release-and-confirm read as ₱60,000
+  leaving the fund — the same bug `doUnmarkPayoutReleased`'s comment describes.
+  It does name the member (`memberId`), because the log is read by all five.
+
+### Two real design flaws the SQL suite caught
+
+Neither was findable in the browser — the smoke harness mocks the network.
+
+- **My first guard forbade the treasurer setting `received_at` at all**, on the
+  reasoning that confirming receipt is the member's act. But in this fund the
+  treasurer IS a member with a payout round, so Jan could never confirm their
+  own ₱30,000. The rule is **"only the recipient"**, which is a different
+  statement from "not the treasurer".
+- **`is distinct from` could not detect a second confirm.** `now()` returns the
+  same value throughout one transaction, so `new.received_at is distinct from
+  old.received_at` was FALSE on a re-confirm — the update fell straight through
+  to the member branch, where `received_note` was unpinned and therefore
+  editable. The set-branch is `new.received_at is not null and old.received_at
+  is null`, and the member branch refuses outright once `old.received_at` is
+  set.
+
+### And one the smoke output caught, by printing it
+
+The record line read **"Received by Sarah on Invalid Date"**. `payoutDateText`
+fed everything through `C.parseDueDate()`, which appends `"T00:00:00"` — right
+for `released_on` (a plain `date`) and fatal for `received_at` (a
+`timestamptz`). It branches on the shape now. The check that printed it was
+passing: it asserted the name and the note but not the date, so the assertion
+was tightened to name the formatted day and reject `Invalid`.
+
+### UI
+
+- **Home, green, above `S.myStatus` and below `S.attention`.** Green and not
+  amber deliberately: the amber family on Home means "the fund's money needs
+  something doing about it", and money arriving for *you* is not that.
+- **Two taps, inline, not a modal** — one button opens a panel with an optional
+  one-line note and Confirm / Cancel. The note is the only free text, capped at
+  120 characters.
+- **The record line on the Rounds accordion is shown to EVERYONE**: "Awaiting
+  Sarah's confirmation that it arrived." before, "Received by Sarah on <date>
+  — <note>" after. "Did Sarah actually get it?" is the group's question, not
+  the treasurer's, and an absence has to read as an absence rather than as
+  nothing at all.
+- Both `received_at` and `received_note` are in the backup and restored.
+
 ## Migrations
 
 Run in the Supabase SQL editor, in order. `006` also needs a one-off
@@ -1092,6 +1189,14 @@ What `required` actually needs is **every member linked** — an address on file
 and one sign-in each. Without that, a member hits the `unknown` dead-end with
 no way into the app at all. `AUTH_MODE` is now `"required"`; all five are
 linked.
+
+`012_payout_receipt_confirmation.sql` — `payouts.received_at` /
+`.received_note`, the `payouts_recipient_ack` policy and `pf_payouts_guard()`.
+**Not applied yet.** Validated 14/14 on a real Postgres 16 by
+`tests/sql/run.sh`, which is what caught the two flaws above. Ships with
+`012_rollback.sql`. Until it runs, the confirm button writes a column that
+does not exist and `requireRows()` reports the refusal — it does not silently
+appear to work.
 
 Every migration from 010 on is wrapped in `begin; … commit;`. Not decoration:
 without it a `raise` in 011's preflight aborted one statement and psql

@@ -75,6 +75,16 @@ create table cycles (
   id uuid primary key default gen_random_uuid(),
   cycle_number int not null unique, due_date date not null);
 alter table cycles enable row level security;
+create table payouts (
+  round_number int primary key,
+  released boolean not null default false,
+  note text, released_on date, started_at timestamptz,
+  amount numeric(10,2), recipient_member_id uuid references members(id),
+  recipient_name text, receipt_url text, released_by text,
+  -- migration 012. Hand-stubbed like every other column here; the migration's
+  -- own `alter table` is what adds them in a real deployment.
+  received_at timestamptz, received_note text);
+alter table payouts enable row level security;
 create or replace function pf_member_id() returns uuid
   language sql stable security definer set search_path = public as $$
   select id from members where auth_user_id = auth.uid() $$;
@@ -84,7 +94,7 @@ create or replace function pf_is_treasurer() returns boolean
 grant usage on schema auth, storage, public to anon, authenticated;
 grant execute on function auth.uid(), storage.foldername(text) to anon, authenticated;
 grant execute on function pf_member_id(), pf_is_treasurer() to anon, authenticated;
-grant select, insert, update, delete on storage.objects, members, cycles to anon, authenticated;
+grant select, insert, update, delete on storage.objects, members, cycles, payouts to anon, authenticated;
 insert into members (id, name, member_order, email, auth_user_id, is_treasurer) values
  ('11111111-0000-0000-0000-000000000001','Regine',1,'r@x.com','aaaaaaaa-0000-0000-0000-00000000000a', true),
  ('11111111-0000-0000-0000-000000000002','Sarah', 2,'s@x.com','bbbbbbbb-0000-0000-0000-00000000000b', false),
@@ -92,6 +102,19 @@ insert into members (id, name, member_order, email, auth_user_id, is_treasurer) 
 insert into cycles (id, cycle_number, due_date) values
  ('22222222-0000-0000-0000-000000000001', 1, '2026-09-15'),
  ('22222222-0000-0000-0000-000000000002', 2, '2026-09-28');
+-- Round 1 -> Regine, who is ALSO THE TREASURER. That combination is the norm
+--   in a fund this size and is the case the first cut of the guard broke.
+-- Round 2 -> Sarah, an ordinary member: the pure-recipient path, and the one
+--   the column pinning has to be tested against (the treasurer may legitimately
+--   change an amount, so testing pinning as the treasurer proves nothing).
+-- Round 3 -> not released.
+insert into payouts (round_number, released, released_on, amount,
+                     recipient_member_id, recipient_name, released_by) values
+ (1, true, '2026-09-20', 30000,
+  '11111111-0000-0000-0000-000000000001', 'Regine', 'Regine'),
+ (2, true, '2027-03-20', 30000,
+  '11111111-0000-0000-0000-000000000002', 'Sarah', 'Regine'),
+ (3, false, null, null, null, null, null);
 SQL
 
 # ---------------------------------------------------------------------------
@@ -103,6 +126,7 @@ import sys, pathlib
 mig, repo, work = (pathlib.Path(p) for p in sys.argv[1:4])
 lock  = (mig / "011_rls_lockdown.sql").read_text()
 guard = (mig / "010_auth_helpers_and_secrets.sql").read_text()
+ack   = (mig / "012_payout_receipt_confirmation.sql").read_text()
 schema = (repo / "supabase" / "schema.sql").read_text()
 def cut(s, start, end):
     i = s.index(start); j = s.index(end, i); return s[i:j]
@@ -123,7 +147,12 @@ def cut(s, start, end):
                 'drop policy if exists "member_avatars_write"')
     + cut(guard, 'create or replace function pf_members_guard()',
                  'for each row execute function pf_members_guard();')
-    + 'for each row execute function pf_members_guard();\n')
+    + 'for each row execute function pf_members_guard();\n'
+    # 012: the recipient's acknowledgement. payouts_treasurer comes from 011
+    # and must be here too — permissive policies are OR-ed, so testing the new
+    # one alone would not show that the treasurer still has full access.
+    + cut(lock, 'drop policy if exists payouts_read', '-- 6) activity_log')
+    + cut(ack, 'drop policy if exists payouts_recipient_ack', 'commit;'))
 PY
 q -q -v ON_ERROR_STOP=1 -f "$WORK/policy.sql" >/dev/null 2>&1 \
   || { echo "the extracted policy text does not apply cleanly"; exit 1; }
@@ -139,7 +168,11 @@ run() {
   # than raising, so each reports "<VERB> 0" with no error. Reading only
   # UPDATE meant every DELETE assertion passed no matter what the policy said.
   rows=$(printf '%s' "$out" | grep -oE '(UPDATE|DELETE) [0-9]+' | tail -1 | awk '{print $2}')
-  if printf '%s' "$out" | grep -qiE "violates row-level security|permission denied|Only the treasurer|only edit your own"; then
+  # A deliberate refusal from a guard trigger counts as DENY. Listed
+  # EXPLICITLY rather than treating any ERROR as a denial — that is the
+  # dangerous direction, because a typo'd column would then read as
+  # "correctly refused". Anything not matched here still lands in ERR: below.
+  if printf '%s' "$out" | grep -qiE "violates row-level security|permission denied|Only the treasurer|only edit your own|can confirm receiving|may only confirm receipt|already confirmed received|has not been released yet|can clear a confirmation"; then
     got=DENY
   elif [ "${rows:-x}" = "0" ]; then
     got=DENY   # RLS hides the row: 0 rows and no error. The silent refusal.
@@ -218,6 +251,54 @@ run "member may still rename themselves" $MEM OK \
 echo "members — treasurer and anon"
 run "treasurer may set any member's payout details" $TRE OK "update members set $P where id='$SID'"
 run "anon may NOT touch payout details" - DENY "update members set $P where id='$SID'"
+
+echo "payouts — the recipient's acknowledgement (migration 012)"
+# THE CASE THE FIRST CUT OF THE GUARD BROKE. Regine is the treasurer AND
+# round 1's recipient, which is normal in a five-person fund. A rule of "the
+# treasurer may not confirm" would stop them acknowledging their own ₱30,000.
+run "the treasurer may confirm their OWN payout" $TRE OK \
+  "update payouts set received_at = now() where round_number = 1"
+# The ordinary recipient path.
+run "a member may confirm their own payout" $MEM OK \
+  "update payouts set received_at = now(), received_note = 'GCash, thanks'
+     where round_number = 2"
+# The integrity property: the confirmation belongs to whoever the money went to.
+run "a member may NOT confirm somebody else's payout" $MEM DENY \
+  "update payouts set received_at = now() where round_number = 1"
+run "the TREASURER may not confirm on a member's behalf" $TRE DENY \
+  "update payouts set received_at = now() where round_number = 2"
+run "a login on no member row may not confirm anything" $GHOST DENY \
+  "update payouts set received_at = now() where round_number = 2"
+# Pinned columns, tested as the ORDINARY recipient — the treasurer may
+# legitimately change an amount, so testing this as them proves nothing.
+run "a recipient may NOT change the amount while confirming" $MEM DENY \
+  "update payouts set received_at = now(), amount = 99999 where round_number = 2"
+run "a recipient may NOT redirect the payout while confirming" $MEM DENY \
+  "update payouts set received_at = now(), recipient_member_id = '$RID'
+     where round_number = 2"
+run "a recipient may NOT un-release it while confirming" $MEM DENY \
+  "update payouts set received_at = now(), released = false where round_number = 2"
+run "a recipient may NOT touch a payout without confirming it" $MEM DENY \
+  "update payouts set note = 'hello' where round_number = 2"
+# Once only. Undoing is a correction, which is the treasurer's act.
+run "a confirmation may not be given twice" $MEM DENY \
+  "update payouts set received_at = now() where round_number = 2;
+   update payouts set received_at = now(), received_note = 'again'
+     where round_number = 2"
+run "a member may NOT clear their own confirmation" $MEM DENY \
+  "update payouts set received_at = now() where round_number = 2;
+   update payouts set received_at = null where round_number = 2"
+# ...but the treasurer must be able to, or Undo Release would leave a stale
+# confirmation on a payout that is no longer released.
+run "the treasurer MAY clear a confirmation" $TRE OK \
+  "update payouts set received_at = now() where round_number = 1;
+   update payouts set received_at = null, released = false where round_number = 1"
+# Nothing to receive yet.
+run "an unreleased payout cannot be confirmed" $TRE DENY \
+  "update payouts set recipient_member_id = pf_member_id() where round_number = 3;
+   update payouts set received_at = now() where round_number = 3"
+run "anon may NOT confirm anything" - DENY \
+  "update payouts set received_at = now() where round_number = 2"
 
 echo "cycles — the payment schedule (Menu -> Payment schedule)"
 CY=22222222-0000-0000-0000-000000000001

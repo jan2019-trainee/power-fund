@@ -19,7 +19,8 @@ window.PFViews.home = function (ctx) {
     escapeHtml, inlineArg, icon, batteryCell, memberAvatar, getPayout,
     sparkline, C,
     formatDateTime, overdueRows, activityTimeLabel, isWide, identityLocked,
-    payoutOwner, pesoWhole
+    payoutOwner, pesoWhole, myUnconfirmedPayout, receiptAckRound, receiptAckNote,
+    payoutDateText
   } = ctx;
   // Cycles due so far — the denominator behind each member's standing ring.
   // Set when the pinned action renders, so the view can reserve room for it.
@@ -245,7 +246,16 @@ window.PFViews.home = function (ctx) {
       !payoutOwner.payout_bank &&
       !payoutOwner.payout_account_number;
     const mine = payoutOwner.member_order;
-    const cur = C.currentRound(state.contributions, rounds);
+    // (rounds, contributions) — REVERSED here, and this was the only one of
+    // eleven call sites that had it backwards. The effect was not a crash:
+    // roundLifecycleEnabled(contributions) finds no `started_at` on a
+    // contribution row, so it fell through to firstUnfundedRound(payouts),
+    // which sums `status === 2` over payout rows that have no `status` at all
+    // — 0 for every round, so it returned 1 ALWAYS. `mine <= cur + 1` was
+    // therefore permanently `mine <= 2`: only payout positions 1 and 2 ever
+    // saw this nudge, and they saw it from day one, which is exactly the
+    // "noise for four rounds" the note above sets out to avoid.
+    const cur = C.currentRound(rounds, state.contributions);
     const released = getPayout(mine).released;
     if (nothingOnFile && !released && mine <= cur + 1) {
       html += `<button type="button" class="payout-nudge" onclick="PowerFund.openPayoutQrModal()">
@@ -267,6 +277,51 @@ window.PFViews.home = function (ctx) {
   // section() slices whatever was appended since the last call, so it must be
   // called unconditionally — skipping it would hand the next section this
   // block's markup.
+  /* ---- "Received ✓": the recipient's own payout is out, unacknowledged ----
+   *
+   * The payout record is otherwise entirely the treasurer's word. This is the
+   * member's side of the biggest transaction in the fund, and it sits high on
+   * Home because it is time-sensitive: the memory of a GCash transfer arriving
+   * is freshest the day it happens.
+   *
+   * NO approved mockup — new design, flagged as such for UI/UX QA.
+   */
+  if (myUnconfirmedPayout) {
+    const p = myUnconfirmedPayout;
+    const amt = p.amount != null ? Number(p.amount) : C.GOAL_PER_ROUND;
+    const open = receiptAckRound === Number(p.round_number);
+    html += `<div class="ack-card">
+      <p class="ack-title">${icon("wallet", 16)}<span>Your Round ${
+      p.round_number
+    } payout has been released</span></p>
+      <p class="ack-note"><b>${C.peso(amt)}</b>${
+      p.released_on ? ` on ${payoutDateText(p.released_on)}` : ""
+    } — did it arrive? Confirming puts it on the record, so nobody has to
+        remember later.</p>
+      ${
+        open
+          ? `<div class="ack-panel">
+               <label class="ack-label" for="ack-note">Anything to add? <span class="ack-optional">optional</span></label>
+               <input id="ack-note" class="text-input ack-input" type="text" maxlength="120"
+                      placeholder="e.g. GCash, received in full"
+                      value="${escapeHtml(receiptAckNote)}"
+                      oninput="PowerFund.setReceiptAckNote(this.value)">
+               <p class="ack-once">This is recorded once and can't be changed afterwards — only the treasurer can correct it.</p>
+               <div class="ack-btns">
+                 <button type="button" class="modal-btn-secondary" onclick="PowerFund.cancelReceiptAck()">Cancel</button>
+                 <button type="button" class="modal-btn-primary" onclick="PowerFund.confirmReceiptAck()" ${
+                   busy ? "disabled" : ""
+                 }>${busy ? "Saving…" : "Confirm receipt"}</button>
+               </div>
+             </div>`
+          : `<button type="button" class="ack-cta" onclick="PowerFund.openReceiptAck(${
+              p.round_number
+            })">${icon("check", 15)}<span>Yes, I received it</span></button>`
+      }
+    </div>`;
+  }
+  S.receiptAck = section();
+
   S.payoutNudge = section();
 
   // The old standalone due-countdown banner was removed — the same date is
@@ -899,6 +954,7 @@ window.PFViews.home = function (ctx) {
       S.dayOne +
       S.rejected +
       (unlocked ? S.release + S.attention : "") +
+      S.receiptAck +
       S.myStatus +
       // S.complete sits AFTER the personal card for both roles. It used to be
       // pulled to the front for a treasurer by the rule above — but that rule
@@ -1057,8 +1113,8 @@ window.PFViews.home = function (ctx) {
       </div>
       <aside class="home-rail">
         ${S.rejected}${unlocked ? `${S.release}${S.attention}` : ""}${
-          S.myStatus
-        }${S.complete}${S.payoutNudge}${overview}${quick}
+          S.receiptAck
+        }${S.myStatus}${S.complete}${S.payoutNudge}${overview}${quick}
       </aside>
     </div>` +
     S.cta +

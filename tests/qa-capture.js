@@ -705,6 +705,72 @@ async function tabs(page, prefix, list) {
     }
   }
 
+  // "Received ✓" (migration 012) — NEW DESIGN, no mockup. Needs a LINKED
+  // ACCOUNT and a released payout pointed at that member, so it was
+  // unreachable to every earlier capture the way My-payout-details was.
+  console.log("\nReceived ✓ — the recipient's payout acknowledgement");
+  {
+    const acct = withAccounts(midFund, 1); // Sarah: linked, not the treasurer
+    const ackData = {
+      ...acct.data,
+      // Round 1 released TO SARAH and unacknowledged. Pointed by
+      // recipient_member_id, which is what the app and 012's policy both key
+      // off — not by payout order.
+      payouts: acct.data.payouts.map((p) =>
+        p.round_number === 1
+          ? {
+              ...p,
+              released: true,
+              released_on: "2026-09-20",
+              amount: 30000,
+              recipient_member_id: acct.me.id,
+              recipient_name: acct.me.name,
+              received_at: null,
+              received_note: null,
+            }
+          : p
+      ),
+    };
+    for (const [label, vp] of [["mobile", MOBILE], ["desktop", DESKTOP]]) {
+      p = await open(browser, ackData, vp, null, {
+        authMode: "optional",
+        signedInAs: acct.me,
+      });
+      await shot(p, `ack-${label}-offered`, "Received ✓ card on Home — the recipient's own released payout");
+      if (await p.locator(".ack-cta").count()) {
+        await p.locator(".ack-cta").click();
+        await p.waitForTimeout(500);
+        await shot(p, `ack-${label}-panel`, "The note panel — one optional line, Confirm / Cancel");
+      }
+      // The record line the whole group reads, before anyone has confirmed.
+      await p.locator(".tab-item, .sidebar-item", { hasText: "Rounds" }).first().click();
+      await p.waitForTimeout(600);
+      await p.locator(".round-head, .round").first().click().catch(() => {});
+      await p.waitForTimeout(500);
+      await shot(p, `ack-${label}-awaiting`, "Rounds — \"Awaiting Sarah's confirmation that it arrived\"");
+      await p.close();
+    }
+    // ...and after.
+    const doneData = {
+      ...ackData,
+      payouts: ackData.payouts.map((p) =>
+        p.round_number === 1
+          ? { ...p, received_at: "2026-09-21T04:00:00Z", received_note: "GCash, received in full" }
+          : p
+      ),
+    };
+    p = await open(browser, doneData, MOBILE, null, {
+      authMode: "optional",
+      signedInAs: acct.me,
+    });
+    await p.locator(".tab-item", { hasText: "Rounds" }).first().click();
+    await p.waitForTimeout(600);
+    await p.locator(".round-head, .round").first().click().catch(() => {});
+    await p.waitForTimeout(500);
+    await shot(p, "ack-mobile-received", "Rounds — \"Received by Sarah on <date> — <note>\"; no card on Home");
+    await p.close();
+  }
+
   console.log("\nOnboarding — first run, both frames");
   for (const [label, vp] of [["mobile", MOBILE], ["desktop", DESKTOP]]) {
     p = await open(browser, midFund, vp, null, { fresh: true });

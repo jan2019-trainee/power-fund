@@ -238,6 +238,13 @@
    * you are already on. See --pf-entry in css/style.css. */
   let animateEntry = true;
 
+  /* "Received ✓" — the recipient acknowledging their own payout (migration
+   * 012). Which round's inline panel is open, and the optional note. Two taps
+   * on purpose: this writes a financial record, so it is not one accidental
+   * press, the same reasoning as the undo-paid and mark-paid panels. */
+  let receiptAckRound = null;
+  let receiptAckNote = "";
+
   let scheduleModalOpen = false;
   let scheduleValues = {};
   /* The last VALID date seen for each cycle, which is what a shift measures
@@ -340,9 +347,16 @@
     return m ? m.name : "—";
   }
 
-  function payoutDateText(released_on) {
-    if (!released_on) return "";
-    return C.formatDate(C.parseDueDate(released_on));
+  function payoutDateText(when) {
+    if (!when) return "";
+    // `released_on` is a plain DATE; `received_at` (012) is a timestamptz.
+    // parseDueDate() appends "T00:00:00", which turns a full timestamp into
+    // an Invalid Date — it rendered as literally "on Invalid Date" on the
+    // record line, which is how this was caught.
+    const d = /^\d{4}-\d{2}-\d{2}$/.test(String(when))
+      ? C.parseDueDate(when)
+      : new Date(when);
+    return isNaN(d.getTime()) ? "" : C.formatDate(d);
   }
 
   /**
@@ -2101,6 +2115,8 @@
         recipient_name: p.recipient_name, //  } migration 004
         receipt_url: p.receipt_url, //  /
         released_by: p.released_by, // /
+        received_at: p.received_at, // } migration 012 — the recipient's
+        received_note: p.received_note, // } acknowledgement
       })),
       activityLog: (state.activityLog || []).map((a) => ({
         message: a.message,
@@ -2852,6 +2868,103 @@
     });
   }
 
+  // ===================================================================
+  // "Received ✓" — the recipient confirms their own payout (migration 012)
+  //
+  // The payout record was entirely one-sided: released / amount / recipient /
+  // receipt / released_by are all the treasurer's. Nothing said the member
+  // actually GOT the money, while a member's ₱1,000 contribution needs a proof
+  // screenshot AND the treasurer's confirmation. This is the payout's missing
+  // second side, and it protects the treasurer most.
+  //
+  // NOT gated on isTreasurerAccount() or on `unlocked` — it is gated on BEING
+  // THE RECIPIENT, which is a different axis from every other permission in
+  // the app. 012's guard enforces it in Postgres; these are the same rule so
+  // nobody is offered a button that will be refused.
+  // ===================================================================
+
+  /** The payout this viewer may acknowledge right now, or null.
+   *  A LINKED ACCOUNT only (`editableMember()`), never the per-device
+   *  who-am-I preference: that preference is unverified, so honouring it would
+   *  let anyone with the site URL acknowledge somebody else's ₱30,000 and
+   *  close the one record that says the money arrived. */
+  function myUnconfirmedPayout() {
+    const me = editableMember();
+    if (!me || !state || !state.payouts) return null;
+    // Matched on `recipient_member_id`, NOT on member_order. 012's policy is
+    // `recipient_member_id = pf_member_id()`, so keying the button off the
+    // payout ORDER would offer it to whoever currently sits at position N —
+    // and the roster can be reordered after a release, which is precisely
+    // when the two disagree. A null recipient (a pre-004 row the backfill
+    // never reached) is refused by that policy for everyone, so it correctly
+    // offers the button to nobody rather than to the wrong person.
+    const p = (state.payouts || []).find(
+      (x) => x && x.recipient_member_id && x.recipient_member_id === me.id
+    );
+    if (!p || !p.released || p.received_at) return null;
+    // `received_at` is absent on a database without 012; undefined and null
+    // both mean "not confirmed", and the write will simply fail until the
+    // migration lands rather than silently appearing to work.
+    return p;
+  }
+
+  function openReceiptAck(round) {
+    const mine = myUnconfirmedPayout();
+    // Exported on PowerFund, so the absent card is not the gate.
+    if (!mine || Number(mine.round_number) !== Number(round)) return;
+    receiptAckRound = Number(round);
+    receiptAckNote = "";
+    render();
+  }
+  function cancelReceiptAck() {
+    receiptAckRound = null;
+    receiptAckNote = "";
+    render();
+  }
+  function setReceiptAckNote(v) {
+    receiptAckNote = v;
+  }
+
+  async function confirmReceiptAck() {
+    if (busy || receiptAckRound == null) return;
+    const round = receiptAckRound;
+    const mine = myUnconfirmedPayout();
+    if (!mine || Number(mine.round_number) !== round) return cancelReceiptAck();
+    const me = editableMember();
+    const note = receiptAckNote.trim();
+    receiptAckRound = null;
+    receiptAckNote = "";
+    busy = true;
+    render();
+    try {
+      await window.DB.confirmPayoutReceived(round, note);
+      // The amount that was actually released, read from the record rather
+      // than assumed from the goal — same rule doUnmarkPayoutReleased uses.
+      const amt = mine.amount != null ? Number(mine.amount) : C.GOAL_PER_ROUND;
+      await logActivity(
+        `${(me && me.name) || "The recipient"} confirmed receiving ${C.peso(
+          amt
+        )} for Round ${round}` + (note ? ` — ${note}` : ""),
+        {
+          type: "payout",
+          // NO amount. The money moved at release and was logged there; this
+          // is an acknowledgement, not a second transaction. Logging a figure
+          // would make a release-and-confirm read as ₱60,000 leaving the fund,
+          // which is the bug doUnmarkPayoutReleased's comment describes.
+          memberId: me ? me.id : null,
+          round: round,
+        }
+      );
+      await reload();
+      showSuccess("Thanks — that payout is confirmed received.");
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      busy = false;
+      render();
+    }
+  }
+
   async function doUnmarkPayoutReleased(round) {
     if (busy) return;
     const recipient = sortedMembers().find((m) => m.member_order === round);
@@ -2882,6 +2995,11 @@
           recipient_name: null,
           receipt_url: null,
           released_by: null,
+          // Or a re-released payout would carry the PREVIOUS recipient's
+          // confirmation. 012's guard lets the treasurer clear one precisely
+          // so this can happen; a member cannot.
+          received_at: null,
+          received_note: null,
         });
       } catch (e) {
         console.warn("Payout accountability fields not cleared:", e.message);
@@ -4052,6 +4170,7 @@
     animateEntry = true; // a real screen change — this is what it is for
     undoPaidTarget = null;
     markPaidTarget = null;
+    receiptAckRound = null;
     currentView = view;
     render();
     // A new screen starts at its top. render() replaces innerHTML but leaves
@@ -6006,6 +6125,9 @@
       hasTreasurerPin: hasTreasurerPin(),
       moneyRefused: moneyWritesRefused(),
       MONEY_REFUSED_NOTE,
+      myUnconfirmedPayout: myUnconfirmedPayout(),
+      receiptAckRound,
+      receiptAckNote,
       // Accounts (migration 008). The mode drives whether Menu shows an
       // Account group at all; the email is what "Signed in as ..." prints.
       authMode: AUTH_MODE,
@@ -8063,6 +8185,10 @@
       editNamesValues[id] = v;
       refreshEditNamesValidity();
     },
+    openReceiptAck,
+    cancelReceiptAck,
+    confirmReceiptAck,
+    setReceiptAckNote,
     openScheduleModal,
     closeScheduleModal,
     setScheduleShift,

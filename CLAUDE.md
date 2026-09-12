@@ -1330,17 +1330,20 @@ linked.
 does not exist and `requireRows()` reports the refusal — it does not silently
 appear to work.
 
-`013_turn_swaps.sql` — the deferrable `member_order` constraint,
-`swap_requests`, `pf_request_swap` / `pf_accept_swap` / `pf_decline_swap` /
-`pf_cancel_swap` / `pf_swap_order`, and the amended members guard.
-**Not applied yet.** Validated on a real Postgres 16 by `tests/sql/run.sh`
-(31 assertions, including the rollback), which caught the stale-branch bug
-above. Ships with `013_rollback.sql`, which deliberately leaves the constraint
-DEFERRABLE — making it deferrable takes nothing away, and reverting it would
-re-break the plain two-write swap. Until 013 runs, `getSwapRequests()` answers
-`[]`, `swapsAvailable()` is false and the feature is simply not offered; the
-treasurer's reorder names the migration rather than failing with a raw
-constraint error.
+**`013` IS APPLIED** — `013_turn_swaps.sql`: the deferrable `member_order`
+constraint, `swap_requests`, `pf_request_swap` / `pf_accept_swap` /
+`pf_decline_swap` / `pf_cancel_swap` / `pf_swap_order`, and the amended members
+guard. Validated on a real Postgres 16 by `tests/sql/run.sh` (31 assertions,
+including the rollback), which caught the stale-branch bug above. Ships with
+`013_rollback.sql`, which deliberately leaves the constraint DEFERRABLE —
+making it deferrable takes nothing away, and reverting it would re-break the
+plain two-write swap.
+
+**So "Reorder payout order" works for the first time**, and turn swaps are
+live. Worth knowing which way the two features degrade if 013 is ever rolled
+back: `getSwapRequests()` answers `[]`, `swapsAvailable()` goes false and the
+swap flow is simply not offered, while the treasurer's reorder names the
+migration rather than failing with a raw constraint error.
 
 Every migration from 010 on is wrapped in `begin; … commit;`. Not decoration:
 without it a `raise` in 011's preflight aborted one statement and psql

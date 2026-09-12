@@ -507,7 +507,7 @@ window.PFViews.home = function (ctx) {
   // CTA needs a payCycle that no longer exists. Say it is finished.
   if (allDone) {
     html += `<div class="attention-panel caught-up fund-complete-panel">
-      <p class="attention-title">${icon("check", 15)}<span>Fund complete</span></p>
+      <p class="attention-title">${icon("check", 16)}<span>Fund complete</span></p>
       <p class="attention-caught-up-note">All ${C.TOTAL_ROUNDS} rounds collected and paid out — ${C.peso(
       C.TARGET_AMOUNT
     )} in total. Nothing is outstanding.</p>
@@ -569,12 +569,12 @@ window.PFViews.home = function (ctx) {
       // (is it clear, or did it fail to load?), and a caught-up queue is
       // the normal state most days.
       html += `<div class="attention-panel caught-up">
-        <p class="attention-title">${icon("check", 15)}<span>All caught up</span></p>
+        <p class="attention-title">${icon("check", 16)}<span>All caught up</span></p>
         <p class="attention-caught-up-note">No payments waiting for review, nothing overdue, and no payout to release right now.</p>
       </div>`;
     } else {
       html += `<div class="attention-panel">
-        <p class="attention-title">${icon("alert", 15)}<span>Needs your attention</span></p>`;
+        <p class="attention-title">${icon("alert", 16)}<span>Needs your attention</span></p>`;
 
       // 1) pending review queue
       if (batches.length) {

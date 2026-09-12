@@ -379,6 +379,33 @@ call to make, not mine. Flagging it as an observation, unrated.
 
 ---
 
+## 4d. A reported visual drift, now FIXED
+
+**"Needs your attention" looked like older UI than the cards around it**, and
+it was — not a matter of taste. `design/Main.dc.html` specifies the panel as
+sentence case, 14px/600 in `#EDEFF2` with an amber glyph; the app was rendering
+13px UPPERCASE with tracking in the accent colour. Every notice card built
+since had independently landed on the artboard's shape, so the panel was the
+only holdout.
+
+The cause was five copies of one title treatment in the CSS. There is now one
+grouped selector, and `.attention-panel` also joined the notice family it sits
+in: 12px corners like `.release-card` and `.dispute-alert`, one even 1px
+border instead of a 3px left rail (which no other card has, and the artboard
+does not either), and `--accent-soft` rather than a flat card background.
+
+**What to look at:** the treasurer's Home with something in the queue, and the
+same screen caught up (green variant), on both frames. `cardFamily` in
+`tests/smoke.js` measures the computed styles, so a regression fails a check —
+but it cannot judge whether the result reads *well*, which is this pass's call.
+
+The two radii in the card family are deliberate: 18px for structural surfaces
+that hold content (`.round`, `.fund-total`, `.stat-tile`, `.menu-list`), 12px
+for notices that make a statement. A finding that they should be unified is a
+design decision, not a defect.
+
+---
+
 ## 4c. One finding from the captures, now FIXED
 
 **FIXED (was: the round accordion's header named the member at that payout

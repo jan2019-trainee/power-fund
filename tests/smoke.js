@@ -3136,6 +3136,134 @@ async function extraTreasurer(browser, errors) {
   await solo.close();
 }
 
+/** The card TITLE treatment, measured — not eyeballed.
+ *
+ *  Reported from a real phone: "Needs your attention" still carried a 13px
+ *  UPPERCASE amber label from an early pass, while every notice card built
+ *  afterwards used sentence case in Space Grotesk with the accent on the
+ *  glyph. `design/Main.dc.html` asks for the latter too, so the app had
+ *  drifted from its own approved artboard, not merely from itself.
+ *
+ *  The cause was five near-identical copies of one treatment in the CSS with
+ *  nothing tying them together, so this asserts the FAMILY rather than any one
+ *  card — six titles that must agree on case, size and family, and a panel
+ *  whose geometry matches the notice cards it sits among. Behavioural checks
+ *  cannot see any of this, which is why it survived ~550 of them.
+ */
+async function cardFamily(browser, errors) {
+  const page = await browser.newPage({ viewport: { width: 430, height: 1100 } });
+  page.on("pageerror", (e) => errors.push(`card-family: ${e}`));
+  // One screen carrying as much of the family as possible: a treasurer with a
+  // pending claim (attention), a funded round (release) and a dispute filed
+  // against their own released payout.
+  const members = rosterWithEmails();
+  members[0].auth_user_id = FAKE_USER_ID; // Regine, the flagged treasurer
+  const payouts = M.PAYOUTS.map((p) =>
+    p.round_number === 1
+      ? {
+          ...p,
+          released: true,
+          released_on: "2026-09-20",
+          amount: 30000,
+          recipient_member_id: members[1].id,
+          recipient_name: members[1].name,
+          disputed_at: "2026-09-22T02:00:00Z",
+          disputed_note: "nothing in GCash",
+        }
+      : p
+  );
+  await serve(page, {
+    ...M.TABLE_DATA,
+    members,
+    payouts,
+    app_settings: { ...M.SETTINGS, treasurer_pin: "1234" },
+  });
+  await withAuthMode(page, "off");
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(1800);
+  await unlockTreasurer(page);
+  await page.waitForTimeout(600);
+
+  const styles = await page.evaluate(() => {
+    const out = {};
+    [
+      ".attention-title",
+      ".dispute-alert-title",
+      ".release-card-title",
+    ].forEach((sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return;
+      const cs = getComputedStyle(el);
+      out[sel] = {
+        transform: cs.textTransform,
+        size: cs.fontSize,
+        weight: cs.fontWeight,
+        family: cs.fontFamily.split(",")[0].replace(/["']/g, ""),
+        display: cs.display,
+        color: cs.color,
+      };
+      const ic = el.querySelector(".icon");
+      if (ic) out[sel].iconColor = getComputedStyle(ic).color;
+    });
+    const box = (sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return null;
+      const cs = getComputedStyle(el);
+      return {
+        radius: cs.borderTopLeftRadius,
+        leftBorder: cs.borderLeftWidth,
+        topBorder: cs.borderTopWidth,
+      };
+    };
+    out.panelBox = box(".attention-panel");
+    out.disputeBox = box(".dispute-alert");
+    out.releaseBox = box(".release-card");
+    return out;
+  });
+
+  const t = styles[".attention-title"];
+  // THE PREMISE: the panel is on screen at all. Without it every check below
+  // passes on an absent element.
+  check(
+    "card-family/the premise: the attention panel rendered",
+    !!t,
+    JSON.stringify(Object.keys(styles))
+  );
+  check(
+    "card-family/its title is sentence case, not UPPERCASE",
+    !!t && t.transform === "none",
+    t ? t.transform : "(no title)"
+  );
+  // The exact drift that was reported: 13px amber vs the family's 14.5px.
+  const fam = styles[".release-card-title"] || styles[".dispute-alert-title"];
+  check(
+    "card-family/...and agrees with the other cards on size, weight and family",
+    !!t && !!fam && t.size === fam.size && t.weight === fam.weight &&
+      t.family === fam.family,
+    JSON.stringify({ attention: t, family: fam })
+  );
+  check(
+    "card-family/the accent is on the GLYPH, not the words",
+    !!t && t.color === fam.color && t.iconColor !== t.color,
+    JSON.stringify({ text: t && t.color, icon: t && t.iconColor })
+  );
+  // Geometry: it is a notice card and must not keep the 18px structural
+  // radius or the 3px left rail no other card in the family has.
+  check(
+    "card-family/the panel's corners match the notice cards beside it",
+    !!styles.panelBox &&
+      !!styles.disputeBox &&
+      styles.panelBox.radius === styles.disputeBox.radius,
+    JSON.stringify({ panel: styles.panelBox, dispute: styles.disputeBox })
+  );
+  check(
+    "card-family/...and it has one even border, not a 3px rail",
+    !!styles.panelBox && styles.panelBox.leftBorder === styles.panelBox.topBorder,
+    JSON.stringify(styles.panelBox)
+  );
+  await page.close();
+}
+
 /** Payout disputes — "it never arrived" (migration 014).
  *
  *  012 gave the recipient one button. A member whose ₱30,000 has NOT arrived
@@ -6277,6 +6405,7 @@ async function bootFailure(browser) {
   await polishPass(browser, errors);
   await receiptAck(browser, errors);
   await payoutDispute(browser, errors);
+  await cardFamily(browser, errors);
   await swapTurns(browser, errors);
   await releasedRecipient(browser, errors);
   await entryAnimation(browser, errors);

@@ -1424,6 +1424,50 @@ assumed to still apply, which is what the receipt check above exists for.
   names the query to run first, because an open report is exactly the thing
   not to drop silently.
 
+## The card title, in one place — and why "Needs your attention" had drifted
+
+Reported from a real phone: the attention card looked like older UI than
+everything around it. It was, and it was an **implementation gap rather than a
+matter of taste** — worth checking before changing anything, because the QA
+Gate says not to modify the design to justify an implementation.
+
+`design/Main.dc.html` and `MainTreasurerFunded.dc.html` both specify the panel
+as **sentence case, 14px/600, `#EDEFF2`, with an amber SVG glyph**. The app was
+rendering **13px UPPERCASE with 0.05em tracking in `--accent`** — so it had
+drifted from its own approved artboard, not merely from itself. Every notice
+card built afterwards (`.ack-title`, `.dispute-alert-title`, `.swap-ask-title`,
+`.dayone-title`, `.release-card-title`) independently landed on the artboard's
+shape: Space Grotesk 14.5/700 in `--text-primary`, accent on the glyph.
+
+**The cause was five near-identical copies of one treatment**, with nothing
+tying them together. So the fix is not a sixth copy: there is now ONE grouped
+selector carrying the shared declarations, placed EARLY in `css/style.css` so
+per-card deviations below it still win by source order. Only one deviation
+survives — `.dispute-alert-title` keeps `align-items: flex-start` and its
+line-height, because that title routinely wraps to two lines and the glyph
+should align to the first.
+
+Also corrected while there, and both were the same drift:
+
+- **`.attention-panel` was in the 18px structural-surface list** (with
+  `.round`, `.fund-total`, `.stat-tile`, `.menu-list`) while every notice card
+  beside it is 12px. It is a notice, not a surface, so it moved — and it now
+  takes `--accent-soft` like `.release-card` rather than a flat `--bg-card`.
+- **It carried a `border-left: 3px` rail** that no other card has and the
+  artboard does not either. Gone; the caught-up variant's now-dead
+  `border-left-color` went with it.
+
+**`tests/smoke.js`'s `cardFamily` MEASURES this**, because nothing behavioural
+can see it — the drift survived ~550 checks. It asserts the family rather than
+any single card: three titles must agree on case, size, weight and font, the
+accent must be on the glyph and not the words, and the panel's radius and
+border must match the notice cards it sits among. Run against the old CSS,
+five of its six checks fail.
+
+**The two radii in the card family are deliberate** and worth not "fixing":
+18px for structural surfaces that hold content, 12px for notices that make a
+statement. A future card should pick the one that matches its job.
+
 ## Migrations
 
 Run in the Supabase SQL editor, in order. `006` also needs a one-off
@@ -1494,12 +1538,15 @@ back: `getSwapRequests()` answers `[]`, `swapsAvailable()` goes false and the
 swap flow is simply not offered, while the treasurer's reorder names the
 migration rather than failing with a raw constraint error.
 
-`014_payout_disputes.sql` — `payouts.disputed_at` / `.disputed_note`, the
-`payout_ack_exclusive` CHECK, and `pf_payouts_guard()` extended (012's rules
-reproduced verbatim and not relaxed). **Not applied yet.** Requires 012.
-Validated on a real Postgres 16 by `tests/sql/run.sh` (20 assertions). Ships
-with `014_rollback.sql`, which names the query to run first — an open report
-that ₱30,000 never arrived is not something to drop silently.
+**`014` IS APPLIED** — `014_payout_disputes.sql`: `payouts.disputed_at` /
+`.disputed_note`, the `payout_ack_exclusive` CHECK, and `pf_payouts_guard()`
+extended (012's rules reproduced verbatim and not relaxed). Validated on a
+real Postgres 16 by `tests/sql/run.sh` (20 assertions). Ships with
+`014_rollback.sql`, which names the query to run first — an open report that
+₱30,000 never arrived is not something to drop silently.
+
+**So every migration through 014 is live.** A recipient can view the
+treasurer's receipt, confirm it arrived, or report that it did not.
 
 Every migration from 010 on is wrapped in `begin; … commit;`. Not decoration:
 without it a `raise` in 011's preflight aborted one statement and psql

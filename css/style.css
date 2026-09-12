@@ -1220,6 +1220,35 @@ body {
 }
 .money-refused .icon { flex: none; margin-top: 2px; }
 
+/* -------------------------------------------------------------------------
+   THE CARD TITLE, in one place.
+
+   Six notice cards had five near-identical copies of this, which is exactly
+   how "Needs your attention" drifted and stayed drifted: nothing tied it to
+   the family, so it kept a 13px UPPERCASE amber label from an earlier pass
+   while every card built afterwards used sentence case in Space Grotesk with
+   the accent on the ICON. `design/Main.dc.html` asks for the latter too —
+   14px/600 in --text-primary with an amber glyph — so the app had drifted
+   from its own approved artboard, not merely from itself.
+
+   Per-card deviations go BELOW this, never by re-declaring the whole block.
+   ------------------------------------------------------------------------- */
+.attention-title,
+.ack-title,
+.dispute-alert-title,
+.swap-ask-title,
+.dayone-title,
+.release-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700;
+  font-size: 14.5px;
+  color: var(--text-primary);
+}
+
 /* An already-released round that no longer holds its full goal. Only reachable
    on a fund that got there before the guard existed — but it must read as the
    contradiction it is, not as a normal release record. */
@@ -2162,23 +2191,19 @@ body {
 /* ==========================================================================
    Treasurer "Needs your attention" panel + pending-review queue (M3)
    ========================================================================== */
+/* A NOTICE card, like .release-card / .ack-card / .dispute-alert, not one of
+   the structural surfaces — so 12px and a single 1px border, and no 3px left
+   rail (which no other card has, and neither does the artboard). */
 .attention-panel {
-  background: var(--bg-card);
+  background: var(--accent-soft);
   border: 1px solid var(--accent);
-  border-left: 3px solid var(--accent);
   border-radius: 12px;
-  padding: 16px;
-  margin-bottom: 20px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
 }
-.attention-title {
-  font-family: 'Space Grotesk', sans-serif;
-  font-size: 13px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--accent);
-  margin: 0 0 12px;
-}
+/* The accent lives on the GLYPH, which is what the artboard does and what
+   every other card in this family does. */
+.attention-panel .attention-title .icon { color: var(--accent); flex-shrink: 0; }
 .attention-group {
   padding: 12px 0;
   border-top: 1px solid var(--border);
@@ -3023,7 +3048,6 @@ body::after {
 /* Everything else that reads as a "card" gets the softer radius and a lift,
    so the hero sits on a consistent family rather than alone. */
 .fund-total,
-.attention-panel,
 .round,
 .menu-list,
 .menu-locked-note,
@@ -3334,10 +3358,9 @@ body:not(.pf-anim) {
    so in its own right. */
 .attention-panel.caught-up {
   border-color: rgba(76, 175, 131, 0.45);
-  border-left-color: var(--success);
   background: rgba(76, 175, 131, 0.06);
 }
-.attention-panel.caught-up .attention-title { color: var(--success); }
+.attention-panel.caught-up .attention-title .icon { color: var(--success); }
 .attention-caught-up-note {
   margin: 6px 0 0;
   font-size: 12.5px;
@@ -3351,7 +3374,7 @@ body:not(.pf-anim) {
   color: var(--text-muted);
 }
 .fund-complete-personal b { color: var(--text-primary); font-weight: 700; }
-.attention-title,
+/* .attention-title is in the shared card-title group above. */
 .attention-group-label { display: inline-flex; align-items: center; gap: 7px; }
 
 /* Fund complete — the end state of the whole fund, not just another funded
@@ -4237,16 +4260,6 @@ body:not(.pf-anim) {
   padding: 13px 16px;
   margin-bottom: 14px;
 }
-.dayone-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 5px;
-  font-family: 'Space Grotesk', sans-serif;
-  font-weight: 700;
-  font-size: 14.5px;
-  color: var(--text-primary);
-}
 .dayone-title .icon { color: var(--accent); }
 .dayone-note { margin: 0; font-size: 12.8px; color: var(--text-muted); line-height: 1.5; }
 
@@ -4258,16 +4271,6 @@ body:not(.pf-anim) {
   border-radius: 12px;
   padding: 14px 16px;
   margin-bottom: 14px;
-}
-.release-card-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 5px;
-  font-family: 'Space Grotesk', sans-serif;
-  font-weight: 700;
-  font-size: 14.5px;
-  color: var(--text-primary);
 }
 .release-card-title .icon { color: var(--accent); flex-shrink: 0; }
 .release-card-note { margin: 0 0 11px; font-size: 12.8px; color: var(--text-muted); line-height: 1.5; }
@@ -4288,16 +4291,6 @@ body:not(.pf-anim) {
   border-radius: 12px;
   padding: 14px 16px;
   margin-bottom: 14px;
-}
-.ack-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 5px;
-  font-family: 'Space Grotesk', sans-serif;
-  font-weight: 700;
-  font-size: 14.5px;
-  color: var(--text-primary);
 }
 .ack-title .icon { color: var(--success); flex-shrink: 0; }
 .ack-note {
@@ -4391,17 +4384,8 @@ body:not(.pf-anim) {
   padding: 14px 16px;
   margin-bottom: 14px;
 }
-.dispute-alert-title {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin: 0 0 6px;
-  font-family: 'Space Grotesk', sans-serif;
-  font-weight: 700;
-  font-size: 14.5px;
-  line-height: 1.35;
-  color: var(--text-primary);
-}
+/* Two lines often, so the icon aligns to the first rather than to the middle. */
+.dispute-alert-title { align-items: flex-start; line-height: 1.35; }
 .dispute-alert-title .icon { color: var(--danger); flex: none; margin-top: 1px; }
 .dispute-alert-body {
   margin: 0 0 6px;
@@ -4550,16 +4534,6 @@ body:not(.pf-anim) {
   border-radius: 12px;
   padding: 14px 16px;
   margin-bottom: 14px;
-}
-.swap-ask-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 6px;
-  font-family: 'Space Grotesk', sans-serif;
-  font-weight: 700;
-  font-size: 14.5px;
-  color: var(--text-primary);
 }
 .swap-ask-title .icon { color: var(--pending-review); flex-shrink: 0; }
 .swap-ask-body {

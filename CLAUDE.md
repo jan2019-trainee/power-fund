@@ -1319,6 +1319,111 @@ Four smoke checks force the divergence (round 1 released to Sarah while Regine
 holds position 1) and all four fail against the old reads — printing
 "Round 1 — Regine" and `["Regine"]`, which is the reported bug exactly.
 
+## "It never arrived" — payout disputes (migration 014)
+
+Reported from use, looking at the live Received ✓ card: **a member asked "did
+it arrive?" had exactly one button.** If the ₱30,000 had not arrived their
+options were to press something untrue or to stay silent — and silence is
+indistinguishable from forgetting to tap. The one dispute this app exists to
+settle was the one thing it could not record. Category: **New Feature**, **no
+approved mockup** — flagged for UI/UX QA as new design.
+
+The same report named a second gap, narrower than it first looked: the
+treasurer's receipt **already existed and was already viewable**, but only on
+the Rounds screen (the release record and Payout history). So somebody was
+being asked to sign for ₱30,000 with the evidence two taps away on another
+screen. `payment_assets_read` is open to any signed-in member, so there was no
+permission work — only placement.
+
+### The product decision, taken by the owner
+
+**A dispute is FLAGGED LOUDLY and BLOCKS NOTHING.** It leads every screen,
+shows on the round for everyone, and is logged — while the fund keeps
+collecting. Put to them rather than invented, because "does a dispute freeze
+the fund" is a business rule about money.
+
+The alternative (gating `canStartNextRound`) was offered and declined, and the
+reasoning is worth keeping: the money has already left the treasurer's hands,
+so a hold punishes the other four for a transfer they cannot fix, and one
+member who forgets to withdraw a resolved report would stall the group with no
+way for the treasurer to clear it. Same shape as 012's recorded decision that a
+receipt is not a gate.
+
+### The rules, and which ones differ from 012
+
+- **Only the recipient may file one** — the same axis as the confirmation, and
+  the treasurer explicitly cannot file on a member's behalf.
+- **`disputed_at` is stamped SERVER-SIDE**, like `received_at`.
+- **`received_at` and `disputed_at` can never both be set.** They are opposite
+  answers, so it is a CHECK CONSTRAINT (`payout_ack_exclusive`) and not merely
+  trigger logic — no path, present or future, should be able to put a row on
+  record as both received and never received.
+- **Confirming receipt CLEARS the dispute**, and the guard does it, not the
+  client. Money arriving late is the ordinary happy ending, and leaving it to
+  the caller would let a forgetful one violate the invariant.
+- **A dispute may be withdrawn by the person who filed it**, which is the one
+  place this deliberately differs from `received_at` (treasurer-only to
+  clear). A confirmation is a receipt and amending one is a correction; a
+  dispute is a report of a problem, and problems get resolved. **If a dispute
+  were permanent nobody would dare press it.** The treasurer may also clear
+  one, which is how a report gets closed out after the two of them have sorted
+  it.
+- **Already confirmed received → cannot be disputed.** Taking a receipt back
+  is a correction, and corrections are Undo Release.
+
+### What the SQL suite caught
+
+Three of the 20 new assertions were wrong before the code was:
+
+- **"a reporter may NOT delete the treasurer's receipt" was VACUOUS.** The
+  fixture left `receipt_url` null, so setting it to null changed nothing, the
+  pinning never fired, and the check passed against a guard that did not
+  protect it. The fixture now populates `receipt_url` on released rounds —
+  which is also more honest, since a receipt is required at release.
+- **"the treasurer may also clear a report" filed the report AS the
+  treasurer**, which the guard correctly refuses. The setup was wrong, not the
+  rule.
+- psql renders a concatenated boolean as `true`/`false`, not `t`/`f`.
+
+**012's member branch would have refused every dispute write.** It raised
+`'A recipient may only confirm receipt, nothing else'` whenever `received_at`
+was null — which is exactly the shape of a dispute. The branch now admits a
+dispute-only write, and the column pinning had to be re-asserted rather than
+assumed to still apply, which is what the receipt check above exists for.
+
+### UI (no approved mockup)
+
+- **RED, and the only place on Home with the danger family.** It leads every
+  screen — ahead of the rejected card, a funded round and the review queue, all
+  of which are orderly by comparison. It outranks the rejected card by POSITION
+  rather than by a louder colour: that one is also red but is about ₱1,000 and
+  is fixed by resending.
+- **Shown to EVERYONE.** The fund is transparent by design and a ₱30,000 gap is
+  the group's problem; hiding it would make the treasurer the only person who
+  could see it.
+- **The recipient does NOT also get the group alert about themselves.** Their
+  own card already says it and carries the two actions, so rendering both
+  printed the same fact twice with the payout-QR nudge wedged between the
+  copies. **Caught in a capture, not a test** — the second time that shape of
+  duplication has only shown up in a screenshot (the first was the
+  fund-complete screen). A check now asserts it.
+- **"No — it hasn't arrived" is not a red button.** It sits under a green
+  primary, and making it red would read as a destructive confirmation, which it
+  is not: it files a report. The panel's own submit IS red, where it is the
+  confirmed act.
+- **The two panels can never both be open.** They are opposite answers with
+  separate note fields, so a half-typed "received in full" can never be filed
+  as a dispute. Asserted in both directions.
+- **"Undo release", not "Undo release & re-send".** The longer label wrapped to
+  two lines beside View receipt at 430px; the remedy is explained in the fine
+  print instead, where it has room. Measured in a capture.
+- The activity entry carries **no amount**, same rule as the confirmation: no
+  money moved, and a figure would make a release-and-dispute read as ₱60,000
+  leaving the fund.
+- `disputed_at` / `disputed_note` are in the backup and restored. The rollback
+  names the query to run first, because an open report is exactly the thing
+  not to drop silently.
+
 ## Migrations
 
 Run in the Supabase SQL editor, in order. `006` also needs a one-off
@@ -1388,6 +1493,13 @@ live. Worth knowing which way the two features degrade if 013 is ever rolled
 back: `getSwapRequests()` answers `[]`, `swapsAvailable()` goes false and the
 swap flow is simply not offered, while the treasurer's reorder names the
 migration rather than failing with a raw constraint error.
+
+`014_payout_disputes.sql` — `payouts.disputed_at` / `.disputed_note`, the
+`payout_ack_exclusive` CHECK, and `pf_payouts_guard()` extended (012's rules
+reproduced verbatim and not relaxed). **Not applied yet.** Requires 012.
+Validated on a real Postgres 16 by `tests/sql/run.sh` (20 assertions). Ships
+with `014_rollback.sql`, which names the query to run first — an open report
+that ₱30,000 never arrived is not something to drop silently.
 
 Every migration from 010 on is wrapped in `begin; … commit;`. Not decoration:
 without it a `raise` in 011's preflight aborted one statement and psql

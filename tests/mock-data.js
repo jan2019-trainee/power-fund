@@ -23,13 +23,20 @@ const PAYOUTS = [1, 2, 3, 4, 5].map((r) => ({
   amount: r === 1 ? 30000 : null,
   recipient_member_id: r === 1 ? MEMBERS[0].id : null,
   recipient_name: r === 1 ? MEMBERS[0].name : null,
-  receipt_url: null,
   released_by: null,
   // Migration 012. Round 1 is released and NOT yet acknowledged, which is the
   // state the recipient's "Received ✓" card exists for; every other round is
   // unreleased, so there is nothing to acknowledge.
   received_at: null,
   received_note: null,
+  // Migration 014. Null by default: an open dispute is a red alert leading
+  // every screen, so leaving one here would front dozens of unrelated checks.
+  disputed_at: null,
+  disputed_note: null,
+  // A receipt is REQUIRED at release, so a released round has one. Populated
+  // because "the recipient can see the treasurer's proof" is the other half
+  // of what 014 is for, and a null here would make that check vacuous.
+  receipt_url: r === 1 ? 'https://example.invalid/receipt-r1.jpg' : null,
 }));
 
 // A few confirmed contributions so rounds/members/insights have something real.

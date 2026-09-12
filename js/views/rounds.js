@@ -311,6 +311,17 @@ window.PFViews.rounds = function (ctx) {
                            ? ` — ${escapeHtml(payout.received_note)}`
                            : ""
                        }</span></p>`
+                     : payout.disputed_at
+                     ? `<p class="payout-disputed">${icon(
+                         "alert",
+                         13
+                       )}<span><b>${escapeHtml(
+                         payoutRecipientName(payout)
+                       )}</b> reports this never arrived${
+                         payout.disputed_note
+                           ? ` — “${escapeHtml(payout.disputed_note)}”`
+                           : ""
+                       }</span></p>`
                      : `<p class="payout-awaiting">${icon("clock", 13)}<span>Awaiting
                           <b>${escapeHtml(
                             payoutRecipientName(payout)

@@ -1673,10 +1673,18 @@ record's padding delimiter, both produce a body of **exactly the same length**
 in production both would have looked like success: a 201 from the push service
 and a phone that never buzzed.
 
-#### Node 22 strips TypeScript natively
+#### Node 22 strips TypeScript natively — and 18 does not
 
 Which is why the function's modules are imported straight out of
-`supabase/functions/` by the tests rather than copied or built. There is no
+`supabase/functions/` by the tests rather than copied or built.
+
+**This was assumed and never guarded, and it broke on a real machine.** Node
+only strips types from 22.6 onward; on v18 every suite here died with a bare
+`ERR_UNKNOWN_FILE_EXTENSION` naming no version and no remedy. Built on 22,
+documented as a feature, shipped without a check. The pre-deploy check
+(`config.test.mjs`) was the worst of it: it needed the newest Node purely for a
+base64url decode Node has had built in since 16, and it is the one file that
+has to run wherever somebody happens to be standing. There is no
 build step, consistent with the rest of the project. The one thing this cost:
 `index.ts` reads its env **at call time, not at module load**, and guards
 `Deno.serve` behind a `globalThis.Deno` check — so the handler can be imported
@@ -2268,12 +2276,19 @@ python3 -m http.server 8791 & # then:
 PF_CHROMIUM=/opt/pw-browsers/chromium-1194/chrome-linux/chrome node tests/smoke.js
 ```
 
-`config.test.mjs` is deliberately dependency-free — it is the check somebody
-runs right before pasting a key and deploying, which is exactly when
-`node_modules` may not exist. The other three `.mjs` suites need `npm install` (they use `http_ece` as a test
-oracle) and Node 22+, which strips the `.ts` types natively — which is why the
-Edge Function's modules can be imported straight out of
-`supabase/functions/` rather than copied or built.
+`config.test.mjs` is deliberately **dependency-free AND version-free** — it
+imports `node:fs` and nothing else. It is the check somebody runs right before
+pasting a key and deploying, which is exactly when `node_modules` may not
+exist and when the machine's Node is whatever it happens to be.
+
+The other three `.mjs` suites need `npm install` (they use `http_ece` as a test
+oracle) **and Node 22+**, which strips `.ts` types natively — which is what
+lets the Edge Function's modules be imported straight out of
+`supabase/functions/` rather than copied or built. They check the version and
+say so, and **the check has to precede a DYNAMIC `import()`**: a static import
+is hoisted and resolved before any module code runs, so a guard written above
+one can never fire — Node dies on the `.ts` extension first. The first version
+of this guard was exactly that, and was useless.
 
 A fifth lesson, from 013: **the harness's own stub had drifted from
 `schema.sql`.** `members.member_order` is declared `unique` there and was not

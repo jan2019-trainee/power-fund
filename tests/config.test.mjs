@@ -9,6 +9,7 @@
  * RUN:  node tests/config.test.mjs
  * ------------------------------------------------------------------------- */
 import { readFileSync } from "node:fs";
+import { webcrypto } from "node:crypto";
 
 /* Node's own base64url decoder, NOT the Edge Function's — importing that would
  * pull in a .ts file, and Node only strips types from 22.6 onward. This check
@@ -55,6 +56,24 @@ console.log("js/config.js — the VAPID key this fund ships");
     check(
       "...and is NOT 32 bytes, which would mean the PRIVATE half was pasted",
       !bytes || bytes.length !== 32
+    );
+    // THE REAL CHECK. Length and prefix would accept 65 random bytes starting
+    // 0x04 — a paste that dropped or gained a character can still look right.
+    // Importing it is the only way to know it is a point ON the curve, and it
+    // is what the browser does before it will subscribe.
+    let onCurve = false;
+    try {
+      await webcrypto.subtle.importKey(
+        "raw", bytes, { name: "ECDH", namedCurve: "P-256" }, false, []
+      );
+      onCurve = true;
+    } catch (e) {
+      onCurve = e.message;
+    }
+    check(
+      "...and is a real point on the P-256 curve, not 65 plausible bytes",
+      onCurve === true,
+      onCurve === true ? "" : String(onCurve)
     );
   }
 }

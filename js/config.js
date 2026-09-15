@@ -54,9 +54,21 @@ window.APP_CONFIG = {
   // anything goes wrong.
   AUTH_MODE: "required",
 
-  // Push notifications (migration 015). The VAPID PUBLIC key — base64url, no
-  // padding. It is meant to be in the page: it is what the browser signs the
-  // subscription against, and it identifies this app to the push service.
+  // Push notifications (migration 015).
+  //
+  // THIS FIELD HOLDS THE VAPID *PUBLIC* KEY. There is no separate "VAPID"
+  // entry in this file — this is it, under a different name, which has caught
+  // somebody out already. Specifically: the 87-character string labelled
+  // "Public Key:" by `npx web-push generate-vapid-keys`, which always starts
+  // with "B". The 43-character "Private Key:" NEVER goes in this file, and
+  // neither does PF_PUSH_SECRET — a secret was pasted here once and had to be
+  // rotated out of the git history.
+  //
+  // The same public key also goes to Supabase as the VAPID_PUBLIC_KEY
+  // function secret. Two places, one value, and they must match exactly.
+  //
+  // It is meant to be in the page: it is what the browser subscribes against,
+  // and it identifies this app to the push service.
   //
   // THE PRIVATE HALF NEVER COMES NEAR THIS FILE. It is an Edge Function
   // secret, the same rule as the service_role key above. Generate a pair with:

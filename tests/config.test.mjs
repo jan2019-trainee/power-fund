@@ -1,15 +1,19 @@
 /* ---------------------------------------------------------------------------
  * Power Fund — the deploy-time config check
  *
- * DELIBERATELY DEPENDENCY-FREE. It imports one local module and node:fs, and
- * nothing from node_modules — so it runs on a machine that has just cloned the
- * repo, which is exactly where somebody stands when they are about to paste a
- * key and deploy.
+ * DELIBERATELY DEPENDENCY-FREE, AND VERSION-FREE. It imports node:fs and
+ * nothing else — no node_modules, and no .ts module, because Node only strips
+ * types from 22.6 onward and the person about to paste a key and deploy runs
+ * whatever Node they happen to have. (Reported from a real machine on v18.)
  *
  * RUN:  node tests/config.test.mjs
  * ------------------------------------------------------------------------- */
 import { readFileSync } from "node:fs";
-import { b64urlToBytes } from "../supabase/functions/notify-payment/webpush.ts";
+
+/* Node's own base64url decoder, NOT the Edge Function's — importing that would
+ * pull in a .ts file, and Node only strips types from 22.6 onward. This check
+ * has to run on whatever Node the person deploying happens to have. */
+const b64urlToBytes = (s) => new Uint8Array(Buffer.from(s, "base64url"));
 
 let failed = 0;
 function check(name, pass, detail) {

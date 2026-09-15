@@ -19,15 +19,26 @@
  *
  * RUN:  node tests/webpush.test.mjs
  * ------------------------------------------------------------------------- */
+/* These import the Edge Function's .ts modules directly, which needs Node's
+ * native type stripping (22.6+). Without this guard Node fails with a bare
+ * ERR_UNKNOWN_FILE_EXTENSION that names no version and no remedy. */
+const nodeMajor = Number(process.versions.node.split(".")[0]);
+if (nodeMajor < 22) {
+  console.error(
+    `This suite imports TypeScript directly and needs Node 22+ — you are on ` +
+      `${process.versions.node}.\n\n` +
+      `  node tests/config.test.mjs   is the pre-deploy check and runs on any Node.\n`
+  );
+  process.exit(2);
+}
+
 import crypto from "node:crypto";
 import ece from "http_ece";
-import {
-  encryptPayload,
-  vapidAuthHeader,
-  generateServerKeys,
-  b64urlToBytes,
-  bytesToB64url,
-} from "../supabase/functions/notify-payment/webpush.ts";
+// DYNAMIC, and after the guard above. A static import is HOISTED and resolved
+// before any module code runs, so the version check could never fire — Node
+// would fail on the .ts extension first, which is exactly what happened.
+const { encryptPayload, vapidAuthHeader, generateServerKeys, b64urlToBytes, bytesToB64url } =
+  await import("../supabase/functions/notify-payment/webpush.ts");
 
 let failed = 0;
 function check(name, pass, detail) {

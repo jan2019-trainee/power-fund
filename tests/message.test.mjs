@@ -1,6 +1,21 @@
 /* What the treasurer's lock screen says. The rule under test is the one the
  * database went to trouble for: ONE NOTIFICATION PER TRANSFER. */
-import { composeNotification, cycleLabel, peso } from "../supabase/functions/notify-payment/message.ts";
+/* These import the Edge Function's .ts modules directly, which needs Node's
+ * native type stripping (22.6+). Without this guard Node fails with a bare
+ * ERR_UNKNOWN_FILE_EXTENSION that names no version and no remedy. */
+const nodeMajor = Number(process.versions.node.split(".")[0]);
+if (nodeMajor < 22) {
+  console.error(
+    `This suite imports TypeScript directly and needs Node 22+ — you are on ` +
+      `${process.versions.node}.\n\n` +
+      `  node tests/config.test.mjs   is the pre-deploy check and runs on any Node.\n`
+  );
+  process.exit(2);
+}
+
+// Dynamic, after the guard: a static import is hoisted past it.
+const { composeNotification, cycleLabel, peso } =
+  await import("../supabase/functions/notify-payment/message.ts");
 
 let failed = 0;
 function check(name, pass, detail) {

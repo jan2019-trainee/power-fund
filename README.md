@@ -107,6 +107,15 @@ power fund/
    [`supabase/migrations/`](supabase/migrations/) in order. A brand-new database
    created from the current `schema.sql` already includes them and can skip this.
 
+> **Migrations here are applied BY HAND, in the SQL editor — never with
+> `supabase db push`.**
+>
+> The files are named `001_…`, `002_…`, not the CLI's timestamp format, and the
+> CLI has no record of which have been applied. `db push` would try to replay
+> all of them against a live fund. `supabase/config.toml` exists so the CLI can
+> deploy the notifications Edge Function; that is the only thing it is for
+> here. `supabase functions …` is safe, `supabase db …` is not.
+
 ### 3. Seed members and cycles
 
 1. **SQL Editor → New query** again.
@@ -350,6 +359,119 @@ email addresses, the account numbers their payouts are sent to, and links to
 their payment screenshots. Keep it somewhere private — it is the fund's
 ledger. It does NOT contain the PINs; those are unreachable from the browser
 once migration 010 is applied.
+
+## Payment notifications (migration 015)
+
+The treasurer can get an alert on their phone when a member sends a payment,
+instead of finding out next time they happen to open the app.
+
+**Supabase has no push product.** What it provides is the trigger side —
+a Postgres trigger, `pg_net`, and Edge Functions. The delivery itself is the
+**Web Push** protocol, signed with a VAPID key pair by a function you deploy.
+No Firebase account is needed: Android Chrome rides FCM underneath, but VAPID
+is all the app supplies.
+
+**It is a nudge, never the record.** Web Push is best-effort — a phone in Doze,
+a killed browser and an expired subscription all drop messages silently. The
+in-app attention queue stays the source of truth, and nothing in the fund
+depends on a notification having arrived.
+
+### Rolling it out
+
+1. **Run [`supabase/migrations/015_push_notifications.sql`](supabase/migrations/015_push_notifications.sql).**
+   Safe on its own: the outbox starts filling and nothing is dispatched,
+   because no endpoint is configured yet.
+2. **Generate a VAPID key pair** — `npx web-push generate-vapid-keys`. Put the
+   **public** half in `PUSH_PUBLIC_KEY` in [`js/config.js`](js/config.js) and
+   redeploy. It belongs in the page; that is what it is for.
+3. **Deploy the Edge Function** that does the signing and sending. This needs
+   the Supabase CLI and `supabase/config.toml` (created by `supabase init`,
+   committed). Use only `supabase functions …` — see the warning in step 2 of
+   Setup about `supabase db push`:
+
+   ```bash
+   supabase functions deploy notify-payment --no-verify-jwt
+   supabase secrets set \
+     PF_PUSH_SECRET='<the same long random string as step 4>' \
+     VAPID_PUBLIC_KEY='<public half>' \
+     VAPID_PRIVATE_KEY='<private half>' \
+     VAPID_SUBJECT='mailto:you@example.com'
+   ```
+
+   `--no-verify-jwt` is required and is **not** a hole: the caller is Postgres
+   via `pg_net`, which has no Supabase session to present, so JWT verification
+   would simply stop the trigger reaching the function at all. The gate is the
+   `x-pf-push-secret` header, compared in constant time — and an **unset**
+   secret refuses every request rather than allowing them, so a half-finished
+   deploy cannot become an open relay onto the treasurer's phone.
+
+   `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are injected by Supabase; you
+   do not set those yourself.
+
+4. **Point the trigger at it**, in the Supabase SQL editor:
+
+   ```sql
+   update app_secrets
+      set push_endpoint_url = 'https://<project>.functions.supabase.co/notify-payment',
+          push_secret       = '<a long random string>'
+    where id = 1;
+   ```
+
+   The same `push_secret` goes to the function, which rejects any request that
+   does not carry it — the endpoint is public, so this is what stops anyone
+   POSTing it a fabricated notification.
+5. **Turn it on per device**: Menu → Account → **Payment notifications**.
+
+Until step 3 is done the app says so rather than claiming notifications are
+on — `pf_push_status()` reports whether the sending half exists, and the
+screen repeats it.
+
+### What the function is, and what it deliberately isn't
+
+[`supabase/functions/notify-payment/`](supabase/functions/notify-payment/) has
+**no dependencies at all** — not `npm:web-push`, not a third-party Deno module.
+PostgREST is plain `fetch` and the crypto is WebCrypto (`webpush.ts` implements
+RFC 8291 message encryption and RFC 8292 VAPID). Two reasons, in this order:
+`web-push` is built on Node's `crypto` and would run through Deno's Node
+compatibility layer, which nothing in this repo can verify; and this is the one
+place in the project running with the **service-role key in scope**, so zero
+imports is zero supply chain.
+
+It is not hand-rolled crypto — every primitive is WebCrypto's. What the file
+owns is the assembly, and [`tests/webpush.test.mjs`](tests/webpush.test.mjs)
+checks that assembly against the `http_ece` library byte for byte, including
+**decrypting its output with an independent implementation**, which is exactly
+what a browser does.
+
+### Where the secrets live
+
+| Secret | Where | Never |
+| --- | --- | --- |
+| VAPID **public** key | `js/config.js`, served to the browser | — |
+| VAPID **private** key | Edge Function secret | the repo, `js/config.js` |
+| `push_secret` | `app_secrets` + Edge Function secret | `app_settings`, the backup |
+| `service_role` key | Edge Function secret | the repo, `js/config.js` |
+
+`app_secrets` has RLS on and **no policy at all**, so PostgREST cannot read it;
+the push URL and secret are as unreachable from the browser as the PINs are.
+
+### Per device, not per account
+
+A Web Push subscription belongs to **one browser profile** — the same shape as
+the "seen the intro" flag. Turning notifications on in a desktop browser tells
+the phone nothing, and the screen says so before the switch rather than after.
+
+- **Android / Chrome** — works in a tab and installed.
+- **iPhone / iPad** — Safari only offers Web Push once the site has been
+  **added to the Home Screen** (see the PWA section above). In an ordinary
+  Safari tab there is no push at all, and the app says so.
+
+### What gets sent
+
+One alert per **transfer**, not per cycle: a member paying six cycles in one
+batch is a single notification, coalesced in the database. The treasurer's own
+payments do not notify them, and a re-upload on a claim already waiting is not
+a new claim. Cash payments the treasurer records themselves send nothing.
 
 ## Security limitations — read this
 

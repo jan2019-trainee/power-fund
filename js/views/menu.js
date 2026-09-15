@@ -20,7 +20,8 @@ window.PFViews.menu = function (ctx) {
     members, unlocked, myMember, escapeHtml, icon, memberAvatar, C, hasMasterPin,
     authMode, sessionEmail, identityLocked, signInStatus, isTreasurerAccount,
     hasTreasurerPin, isWide,
-    payoutOwner, maskAccount, canSwapTurns, myOutgoingSwap, memberName
+    payoutOwner, maskAccount, canSwapTurns, myOutgoingSwap, memberName,
+    canUsePush, pushNote
   } = ctx;
 
   /** One tappable settings row. `note` is the quiet second line. */
@@ -316,6 +317,20 @@ window.PFViews.menu = function (ctx) {
             ? `${st.withEmail} of ${st.total} addresses on file`
             : `${st.linked} of ${st.total} have signed in`
         )
+      );
+    }
+    // Payment notifications (015). NEW FEATURE BEYOND THE DESIGN — no
+    // mockup has one. `canUsePush` is a LINKED account carrying is_treasurer,
+    // not `unlocked` and not isTreasurerAccount(): the sender picks who to
+    // notify from members.is_treasurer, so a PIN-unlocked member offered this
+    // would register a device nothing will ever send to. Today the only event
+    // is a member's payment, which is the treasurer's to act on.
+    //
+    // In Account rather than Security because it is about this DEVICE and
+    // this login, which is what the group beside it is already about.
+    if (canUsePush) {
+      account.push(
+        row("bell", "Payment notifications", "PowerFund.openNotifyModal()", pushNote)
       );
     }
     account.push(

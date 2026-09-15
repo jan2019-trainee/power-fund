@@ -1468,6 +1468,271 @@ five of its six checks fail.
 18px for structural surfaces that hold content, 12px for notices that make a
 statement. A future card should pick the one that matches its job.
 
+## Push notifications — the treasurer's phone (migration 015)
+
+Asked for directly: the treasurer has no idea a payment is waiting until they
+happen to open the app, so every claim still gets chased by a personal
+message — the thing the app exists to replace. Category: **New Feature**, and
+**no approved mockup exists** — the design has no notifications and no auth.
+Flagged for UI/UX QA as new design.
+
+**Supabase has no push product.** It supplies the trigger side (a Postgres
+trigger, `pg_net`, Edge Functions); delivery is the **Web Push** protocol,
+signed with VAPID by a function we deploy. Android Chrome rides FCM
+underneath and needs no Firebase account. Platform was settled before any
+code: the owner confirmed **Android/Chrome**, which removes the one real
+blocker — Safari exposes `pushManager` only once the site is on the Home
+Screen, and in an ordinary iOS tab there is no push at all.
+
+**It is a nudge, never the record**, the same posture as 012's "a receipt is
+not a gate". Web Push is best-effort — Doze, a killed browser, an expired
+subscription — so nothing in the fund depends on one having arrived, and the
+attention queue stays the truth.
+
+### Why an outbox, and not a direct call
+
+Two things make the obvious per-row dispatch wrong, and both are ordinary use
+here:
+
+- **A member paying six cycles in one transfer is ONE upsert of six rows.**
+  Six dispatches would buzz the treasurer six times for one transfer.
+- **That upsert is `insert ... on conflict do update`.** A batch where some
+  cycles already had rows takes the UPDATE path for those and the INSERT path
+  for the rest — and a statement-level trigger cannot cover both, because
+  Postgres refuses transition tables for a multi-event trigger. That route
+  would have sent TWICE for one transfer.
+
+So every row appends to `push_outbox`, and **one dispatch per transaction**
+carries the txid; the Edge Function claims the whole txid and writes one
+notification. The claim is a transaction-local GUC (`pf.push_scheduled`), the
+same shape as 013's `pf.swap_ok` and unreachable from a browser for the same
+reason — PostgREST exposes only public-schema functions and `set_config` lives
+in `pg_catalog`.
+
+`pg_net` **queues and sends AFTER COMMIT**, which is what makes the whole
+design safe: the function can never read outbox rows from a transaction that
+then rolled back, and a dead push endpoint cannot delay a payment write.
+
+### The trigger fires on the money table
+
+Every path through `pf_queue_payment_push()` is inside an exception block. A
+notification that cannot be queued must never roll back a member's payment.
+
+**TWO blocks, not one, and this is the part not to "simplify".** A plpgsql
+exception block undoes everything inside it — so a single block means a dead
+`pg_net` erases the outbox row that exists to explain why the phone stayed
+quiet. Mutating the function to one block fails three checks in
+`tests/sql/run.sh`. The GUC is claimed in the FIRST block for the same family
+of reason: claimed in the second, a dispatch that throws would release it and
+every remaining row of the batch would try again.
+
+### `push_subscriptions` is the one table this app does not read openly
+
+An **endpoint URL is a capability**: whoever holds it can push to that phone.
+So SELECT is self-only — a deliberate break from "this fund is transparent by
+design", and the only such break. Nobody, treasurer included, needs to read
+another member's endpoint; the Edge Function reads the table with the service
+role. `push_outbox` goes further and has RLS on with **no policy at all**,
+like `app_secrets`.
+
+**Registration goes through a security-definer function**, not an upsert,
+because of the takeover case: a shared phone, or a member who signs out and
+another signs in, produces the SAME endpoint already sitting on somebody
+else's row. A plain upsert would be hidden by the policy and fail **silently**
+— `[]` and no error, the exact bug `requireRows()` exists for. The residual
+risk is that a member who somehow learns another's endpoint could take their
+notifications away; they could already push to it if they knew it, and they
+cannot read it here. Noted rather than defended against.
+
+### The honesty problem, and `pf_push_status()`
+
+Registering a device while no Edge Function is deployed is a **real write with
+no effect anybody can see**. A screen reading "Notifications are on" over that
+is precisely the simulated notification rule 4 forbids — and the browser
+cannot tell, because `app_secrets` is unreadable by design.
+
+`pf_push_status()` answers it: **booleans and a count only**, never the URL
+and never the secret, the same discipline as `pf_pin_status()`. The row says
+*"On here, but nothing is sending yet"* and the sheet says it in full. A
+null answer is treated as "cannot promise", never as "configured".
+
+- **It is `revoke execute ... from public` before the grant**, and so are the
+  other two. Postgres grants EXECUTE on a new function to PUBLIC by default
+  and every role is a member of it, so granting to `authenticated` alone would
+  have left all three callable by `anon` — which 011 has otherwise revoked
+  from every table in the fund. Caught by a test, not by reading.
+- **It is defined AFTER the `app_secrets` columns, and has to stay there**: a
+  `language sql` body is parsed when the function is CREATED, so it cannot
+  name `push_endpoint_url` before the column exists. (plpgsql resolves at run
+  time, which is why `pf_register_push` can sit earlier.) Found by the SQL
+  suite refusing to apply the migration.
+
+### The gate is `verifiedTreasurer()`, not `isTreasurerAccount()`
+
+The sender picks who to notify from `members.is_treasurer`, so the switch has
+to mean the same thing. `isTreasurerAccount()` falls back to the PIN when
+nobody is flagged — using it would offer a PIN-unlocked member a switch that
+registers a device nothing will ever send to, and tell them it worked. Today
+the only event is a member's payment, which is the treasurer's to act on, so
+this is treasurer-only **by scope rather than by permission**; when
+member-facing events land the gate becomes `editableMember()`.
+
+Checked in `openNotifyModal`, `enableNotifications` and `disableNotifications`
+as well as in the menu row — they are exported on `PowerFund`, so an absent
+row is not the gate.
+
+### Decisions taken, with defaults stated
+
+- **The treasurer is not told about their own payment.** They are a member
+  with a payout round like everyone; buzzing their own phone is noise. Done in
+  the trigger, so no useless outbox row is written.
+- **Cash payments the treasurer records themselves send nothing** (status 2 is
+  theirs to write, and 011 refuses it from a member outright).
+- **A re-upload or note edit on a claim already waiting is not a new claim** —
+  `old.status = 1` skips.
+- **Lock-screen text carries names and amounts, never account numbers.**
+- **Per device, said before the switch and not after.** A subscription belongs
+  to one browser profile, the same shape as `pf_onboarded`, and it is the
+  thing people reasonably assume works the other way.
+
+### Two client details worth not undoing
+
+- **`Notification.requestPermission()` is called FIRST**, before any other
+  await and before the `busy` render. A browser will refuse the prompt once
+  the user activation that reached the handler has been spent.
+- **Turning it off writes the DATABASE first, then unsubscribes locally.** The
+  row is the record of where to send, so clearing it is what actually stops
+  the notifications; if it throws, nothing has changed and the switch honestly
+  still reads as on. The other order leaves a device that looks off and a row
+  still being sent to. Asserted by timestamp in `tests/smoke.js`.
+- **The service worker cannot re-register a rotated subscription** — that is
+  an authenticated write and a worker has no Supabase session. It messages the
+  page instead, and the page compares the live endpoint against
+  `localStorage.pf_push_endpoint` and repairs quietly.
+
+### What the suites can and cannot see
+
+`tests/smoke.js` runs with `serviceWorkers: "block"` and mocks the network, so
+**no real push can ever be delivered in it**. The permission states, the gate
+and the two write orders are covered by stubbing `Notification` and
+`pushManager`; `tests/sql/run.sh` covers the policies, the coalescing and the
+never-costs-a-payment property. **Actual delivery is a manual check on a real
+phone** — said plainly rather than implied by a green suite.
+
+Two gaps in the SQL harness closed on the way, both of which had been hiding
+things:
+
+- **`contributions` was never stubbed at all**, so 011's central claim — a
+  member may claim but may not confirm their own payment — had no test.
+- **`run()` cannot express a filtered SELECT.** RLS hides rows rather than
+  raising and psql prints nothing for an empty result, so `run()` sees no
+  UPDATE/DELETE tag, no error, and reports OK. Every read-visibility assertion
+  written with it would have passed whatever the policy said. `pfval()` reads a
+  value instead. (013's own flag-does-not-survive check was already written the
+  right way, with `state`.)
+
+### The sender — `supabase/functions/notify-payment/` (phase 2)
+
+**Zero dependencies, deliberately.** Not `npm:web-push`, not a third-party
+Deno module: PostgREST is plain `fetch` and the crypto is WebCrypto.
+`webpush.ts` implements RFC 8291 (aes128gcm) and RFC 8292 (VAPID) itself.
+
+Two reasons, in this order:
+
+1. **`web-push` is built on Node's `crypto`** (`createECDH`, `createHmac`), so
+   on Supabase Edge Functions it runs through Deno's Node-compatibility layer —
+   and **nothing in this repo's toolchain can verify that**, because there is
+   no Deno here. WebCrypto is native to Deno *and* to Node, so what the tests
+   run is the same code that deploys.
+2. This is the one place in the project executing with the **service-role key
+   in scope**. Zero imports is zero supply chain.
+
+It is **not hand-rolled crypto** — every primitive is WebCrypto's (ECDH, HKDF,
+AES-GCM, ECDSA). What the file owns is the *assembly*, and that is what is
+tested.
+
+#### How it is actually verified
+
+`tests/webpush.test.mjs` checks the assembly against `http_ece` — the library
+`web-push` itself encrypts with — in three ways, because one would not do:
+
+- **Byte-identical output.** Given the same salt and the same ephemeral key
+  pair, our body must equal theirs exactly. That pins every step of the
+  derivation, not just the result.
+- **An independent implementation DECRYPTING our output** with the
+  subscriber's private key, which is precisely what the browser does. A round
+  trip against our own code could not catch a shared misreading of the spec;
+  this can, and it is the check that matters.
+- The VAPID JWT **verified with WebCrypto's own `verify`** against the public
+  key — the thing the push service does before accepting the request.
+
+Run against mutated code first. Swapping the receiver/sender order in the
+`WebPush: info` construction, or using `0x01` instead of `0x02` as the last
+record's padding delimiter, both produce a body of **exactly the same length**
+— so a size check would have passed both. Only the decrypt catches them, and
+in production both would have looked like success: a 201 from the push service
+and a phone that never buzzed.
+
+#### Node 22 strips TypeScript natively — and 18 does not
+
+Which is why the function's modules are imported straight out of
+`supabase/functions/` by the tests rather than copied or built.
+
+**This was assumed and never guarded, and it broke on a real machine.** Node
+only strips types from 22.6 onward; on v18 every suite here died with a bare
+`ERR_UNKNOWN_FILE_EXTENSION` naming no version and no remedy. Built on 22,
+documented as a feature, shipped without a check. The pre-deploy check
+(`config.test.mjs`) was the worst of it: it needed the newest Node purely for a
+base64url decode Node has had built in since 16, and it is the one file that
+has to run wherever somebody happens to be standing. There is no
+build step, consistent with the rest of the project. The one thing this cost:
+`index.ts` reads its env **at call time, not at module load**, and guards
+`Deno.serve` behind a `globalThis.Deno` check — so the handler can be imported
+and exercised under Node without starting a server. That is a real
+testability seam, not a workaround; it also means a rotated secret is picked
+up without waiting for a cold isolate.
+
+#### Things in the handler worth not undoing
+
+- **`--no-verify-jwt` is required and is not a hole.** The caller is Postgres
+  via `pg_net`, which has no Supabase session to present, so JWT verification
+  would stop the trigger reaching the function at all. The gate is the
+  `x-pf-push-secret` header, compared in constant time.
+- **An UNSET secret fails CLOSED.** A half-finished deploy must not become an
+  open relay onto the treasurer's phone.
+- **The claim is `?txid=eq.N&sent_at=is.null` in one PATCH.** That single
+  statement is what makes a duplicate delivery — pg_net retrying, or a
+  replayed call — claim nothing and send nothing.
+- **The request body only ever carries a txid.** Everything else is read from
+  the database, so there is nothing a caller could forge even holding the
+  secret; the worst they can do is ask for a transaction that already went.
+- **404/410 prunes the subscription.** The push service is saying that browser
+  is never coming back; left in place it would be pushed to forever, and the
+  member would see "on" for a device that no longer exists. This is also how a
+  row from an unsubscribe that failed halfway cleans itself up.
+- **One JWT per push SERVICE, not per device** — the audience is the origin,
+  so two devices on the same service share a token.
+- **A run that delivered nothing writes `last_error`.** The outbox row is the
+  only trail for "the treasurer's phone stayed quiet", so "no treasurer is
+  flagged" and "the treasurer has no device registered" are recorded rather
+  than returned and forgotten.
+- **The notification names the member and the total, never an account number**
+  — same rule as the activity log, and this one renders on a lock screen.
+
+#### The limit of the handler test, stated
+
+`tests/notify-payment.test.mjs` runs the real handler against an in-memory
+fake of PostgREST. It proves the handler's logic — the gate, the claim, the
+pruning, and a full decrypt of what was POSTed — but **the fake answers
+PostgREST's URL syntax rather than being PostgREST**. A malformed filter that
+the fake happens to understand and the real service rejects would pass here.
+The query strings are asserted explicitly so they are at least visible, but
+the first deploy is still the first real test of them.
+
+`http_ece` is a **devDependency and a test oracle only**. `web-push` was
+installed, found to be imported by nothing, and removed — `npx web-push
+generate-vapid-keys` needs no dependency.
+
 ## Migrations
 
 Run in the Supabase SQL editor, in order. `006` also needs a one-off
@@ -1545,8 +1810,24 @@ real Postgres 16 by `tests/sql/run.sh` (20 assertions). Ships with
 `014_rollback.sql`, which names the query to run first — an open report that
 ₱30,000 never arrived is not something to drop silently.
 
-**So every migration through 014 is live.** A recipient can view the
-treasurer's receipt, confirm it arrived, or report that it did not.
+**`015` IS NOT APPLIED YET** — `015_push_notifications.sql`:
+`push_subscriptions` + its two register functions, `pf_push_status()`,
+`push_outbox`, `app_secrets.push_endpoint_url` / `.push_secret`, and
+`pf_queue_payment_push()` on `contributions`. Validated on a real Postgres 16
+by `tests/sql/run.sh` (53 assertions, including the rollback). Ships with
+`015_rollback.sql`, which names the query to run first — every registered
+device is lost and **re-applying 015 does not bring them back**, because a Web
+Push subscription cannot be recreated server-side.
+
+**Applying it alone is deliberately inert**: with `push_endpoint_url` unset the
+outbox fills and nothing is dispatched, so it is safe to run well before the
+Edge Function exists. `pg_net` is installed if available and simply skipped if
+not — the trigger resolves `net.http_post` at run time inside an exception
+block.
+
+**So every migration through 014 is live, and 015 is written and tested but
+not yet run.** A recipient can view the treasurer's receipt, confirm it
+arrived, or report that it did not.
 
 Every migration from 010 on is wrapped in `begin; … commit;`. Not decoration:
 without it a `raise` in 011's preflight aborted one statement and psql
@@ -1986,10 +2267,28 @@ confirmation names everything it replaces.
 ```bash
 node tests/views.test.js      # static: view scope. no browser
 node tests/calc.test.js       # money rules. no browser
+node tests/config.test.mjs    # the shipped VAPID key. NO npm install needed
+node tests/message.test.mjs   # what the lock screen says. no browser
+node tests/webpush.test.mjs   # Web Push crypto vs http_ece. no browser
+node tests/notify-payment.test.mjs   # the Edge Function handler. no browser
 bash tests/sql/run.sh         # RLS on a real Postgres 16. no browser
 python3 -m http.server 8791 & # then:
 PF_CHROMIUM=/opt/pw-browsers/chromium-1194/chrome-linux/chrome node tests/smoke.js
 ```
+
+`config.test.mjs` is deliberately **dependency-free AND version-free** — it
+imports `node:fs` and nothing else. It is the check somebody runs right before
+pasting a key and deploying, which is exactly when `node_modules` may not
+exist and when the machine's Node is whatever it happens to be.
+
+The other three `.mjs` suites need `npm install` (they use `http_ece` as a test
+oracle) **and Node 22+**, which strips `.ts` types natively — which is what
+lets the Edge Function's modules be imported straight out of
+`supabase/functions/` rather than copied or built. They check the version and
+say so, and **the check has to precede a DYNAMIC `import()`**: a static import
+is hoisted and resolved before any module code runs, so a guard written above
+one can never fire — Node dies on the `.ts` extension first. The first version
+of this guard was exactly that, and was useless.
 
 A fifth lesson, from 013: **the harness's own stub had drifted from
 `schema.sql`.** `members.member_order` is declared `unique` there and was not

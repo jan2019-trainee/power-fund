@@ -1,5 +1,8 @@
 {
   "dependencies": {
     "playwright": "^1.63.0"
+  },
+  "devDependencies": {
+    "http_ece": "^1.2.1"
   }
 }

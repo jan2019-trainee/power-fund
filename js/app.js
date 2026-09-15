@@ -8809,7 +8809,19 @@
     // hold up the app, and this only reads the browser's own state.
     if (!gated) {
       refreshPushState().then(() => {
-        if (state) render();
+        // NO UNCONDITIONAL RENDER HERE. This resolves a tick or two after the
+        // first paint, and render() clears body.pf-anim before reassigning
+        // innerHTML — so an extra render lands mid-flight and KILLS the entry
+        // transition it was in the middle of. Caught by tests/smoke.js's
+        // `anim/the first paint animates`, which is the check that exists
+        // because a background refresh replaying the transition was reported
+        // from use; this is the same hazard from the other direction.
+        //
+        // Nothing push-related is on screen at boot: the row and the sheet
+        // both live in Menu, and setView() renders on its way there. The one
+        // case that needs a repaint is somebody already sitting on Menu when
+        // this resolves.
+        if (state && currentView === "menu") render();
       });
     }
     // The worker tells us when a subscription was rotated underneath us. It
@@ -8818,8 +8830,9 @@
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.addEventListener("message", (e) => {
         if (e && e.data === "PUSH_RESUBSCRIBE") {
+          // Same rule as above: only the Menu surfaces say anything about it.
           refreshPushState().then(() => {
-            if (state) render();
+            if (state && currentView === "menu") render();
           });
         }
       });

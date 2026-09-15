@@ -123,6 +123,12 @@ self.addEventListener("push", (event) => {
       // No `badge`: Android wants a monochrome silhouette there and renders a
       // colour icon as a white blob. Better the platform's own dot than a
       // wrong asset.
+      // NOTE FOR WHOEVER WRITES THE SENDER: the app has NO routing — no hash,
+      // no history, one `currentView` that starts at "home". So a payload
+      // setting `url` to something like "/#review" would reload the app at
+      // Home and look broken. Deep-linking a notification to the review
+      // screen means adding routing first; until then the only honest value
+      // is "/", which is the default below.
       tag: data.tag || "pf-payment",
       // Same tag replaces the previous notice rather than stacking — but
       // renotify so a second payment still buzzes instead of silently

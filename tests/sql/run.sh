@@ -101,6 +101,53 @@ create table activity_log (
   event_type text, amount numeric(10,2), ref_status smallint,
   member_id uuid, round_number int);
 alter table activity_log enable row level security;
+-- migration 015. The money table, stubbed from schema.sql with 006's widened
+-- status check. It had never been here at all — 011's contributions policies
+-- were therefore untested, and 015's trigger fires on this table, so both
+-- arrive together.
+create table contributions (
+  id uuid primary key default gen_random_uuid(),
+  cycle_id uuid not null references cycles(id) on delete cascade,
+  member_id uuid not null references members(id) on delete cascade,
+  amount numeric(10,2) not null default 1000 check (amount >= 0),
+  status smallint not null default 0 check (status in (0, 1, 2, 3)),
+  proof_url text, notes text, paid_at timestamptz, rejection_note text,
+  rejected_at timestamptz,
+  created_at timestamptz not null default now(),
+  unique (cycle_id, member_id),
+  constraint contributions_pending_requires_proof
+    check (status <> 1 or proof_url is not null));
+alter table contributions enable row level security;
+-- 010's vault. 015 hangs push_endpoint_url / push_secret off it, so the base
+-- table has to exist; the columns themselves come from the migration.
+create table app_secrets (
+  id int primary key default 1 check (id = 1),
+  treasurer_pin text, master_pin text,
+  updated_at timestamptz not null default now());
+insert into app_secrets (id) values (1);
+alter table app_secrets enable row level security;
+revoke all on app_secrets from anon, authenticated;
+-- pg_net, stubbed to RECORD rather than send. The signature is pg_net's real
+-- one — argument names, order and defaults — because 015 calls it with NAMED
+-- arguments, so a stub that merely accepted three columns would let a call
+-- that cannot work in production pass this suite.
+create schema net;
+create table net.calls (
+  id bigserial primary key, req_url text, req_body jsonb,
+  req_params jsonb, req_headers jsonb, req_ms int);
+create or replace function net.http_post(
+    url text,
+    body jsonb default '{}'::jsonb,
+    params jsonb default '{}'::jsonb,
+    headers jsonb default '{"Content-Type": "application/json"}'::jsonb,
+    timeout_milliseconds integer default 5000)
+  returns bigint language plpgsql as $net$
+declare _id bigint;
+begin
+  insert into net.calls (req_url, req_body, req_params, req_headers, req_ms)
+  values (url, body, params, headers, timeout_milliseconds) returning id into _id;
+  return _id;
+end $net$;
 create or replace function pf_member_id() returns uuid
   language sql stable security definer set search_path = public as $$
   select id from members where auth_user_id = auth.uid() $$;
@@ -111,6 +158,7 @@ grant usage on schema auth, storage, public to anon, authenticated;
 grant execute on function auth.uid(), storage.foldername(text) to anon, authenticated;
 grant execute on function pf_member_id(), pf_is_treasurer() to anon, authenticated;
 grant select, insert, update, delete on storage.objects, members, cycles, payouts, activity_log to anon, authenticated;
+grant select, insert, update, delete on contributions to anon, authenticated;
 insert into members (id, name, member_order, email, auth_user_id, is_treasurer) values
  ('11111111-0000-0000-0000-000000000001','Regine',1,'r@x.com','aaaaaaaa-0000-0000-0000-00000000000a', true),
  ('11111111-0000-0000-0000-000000000002','Sarah', 2,'s@x.com','bbbbbbbb-0000-0000-0000-00000000000b', false),
@@ -122,7 +170,13 @@ insert into members (id, name, member_order, email, auth_user_id, is_treasurer) 
  ('11111111-0000-0000-0000-000000000005','Jan',   5,'j@x.com','eeeeeeee-0000-0000-0000-00000000000e', false);
 insert into cycles (id, cycle_number, due_date) values
  ('22222222-0000-0000-0000-000000000001', 1, '2026-09-15'),
- ('22222222-0000-0000-0000-000000000002', 2, '2026-09-28');
+ ('22222222-0000-0000-0000-000000000002', 2, '2026-09-28'),
+ -- Cycles 3-6 complete round 1, so 015's batch checks can pay six cycles in
+ -- one transfer — the case that would otherwise buzz the treasurer six times.
+ ('22222222-0000-0000-0000-000000000003', 3, '2026-10-15'),
+ ('22222222-0000-0000-0000-000000000004', 4, '2026-10-31'),
+ ('22222222-0000-0000-0000-000000000005', 5, '2026-11-15'),
+ ('22222222-0000-0000-0000-000000000006', 6, '2026-11-30');
 -- Round 1 -> Regine, who is ALSO THE TREASURER. That combination is the norm
 --   in a fund this size and is the case the first cut of the guard broke.
 -- Round 2 -> Sarah, an ordinary member: the pure-recipient path, and the one
@@ -160,6 +214,7 @@ guard = (mig / "010_auth_helpers_and_secrets.sql").read_text()
 ack   = (mig / "012_payout_receipt_confirmation.sql").read_text()
 disp  = (mig / "014_payout_disputes.sql").read_text()
 swap  = (mig / "013_turn_swaps.sql").read_text()
+push  = (mig / "015_push_notifications.sql").read_text()
 schema = (repo / "supabase" / "schema.sql").read_text()
 def cut(s, start, end):
     i = s.index(start); j = s.index(end, i); return s[i:j]
@@ -176,6 +231,10 @@ def cut(s, start, end):
     # members.is_treasurer precisely because this policy does — so the gate is
     # only as real as what this section says.
     + cut(lock, 'drop policy if exists cycles_read', '-- 4) contributions')
+    # THE MONEY TABLE. Never extracted before, so 011's central claim — a
+    # member may claim but may not confirm their own payment — had no test at
+    # all. 015's trigger fires on this table, so the two arrive together.
+    + cut(lock, 'drop policy if exists contributions_read', '-- 5) payouts')
     + cut(lock, 'drop policy if exists "payment_assets_write"',
                 'drop policy if exists "member_avatars_write"')
     + cut(guard, 'create or replace function pf_members_guard()',
@@ -193,7 +252,12 @@ def cut(s, start, end):
     + cut(swap, '-- 1) The unique constraint', 'commit;')
     # 014: disputes. Applied AFTER 012, which is the real deployment order —
     # its guard is a `create or replace` over 012's and must win.
-    + cut(disp, '-- 1) The columns.', 'commit;'))
+    + cut(disp, '-- 1) The columns.', 'commit;')
+    # 015: push notifications. Taken WHOLE — the subscription table, the two
+    # register functions, the outbox and the contributions trigger only mean
+    # anything together. Its section 0 is included deliberately: pg_net is not
+    # available on a bare Postgres, and the migration has to survive that.
+    + cut(push, '-- 0) pg_net.', 'commit;'))
 # 013 on its own, so the rollback test can re-apply JUST it. Re-applying the
 # concatenated file instead fails on schema.sql's payment_assets_read, which
 # carries no `drop policy if exists` — a failure that says nothing about 013.
@@ -623,6 +687,282 @@ if [ -z "$(printf '%s' "$reapply" | grep -i ERROR)" ]; then
 else
   printf '  FAIL 013 does not re-apply after rollback — %s\n' \
     "$(printf '%s' "$reapply" | grep -i ERROR | head -1 | cut -c1-110)"; FAILED=1
+fi
+
+# ===========================================================================
+# Migration 015 — push notifications
+#
+# The trigger fires on `contributions`, so the property that matters most here
+# is the one about money: a notification that cannot be queued or dispatched
+# must still leave the payment written. Everything else is coalescing.
+# ===========================================================================
+C1=22222222-0000-0000-0000-000000000001
+C2=22222222-0000-0000-0000-000000000002
+C3=22222222-0000-0000-0000-000000000003
+C4=22222222-0000-0000-0000-000000000004
+C5=22222222-0000-0000-0000-000000000005
+C6=22222222-0000-0000-0000-000000000006
+
+# The dispatch target. Deployment config, set by hand in SQL once the Edge
+# Function is deployed — so the fixture sets it the same way, and the
+# "not configured yet" path is exercised further down by dropping it.
+q -tAc "update app_secrets set push_endpoint_url='https://fn/notify-payment',
+                               push_secret='shhh' where id=1" >/dev/null 2>&1
+
+# pfval <label> <expected> <sub|-|!> <scalar expression>
+#
+# run() CANNOT EXPRESS A FILTERED SELECT: RLS hides rows rather than raising,
+# psql prints nothing for an empty result, and run() only reads UPDATE/DELETE
+# tags — so "0 rows" reads as OK there and every read-visibility assertion
+# would pass no matter what the policy said. This reads a value instead.
+# '!' runs as the superuser, for tables no PostgREST role can see.
+pfval() {
+  local label="$1" expect="$2" sub="$3" expr="$4" pre out got
+  case "$sub" in
+    '!') pre="" ;;
+    '-') pre="set local role anon;" ;;
+    *)   pre="set local role authenticated;
+              select set_config('request.jwt.claim.sub','$sub',true);" ;;
+  esac
+  out=$(q -tAc "begin; $pre
+      select 'PF=' || coalesce(($expr)::text, '<null>'); rollback;" 2>&1)
+  got=$(printf '%s' "$out" | grep -oE 'PF=.*' | tail -1 | cut -c4-)
+  if [ "$got" = "$expect" ]; then printf '  ok   %s\n' "$label"
+  else
+    printf '  FAIL %s — expected %s, got %s%s\n' "$label" "$expect" "${got:-none}" \
+      "$(printf '%s' "$out" | grep -oiE 'ERROR:.*' | head -1 | sed 's/^/ — /' | cut -c1-80)"
+    FAILED=1
+  fi
+}
+
+# push <label> <expected "outbox/calls"> <sub> <sql> [setup]
+#
+# One transaction, rolled back. [setup] runs FIRST, as the superuser, before
+# the counters are cleared — so a test can start from a row that already
+# exists without its own trigger firing counting toward the result.
+push() {
+  local label="$1" expect="$2" sub="$3" sql="$4" setup="${5:-}" out got
+  out=$(q -tAc "begin;
+      ${setup:+$setup;}
+      delete from push_outbox; delete from net.calls;
+      set local role authenticated;
+      select set_config('request.jwt.claim.sub','$sub',true);
+      $sql;
+      reset role;
+      select 'PF=' || (select count(*) from push_outbox) || '/'
+                   || (select count(*) from net.calls);
+      rollback;" 2>&1)
+  got=$(printf '%s' "$out" | grep -oE 'PF=[0-9]+/[0-9]+' | tail -1 | cut -c4-)
+  if [ "$got" = "$expect" ]; then printf '  ok   %s\n' "$label"
+  else
+    printf '  FAIL %s — expected %s outbox/calls, got %s%s\n' "$label" "$expect" \
+      "${got:-none}" \
+      "$(printf '%s' "$out" | grep -oiE 'ERROR:.*' | head -1 | sed 's/^/ — /' | cut -c1-80)"
+    FAILED=1
+  fi
+}
+
+# pushval <label> <expected> <sub> <sql> <expression>
+# Runs <sql> as <sub>, then reads <expression> as the superuser — for asking
+# what the dispatch actually carried, which no PostgREST role may see.
+pushval() {
+  local label="$1" expect="$2" sub="$3" sql="$4" expr="$5" out got
+  out=$(q -tAc "begin;
+      delete from push_outbox; delete from net.calls;
+      set local role authenticated;
+      select set_config('request.jwt.claim.sub','$sub',true);
+      $sql;
+      reset role;
+      select 'PF=' || coalesce(($expr)::text, '<null>');
+      rollback;" 2>&1)
+  got=$(printf '%s' "$out" | grep -oE 'PF=.*' | tail -1 | cut -c4-)
+  if [ "$got" = "$expect" ]; then printf '  ok   %s\n' "$label"
+  else
+    printf '  FAIL %s — expected %s, got %s%s\n' "$label" "$expect" "${got:-none}" \
+      "$(printf '%s' "$out" | grep -oiE 'ERROR:.*' | head -1 | sed 's/^/ — /' | cut -c1-80)"
+    FAILED=1
+  fi
+}
+
+PROOF="'https://x/p.png'"
+SIX="insert into contributions (cycle_id, member_id, status, proof_url) values
+  ('$C1','$SID',1,$PROOF),('$C2','$SID',1,$PROOF),('$C3','$SID',1,$PROOF),
+  ('$C4','$SID',1,$PROOF),('$C5','$SID',1,$PROOF),('$C6','$SID',1,$PROOF)"
+
+echo
+echo "015 — a push endpoint is a capability, not group news"
+swapq "a member registers their own device" $MEM OK \
+  "select pf_register_push('https://fcm/sarah','k1','a1','Pixel')"
+pfval "...and the row is theirs" "$SID" $MEM \
+  "select member_id from push_subscriptions where endpoint='https://fcm/sarah'"
+pfval "the owner sees it" "1" $MEM "select count(*) from push_subscriptions"
+# THE DELIBERATE BREAK from this app's read-open convention: whoever holds an
+# endpoint URL can push to that phone, so nobody else has any reason to read
+# one — the Edge Function uses the service role instead.
+pfval "another member sees nothing" "0" $CLA "select count(*) from push_subscriptions"
+pfval "not even the treasurer" "0" $TRE "select count(*) from push_subscriptions"
+run "anon may not read the table at all" - DENY "select 1 from push_subscriptions"
+run "a member may NOT insert a subscription directly" $MEM DENY \
+  "insert into push_subscriptions (member_id,endpoint,p256dh,auth)
+     values ('$SID','https://fcm/x','k','a')"
+run "a member may NOT delete one directly" $MEM DENY \
+  "delete from push_subscriptions where endpoint='https://fcm/sarah'"
+
+echo "015 — registering"
+swapq "an unlinked login may NOT register" $GHOST "Sign in first" \
+  "select pf_register_push('https://fcm/ghost','k','a','x')"
+swapq "an incomplete subscription is refused" $MEM "Incomplete push subscription" \
+  "select pf_register_push('https://fcm/y','','a','x')"
+swapq "re-registering the same device does not duplicate" $MEM OK \
+  "select pf_register_push('https://fcm/sarah','k2','a2','Pixel')"
+pfval "...still exactly one row for it" "1" '!' \
+  "select count(*) from push_subscriptions where endpoint='https://fcm/sarah'"
+# The takeover case: a shared phone, or a member who signs out and another
+# signs in. The endpoint is identical and already on somebody else's row, so a
+# plain upsert would be hidden by the policy and fail SILENTLY — `[]` and no
+# error, the bug requireRows() exists to catch everywhere else.
+swapq "a device that changes hands moves to its new owner" $CLA OK \
+  "select pf_register_push('https://fcm/sarah','k3','a3','Pixel')"
+pfval "...and belongs to them alone" "$CID/1" '!' \
+  "select member_id || '/' || count(*) over ()
+     from push_subscriptions where endpoint='https://fcm/sarah'"
+swapq "unregistering removes it" $CLA OK \
+  "select pf_unregister_push('https://fcm/sarah')"
+pfval "...and it is gone" "0" '!' \
+  "select count(*) from push_subscriptions where endpoint='https://fcm/sarah'"
+
+echo "015 — the outbox is unreachable from PostgREST"
+run "a member may not read the outbox" $MEM DENY "select 1 from push_outbox"
+run "the treasurer may not either" $TRE DENY "select 1 from push_outbox"
+run "a member may not write to it" $MEM DENY \
+  "insert into push_outbox (txid,event_type) values (1,'forged')"
+run "anon may not read it" - DENY "select 1 from push_outbox"
+
+echo "015 — what is worth telling the treasurer about"
+push "a claim awaiting review queues one" "1/1" $MEM \
+  "insert into contributions (cycle_id,member_id,status,proof_url)
+     values ('$C1','$SID',1,$PROOF)"
+push "an unpaid row queues nothing" "0/0" $MEM \
+  "insert into contributions (cycle_id,member_id,status) values ('$C1','$SID',0)"
+push "unpaid becoming a claim queues one" "1/1" $MEM \
+  "update contributions set status=1, proof_url=$PROOF
+     where cycle_id='$C1' and member_id='$SID'" \
+  "insert into contributions (cycle_id,member_id,status) values ('$C1','$SID',0)"
+# A re-upload or a note edit on a claim already waiting is not a new claim.
+push "a re-upload on an existing claim queues nothing" "0/0" $MEM \
+  "update contributions set proof_url='https://x/p2.png'
+     where cycle_id='$C1' and member_id='$SID'" \
+  "insert into contributions (cycle_id,member_id,status,proof_url)
+     values ('$C1','$SID',1,$PROOF)"
+# The treasurer is a member with a payout round of their own. Buzzing their
+# own phone about a payment they just made themselves is noise.
+push "the treasurer's own payment queues nothing" "0/0" $TRE \
+  "insert into contributions (cycle_id,member_id,status,proof_url)
+     values ('$C1','$RID',1,$PROOF)"
+# Status 2 is money, and 011 refuses it from a member outright — so this
+# asserts the lockdown as much as the trigger.
+run "a member cannot even write a confirmed row" $MEM DENY \
+  "insert into contributions (cycle_id,member_id,status) values ('$C1','$SID',2)"
+
+echo "015 — six cycles in one transfer is ONE notification"
+push "a six-cycle batch dispatches once" "6/1" $MEM "$SIX"
+# The sharp case. `upsert` is `insert ... on conflict do update`, so a batch
+# where some cycles already had rows takes the UPDATE path for those and the
+# INSERT path for the rest. A statement-level trigger cannot cover both events
+# at once (Postgres refuses transition tables for a multi-event trigger), so
+# that route would have sent TWICE for one transfer.
+push "a MIXED insert/update batch still dispatches once" "6/1" $MEM \
+  "$SIX on conflict (cycle_id,member_id) do update
+     set status = excluded.status, proof_url = excluded.proof_url" \
+  "insert into contributions (cycle_id,member_id,status) values
+     ('$C1','$SID',0),('$C2','$SID',0)"
+
+echo "015 — the dispatch carries what the function needs"
+pushval "the secret travels in the header, the txid in the body" "yes" $MEM \
+  "insert into contributions (cycle_id,member_id,status,proof_url)
+     values ('$C1','$SID',1,$PROOF)" \
+  "select case when req_url = 'https://fn/notify-payment'
+                and req_headers->>'x-pf-push-secret' = 'shhh'
+                and req_body ? 'txid' then 'yes' else 'no' end
+     from net.calls order by id desc limit 1"
+pushval "that txid claims the whole batch" "6" $MEM "$SIX" \
+  "select count(*) from push_outbox o
+    where o.txid::text = (select req_body->>'txid' from net.calls order by id desc limit 1)
+      and o.sent_at is null"
+
+echo "015 — A NOTIFICATION NEVER COSTS A PAYMENT"
+# The property this whole file exists for. Each of these breaks the dispatch a
+# different way; in every one the contribution must still be written.
+q -tAc "alter table app_secrets drop column push_endpoint_url" >/dev/null 2>&1
+push "app_secrets broken: nothing sent" "1/0" $MEM \
+  "insert into contributions (cycle_id,member_id,status,proof_url)
+     values ('$C2','$SID',1,$PROOF)"
+pushval "...and the payment is really written" "1" $MEM \
+  "insert into contributions (cycle_id,member_id,status,proof_url)
+     values ('$C2','$SID',1,$PROOF)" \
+  "select count(*) from contributions where cycle_id='$C2' and status=1"
+q -tAc "alter table app_secrets add column push_endpoint_url text;
+        update app_secrets set push_endpoint_url='https://fn/notify-payment',
+                               push_secret='shhh' where id=1" >/dev/null 2>&1
+
+# pg_net present but throwing. The outbox row MUST survive it — a plpgsql
+# exception block undoes everything inside it, which is why recording and
+# dispatching are two blocks and not one.
+q -tAc "alter table net.calls add constraint boom
+          check (req_url <> 'https://fn/notify-payment')" >/dev/null 2>&1
+push "pg_net throwing: payment written, outbox row SURVIVES" "1/0" $MEM \
+  "insert into contributions (cycle_id,member_id,status,proof_url)
+     values ('$C3','$SID',1,$PROOF)"
+q -tAc "alter table net.calls drop constraint boom" >/dev/null 2>&1
+
+# pg_net not installed at all — a database that never got the extension.
+q -tAc "alter function net.http_post(text,jsonb,jsonb,jsonb,integer)
+          rename to http_post_x" >/dev/null 2>&1
+push "pg_net absent: payment written, outbox row survives" "1/0" $MEM \
+  "insert into contributions (cycle_id,member_id,status,proof_url)
+     values ('$C4','$SID',1,$PROOF)"
+q -tAc "alter function net.http_post_x(text,jsonb,jsonb,jsonb,integer)
+          rename to http_post" >/dev/null 2>&1
+push "...and dispatch resumes once it is back" "1/1" $MEM \
+  "insert into contributions (cycle_id,member_id,status,proof_url)
+     values ('$C5','$SID',1,$PROOF)"
+
+echo "015 — nothing the trigger loosened"
+# Transaction-local, so it cannot be left set for the next request on a pooled
+# connection. Same shape as 013's pf.swap_ok.
+state "the dispatch flag does not survive the transaction" "" \
+  "select current_setting('pf.push_scheduled', true)"
+run "a member still may NOT confirm their own payment" $MEM DENY \
+  "insert into contributions (cycle_id,member_id,status,proof_url)
+     values ('$C1','$SID',1,$PROOF);
+   update contributions set status=2 where cycle_id='$C1' and member_id='$SID'"
+run "a member still may NOT claim for somebody else" $MEM DENY \
+  "insert into contributions (cycle_id,member_id,status,proof_url)
+     values ('$C1','$RID',1,$PROOF)"
+run "a claim with no proof is still refused" $MEM DENY \
+  "insert into contributions (cycle_id,member_id,status) values ('$C1','$SID',1)"
+
+echo "015 — the rollback"
+if q -q -v ON_ERROR_STOP=1 -f "$MIG/015_rollback.sql" >/dev/null 2>&1; then
+  printf '  ok   015_rollback.sql applies cleanly\n'
+else printf '  FAIL 015_rollback.sql does not apply\n'; FAILED=1; fi
+pfval "push_subscriptions and push_outbox are gone" "0" '!' \
+  "select count(*) from pg_tables where tablename in ('push_subscriptions','push_outbox')"
+pfval "the trigger is gone" "0" '!' \
+  "select count(*) from pg_trigger where tgname='contributions_push'"
+# The point of the rollback test: a payment still works with 015 undone.
+run "a member may still claim a cycle with 015 rolled back" $MEM OK \
+  "insert into contributions (cycle_id,member_id,status,proof_url)
+     values ('$C6','$SID',1,$PROOF)"
+if q -q -v ON_ERROR_STOP=1 -f "$MIG/015_rollback.sql" >/dev/null 2>&1; then
+  printf '  ok   015_rollback.sql is idempotent\n'
+else printf '  FAIL 015_rollback.sql is not re-runnable\n'; FAILED=1; fi
+reapply015=$(q -q -v ON_ERROR_STOP=1 -f "$MIG/015_push_notifications.sql" 2>&1)
+if [ -z "$(printf '%s' "$reapply015" | grep -i ERROR)" ]; then
+  printf '  ok   015 re-applies on top of its own rollback\n'
+else
+  printf '  FAIL 015 does not re-apply after rollback — %s\n' \
+    "$(printf '%s' "$reapply015" | grep -i ERROR | head -1 | cut -c1-110)"; FAILED=1
 fi
 
 echo

@@ -351,6 +351,80 @@ their payment screenshots. Keep it somewhere private — it is the fund's
 ledger. It does NOT contain the PINs; those are unreachable from the browser
 once migration 010 is applied.
 
+## Payment notifications (migration 015)
+
+The treasurer can get an alert on their phone when a member sends a payment,
+instead of finding out next time they happen to open the app.
+
+**Supabase has no push product.** What it provides is the trigger side —
+a Postgres trigger, `pg_net`, and Edge Functions. The delivery itself is the
+**Web Push** protocol, signed with a VAPID key pair by a function you deploy.
+No Firebase account is needed: Android Chrome rides FCM underneath, but VAPID
+is all the app supplies.
+
+**It is a nudge, never the record.** Web Push is best-effort — a phone in Doze,
+a killed browser and an expired subscription all drop messages silently. The
+in-app attention queue stays the source of truth, and nothing in the fund
+depends on a notification having arrived.
+
+### Rolling it out
+
+1. **Run [`supabase/migrations/015_push_notifications.sql`](supabase/migrations/015_push_notifications.sql).**
+   Safe on its own: the outbox starts filling and nothing is dispatched,
+   because no endpoint is configured yet.
+2. **Generate a VAPID key pair** — `npx web-push generate-vapid-keys`. Put the
+   **public** half in `PUSH_PUBLIC_KEY` in [`js/config.js`](js/config.js) and
+   redeploy. It belongs in the page; that is what it is for.
+3. **Deploy the Edge Function** that does the signing and sending, with the
+   **private** key and the Supabase service-role key as function secrets.
+4. **Point the trigger at it**, in the Supabase SQL editor:
+
+   ```sql
+   update app_secrets
+      set push_endpoint_url = 'https://<project>.functions.supabase.co/notify-payment',
+          push_secret       = '<a long random string>'
+    where id = 1;
+   ```
+
+   The same `push_secret` goes to the function, which rejects any request that
+   does not carry it — the endpoint is public, so this is what stops anyone
+   POSTing it a fabricated notification.
+5. **Turn it on per device**: Menu → Account → **Payment notifications**.
+
+Until step 3 is done the app says so rather than claiming notifications are
+on — `pf_push_status()` reports whether the sending half exists, and the
+screen repeats it.
+
+### Where the secrets live
+
+| Secret | Where | Never |
+| --- | --- | --- |
+| VAPID **public** key | `js/config.js`, served to the browser | — |
+| VAPID **private** key | Edge Function secret | the repo, `js/config.js` |
+| `push_secret` | `app_secrets` + Edge Function secret | `app_settings`, the backup |
+| `service_role` key | Edge Function secret | the repo, `js/config.js` |
+
+`app_secrets` has RLS on and **no policy at all**, so PostgREST cannot read it;
+the push URL and secret are as unreachable from the browser as the PINs are.
+
+### Per device, not per account
+
+A Web Push subscription belongs to **one browser profile** — the same shape as
+the "seen the intro" flag. Turning notifications on in a desktop browser tells
+the phone nothing, and the screen says so before the switch rather than after.
+
+- **Android / Chrome** — works in a tab and installed.
+- **iPhone / iPad** — Safari only offers Web Push once the site has been
+  **added to the Home Screen** (see the PWA section above). In an ordinary
+  Safari tab there is no push at all, and the app says so.
+
+### What gets sent
+
+One alert per **transfer**, not per cycle: a member paying six cycles in one
+batch is a single notification, coalesced in the database. The treasurer's own
+payments do not notify them, and a re-upload on a claim already waiting is not
+a new claim. Cash payments the treasurer records themselves send nothing.
+
 ## Security limitations — read this
 
 This app has **no authentication**. That is a deliberate choice to keep it simple

@@ -831,6 +831,30 @@ swapq "unregistering removes it" $CLA OK \
 pfval "...and it is gone" "0" '!' \
   "select count(*) from push_subscriptions where endpoint='https://fcm/sarah'"
 
+echo "015 — pf_push_status tells the app what it may claim"
+# Booleans and a count only. The app needs to know whether the SENDING half
+# exists, because registering a device while no Edge Function is deployed is a
+# real write with no visible effect — and a screen saying "notifications are
+# on" about that is the simulated notification rule 4 forbids.
+pfval "it reports the dispatch as configured" "true" $MEM \
+  "select dispatch_configured from pf_push_status()"
+pfval "...and counts only the caller's own devices" "0" $TRE \
+  "select my_devices from pf_push_status()"
+q -tAc "update app_secrets set push_endpoint_url = '' where id = 1" >/dev/null 2>&1
+pfval "an unset endpoint reports NOT configured" "false" $MEM \
+  "select dispatch_configured from pf_push_status()"
+q -tAc "update app_secrets set push_endpoint_url = 'https://fn/notify-payment'
+         where id = 1" >/dev/null 2>&1
+# It is security definer over a table nobody may read, so the thing to prove is
+# that it leaks neither the URL nor the secret — only the two columns above.
+pfval "it returns exactly two columns, neither of them the secret" \
+  "TABLE(dispatch_configured boolean, my_devices integer)" '!' \
+  "select pg_get_function_result('pf_push_status'::regproc)"
+run "anon may not call it at all" - DENY "select * from pf_push_status()"
+run "anon may not register a device either" - DENY \
+  "select pf_register_push('https://fcm/a','k','a','x')"
+run "anon may not unregister one" - DENY "select pf_unregister_push('https://fcm/a')"
+
 echo "015 — the outbox is unreachable from PostgREST"
 run "a member may not read the outbox" $MEM DENY "select 1 from push_outbox"
 run "the treasurer may not either" $TRE DENY "select 1 from push_outbox"

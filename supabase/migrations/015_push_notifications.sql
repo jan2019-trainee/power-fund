@@ -14,7 +14,7 @@
 --
 -- WHAT IT ADDS
 --   1. push_subscriptions  — one row per device, SELF-ONLY including select
---   2. pf_register_push / pf_unregister_push
+--   2. pf_register_push / pf_unregister_push / pf_push_status
 --   3. push_outbox         — unreachable from PostgREST, like app_secrets
 --   4. app_secrets.push_endpoint_url / .push_secret (set by hand, see below)
 --   5. pf_queue_payment_push() on contributions
@@ -160,8 +160,15 @@ begin
   return _n;
 end $$;
 
-grant execute on function pf_register_push(text, text, text, text) to authenticated;
-grant execute on function pf_unregister_push(text)                 to authenticated;
+-- REVOKED FROM PUBLIC FIRST. Postgres grants EXECUTE on a new function to
+-- PUBLIC by default, and every role is a member of it — so granting to
+-- `authenticated` alone would leave these callable by `anon`, which 011 has
+-- otherwise revoked from every table in the fund. The two below refuse an
+-- unlinked caller on their own logic; this is the belt to that braces.
+revoke execute on function pf_register_push(text, text, text, text) from public;
+revoke execute on function pf_unregister_push(text)                 from public;
+grant  execute on function pf_register_push(text, text, text, text) to authenticated;
+grant  execute on function pf_unregister_push(text)                 to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 3) push_outbox — what happened, waiting to be told.
@@ -189,7 +196,10 @@ create table if not exists push_outbox (
   event_type   text not null,              -- 'payment_pending' today; more later
   member_id    uuid references members(id) on delete set null,  -- who caused it
   cycle_number int,
-  round_number int,
+  -- No round_number. It is ceil(cycle_number / CYCLES_PER_ROUND), and that
+  -- constant lives in js/calculations.js — copying it into SQL is how the two
+  -- drift. A column that is always null is worse than none: the next writer
+  -- assumes it is populated.
   amount       numeric(10,2),
   created_at   timestamptz not null default now(),
   sent_at      timestamptz,                -- claimed+sent by the function
@@ -219,6 +229,33 @@ comment on column app_secrets.push_endpoint_url is
 comment on column app_secrets.push_secret is
   'Shared secret sent as x-pf-push-secret. The function endpoint is public, '
   'so this is what stops anyone POSTing it a fabricated notification.';
+
+-- DEFINED HERE, not up with the other two functions, and it has to stay here:
+-- a `language sql` body is parsed and validated when the function is CREATED,
+-- so it cannot name push_endpoint_url until the column above exists. (plpgsql
+-- resolves at run time, which is why pf_register_push could sit earlier.)
+-- Is the sending half actually deployed, and how many devices has this member
+-- registered? BOOLEANS AND A COUNT ONLY — never the URL and never the secret,
+-- the same discipline as pf_pin_status().
+--
+-- The app needs this to stay honest. Registering a device while no Edge
+-- Function exists is a real write with no effect anybody can see, and a
+-- screen saying "Notifications are on" about it would be exactly the
+-- simulated notification CLAUDE.md rule 4 forbids.
+create or replace function pf_push_status()
+  returns table (dispatch_configured boolean, my_devices int)
+  language sql
+  stable
+  security definer
+  set search_path = public
+as $$
+  select
+    coalesce((select push_endpoint_url from app_secrets where id = 1), '') <> '',
+    (select count(*)::int from push_subscriptions where member_id = pf_member_id())
+$$;
+
+revoke execute on function pf_push_status() from public;
+grant  execute on function pf_push_status() to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- 5) The trigger.

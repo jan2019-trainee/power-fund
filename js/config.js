@@ -53,4 +53,18 @@ window.APP_CONFIG = {
   // this is the reversible half — flip it back to "optional" and redeploy if
   // anything goes wrong.
   AUTH_MODE: "required",
+
+  // Push notifications (migration 015). The VAPID PUBLIC key — base64url, no
+  // padding. It is meant to be in the page: it is what the browser signs the
+  // subscription against, and it identifies this app to the push service.
+  //
+  // THE PRIVATE HALF NEVER COMES NEAR THIS FILE. It is an Edge Function
+  // secret, the same rule as the service_role key above. Generate a pair with:
+  //
+  //   npx web-push generate-vapid-keys
+  //
+  // Leave this "" until the Edge Function is deployed. Empty means the app
+  // says notifications are not set up yet rather than offering a switch that
+  // registers a device nothing will ever send to.
+  PUSH_PUBLIC_KEY: "",
 };

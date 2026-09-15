@@ -21,7 +21,7 @@
  * ------------------------------------------------------------------------- */
 
 /* Bump this string on every deploy that should invalidate the shell cache. */
-const CACHE = "pf-v58";
+const CACHE = "pf-v59";
 
 const PRECACHE = [
   "/",
@@ -87,6 +87,103 @@ self.addEventListener("activate", (event) => {
 /* Let the page hurry a waiting worker along (used by the "Reload" prompt). */
 self.addEventListener("message", (event) => {
   if (event.data === "SKIP_WAITING") self.skipWaiting();
+});
+
+/* ---------------------------------------------------------------------------
+ * Push notifications (migration 015)
+ *
+ * The subscription is registered by the page, which has the Supabase session;
+ * the worker only renders what arrives and decides where a tap goes.
+ * ------------------------------------------------------------------------- */
+
+self.addEventListener("push", (event) => {
+  // `userVisibleOnly: true` is a PROMISE to the browser that every push shows
+  // a notification. Break it and Chrome posts its own "this site was updated
+  // in the background" notice instead, which is worse than any fallback we
+  // could write — so every path below ends in showNotification(), including
+  // a push with no data at all or a body that isn't JSON.
+  let data = {};
+  if (event.data) {
+    try {
+      data = event.data.json() || {};
+    } catch (e) {
+      try {
+        data = { body: event.data.text() };
+      } catch (e2) {
+        data = {};
+      }
+    }
+  }
+
+  const title = data.title || "Power Fund";
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: data.body || "A payment is waiting for your review.",
+      icon: "/icons/icon-192.png",
+      // No `badge`: Android wants a monochrome silhouette there and renders a
+      // colour icon as a white blob. Better the platform's own dot than a
+      // wrong asset.
+      tag: data.tag || "pf-payment",
+      // Same tag replaces the previous notice rather than stacking — but
+      // renotify so a second payment still buzzes instead of silently
+      // swapping the text under a notification already on screen.
+      renotify: true,
+      timestamp: Date.now(),
+      data: { url: data.url || "/" },
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || "/";
+  event.waitUntil(
+    (async () => {
+      // Reuse a window that is already open — the treasurer tapping this
+      // should land in the app they may already have running, not in a second
+      // copy of it with its own session and its own unsaved sheet.
+      const open = await self.clients.matchAll({
+        type: "window",
+        includeUncontrolled: true,
+      });
+      for (const c of open) {
+        let sameOrigin = false;
+        try {
+          sameOrigin = new URL(c.url).origin === self.location.origin;
+        } catch (e) {
+          sameOrigin = false;
+        }
+        if (!sameOrigin) continue;
+        await c.focus();
+        if (url && url !== "/" && "navigate" in c) {
+          try {
+            await c.navigate(url);
+          } catch (e) {
+            /* focus already succeeded; the view just doesn't change */
+          }
+        }
+        return;
+      }
+      await self.clients.openWindow(url);
+    })()
+  );
+});
+
+self.addEventListener("pushsubscriptionchange", (event) => {
+  // A browser may rotate a subscription on its own. THE WORKER CANNOT RE-
+  // REGISTER IT: recording a subscription is an authenticated write, and the
+  // worker has no Supabase session. The page handles it instead, by comparing
+  // the live endpoint against the one it last recorded — this only makes that
+  // happen now rather than on the next load.
+  event.waitUntil(
+    (async () => {
+      const open = await self.clients.matchAll({
+        type: "window",
+        includeUncontrolled: true,
+      });
+      open.forEach((c) => c.postMessage("PUSH_RESUBSCRIBE"));
+    })()
+  );
 });
 
 self.addEventListener("fetch", (event) => {

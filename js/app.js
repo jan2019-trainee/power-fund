@@ -1418,6 +1418,252 @@
   }
 
   // ===================================================================
+  // Push notifications (migration 015)
+  //
+  // A NEW FEATURE BEYOND THE DESIGN — the mockups have no notifications and
+  // no auth at all. Flagged for UI/UX QA as new design, not a port.
+  //
+  // WHAT THIS HALF DOES: records THIS DEVICE as somewhere to send to. The
+  // sending is an Edge Function, and until that is deployed and
+  // app_secrets.push_endpoint_url is set, nothing reaches anybody's phone.
+  // pf_push_status() is how the screen knows which of those worlds it is in,
+  // because a switch reading "on" over a sender that does not exist is
+  // exactly the simulated notification rule 4 forbids.
+  // ===================================================================
+  const PUSH_KEY = String(
+    (window.APP_CONFIG && window.APP_CONFIG.PUSH_PUBLIC_KEY) || ""
+  ).trim();
+  /** The endpoint this device last recorded. A browser may rotate a
+   *  subscription on its own, and the service worker cannot re-record it (no
+   *  Supabase session in a worker), so the page compares and repairs. */
+  const PUSH_ENDPOINT_KEY = "pf_push_endpoint";
+
+  let notifyModalOpen = false;
+  let pushSubscribed = false; // this browser holds a live PushSubscription
+  let pushStatus = null; // { dispatchConfigured, myDevices } | null = unknown
+  let pushStatusTried = false; // loaded once per session, not per poll
+  let pushBusy = false;
+
+  function pushPermission() {
+    return typeof Notification !== "undefined" ? Notification.permission : "denied";
+  }
+
+  function pushSupported() {
+    return !!(
+      typeof Notification !== "undefined" &&
+      typeof navigator !== "undefined" &&
+      "serviceWorker" in navigator &&
+      typeof window !== "undefined" &&
+      "PushManager" in window
+    );
+  }
+
+  /**
+   * Who may turn this on.
+   *
+   * verifiedTreasurer() — a LINKED account carrying `is_treasurer` — and NOT
+   * isTreasurerAccount(), which falls back to the PIN when nobody is flagged.
+   * The Edge Function decides who to notify from `members.is_treasurer`, so a
+   * PIN-unlocked member offered this switch would register a device that
+   * nothing will ever send to, and be told it worked.
+   *
+   * Today the only event is a member's payment, which is the treasurer's to
+   * act on, so this is treasurer-only by scope rather than by permission.
+   * When member-facing events land, the gate becomes editableMember().
+   */
+  function canUsePush() {
+    return !!(verifiedTreasurer() && window.DB.pushAvailable());
+  }
+
+  /** The VAPID key travels as base64url; subscribe() wants raw bytes. */
+  function vapidKeyBytes(key) {
+    const pad = "=".repeat((4 - (key.length % 4)) % 4);
+    const b64 = (key + pad).replace(/-/g, "+").replace(/_/g, "/");
+    const raw = atob(b64);
+    const out = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+
+  function lastPushEndpoint() {
+    try {
+      return localStorage.getItem(PUSH_ENDPOINT_KEY);
+    } catch (e) {
+      return null;
+    }
+  }
+  function rememberPushEndpoint(endpoint) {
+    try {
+      if (endpoint) localStorage.setItem(PUSH_ENDPOINT_KEY, endpoint);
+      else localStorage.removeItem(PUSH_ENDPOINT_KEY);
+    } catch (e) {
+      /* private window, or site data blocked. The repair below just runs again. */
+    }
+  }
+
+  async function livePushSubscription() {
+    if (!pushSupported()) return null;
+    const reg = await navigator.serviceWorker.getRegistration();
+    return reg ? await reg.pushManager.getSubscription() : null;
+  }
+
+  /** Re-record a subscription the browser rotated underneath us. QUIET on
+   *  failure — it is a background repair, not something anybody asked for,
+   *  and the next load tries again. */
+  async function reconcilePushEndpoint(sub) {
+    if (!sub || !canUsePush()) return;
+    if (lastPushEndpoint() === sub.endpoint) return;
+    try {
+      await window.DB.registerPush(sub, navigator.userAgent);
+      rememberPushEndpoint(sub.endpoint);
+    } catch (e) {
+      console.warn("Couldn't re-record this device for notifications:", e.message);
+    }
+  }
+
+  /** Read the browser's side of it. Never throws — every caller is a render
+   *  path, and a notification switch must not be able to take a screen down. */
+  async function refreshPushState() {
+    if (!pushSupported()) {
+      pushSubscribed = false;
+      return;
+    }
+    try {
+      const sub = await livePushSubscription();
+      pushSubscribed = !!sub;
+      if (sub) await reconcilePushEndpoint(sub);
+    } catch (e) {
+      console.warn("Couldn't read this device's push subscription:", e);
+      pushSubscribed = false;
+    }
+    if (canUsePush() && !pushStatusTried) {
+      pushStatusTried = true;
+      pushStatus = await window.DB.pushStatus();
+    }
+  }
+
+  /** The quiet second line on the Menu row. Says what is true about THIS
+   *  DEVICE, because a push subscription is per browser profile — the same
+   *  shape as pf_onboarded, and the thing people get wrong about it. */
+  function pushRowNote() {
+    if (!pushSupported()) return "This browser can't show notifications";
+    if (!PUSH_KEY) return "Not set up for this fund yet";
+    if (pushPermission() === "denied") return "Blocked in your browser settings";
+    if (!pushSubscribed) return "Off on this device";
+    if (pushStatus && !pushStatus.dispatchConfigured)
+      return "On here, but nothing is sending yet";
+    return "On for this device";
+  }
+
+  function openNotifyModal() {
+    // Exported on PowerFund, so an absent menu row is not the gate.
+    if (!canUsePush()) return;
+    notifyModalOpen = true;
+    render();
+    // Re-read rather than trust what the last render believed: permission can
+    // be revoked from browser settings without the page ever hearing about it.
+    pushStatusTried = false;
+    refreshPushState().then(render);
+  }
+
+  function closeNotifyModal() {
+    notifyModalOpen = false;
+    render();
+  }
+
+  async function enableNotifications() {
+    if (pushBusy || !canUsePush()) return;
+    if (!pushSupported()) {
+      return showError("This browser can't show notifications.");
+    }
+    if (!PUSH_KEY) {
+      return showError(
+        "Notifications aren't set up for this fund yet — PUSH_PUBLIC_KEY is " +
+          "empty in js/config.js."
+      );
+    }
+    try {
+      // FIRST, and before any await that isn't this one: the permission prompt
+      // needs the user gesture that got us here, and a browser will refuse it
+      // once that activation has been spent.
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") {
+        // Not an error — they said no, or dismissed it. The modal renders the
+        // denied dead-end, which is the only place that can explain that the
+        // app cannot ask again.
+        render();
+        return;
+      }
+    } catch (e) {
+      return showError("Couldn't ask for notification permission.");
+    }
+
+    pushBusy = true;
+    render();
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        sub = await reg.pushManager.subscribe({
+          // A promise to the browser that every push shows something. sw.js
+          // keeps it on every path, including a push carrying no data.
+          userVisibleOnly: true,
+          applicationServerKey: vapidKeyBytes(PUSH_KEY),
+        });
+      }
+      await window.DB.registerPush(sub, navigator.userAgent);
+      rememberPushEndpoint(sub.endpoint);
+      pushSubscribed = true;
+      pushStatus = await window.DB.pushStatus();
+      showSuccess(
+        pushStatus && !pushStatus.dispatchConfigured
+          ? "This device is registered. Nothing will arrive until the sender is deployed."
+          : "Notifications are on for this device."
+      );
+    } catch (e) {
+      console.error("Enabling notifications failed:", e);
+      showError(e.message || "Couldn't turn notifications on.");
+    } finally {
+      pushBusy = false;
+      render();
+    }
+  }
+
+  async function disableNotifications() {
+    if (pushBusy || !canUsePush()) return;
+    pushBusy = true;
+    render();
+    try {
+      const sub = await livePushSubscription();
+      const endpoint = (sub && sub.endpoint) || lastPushEndpoint();
+      // The DATABASE first. It is the record of where to send, so clearing it
+      // is what actually stops the notifications; if this throws, nothing has
+      // changed and the switch honestly still reads as on. The other order
+      // would leave a device that looks off and a row still being sent to.
+      if (endpoint) await window.DB.unregisterPush(endpoint);
+      if (sub) {
+        try {
+          await sub.unsubscribe();
+        } catch (e) {
+          // Harmless: the row is gone, so nothing will be sent to it either
+          // way, and a stale endpoint is pruned on the first 410.
+          console.warn("Couldn't unsubscribe locally:", e);
+        }
+      }
+      rememberPushEndpoint(null);
+      pushSubscribed = false;
+      pushStatus = await window.DB.pushStatus();
+      showSuccess("Notifications are off for this device.");
+    } catch (e) {
+      console.error("Disabling notifications failed:", e);
+      showError(e.message || "Couldn't turn notifications off.");
+    } finally {
+      pushBusy = false;
+      render();
+    }
+  }
+
+  // ===================================================================
   // "Which member are you?" — this device's remembered member (display only)
   // ===================================================================
   function openWhoAmIPicker() {
@@ -5865,6 +6111,7 @@
       contributePicker != null ||
       whoAmIPickerOpen ||
       profileModalOpen ||
+      notifyModalOpen ||
       photoSheetOpen
     );
   }
@@ -5890,6 +6137,7 @@
     if (scheduleModalOpen) return closeScheduleModal();
     if (memberAccountsModalOpen) return closeMemberAccountsModal();
     if (transferRoleModalOpen) return closeTransferRole();
+    if (notifyModalOpen) return closeNotifyModal();
     if (shareModalOpen) return closeShareModal();
     if (startRoundConfirming) return cancelStartRound();
   }
@@ -6543,6 +6791,12 @@
       myIncomingSwaps: myIncomingSwaps(),
       myOutgoingSwap: myOutgoingSwap(),
       memberName,
+      // Push notifications (015). Passed as VALUES, already resolved — the
+      // views cannot see this closure. canUsePush() combines a linked
+      // treasurer account with a database carrying 015; the note says what is
+      // true of THIS DEVICE, which is what a push subscription is scoped to.
+      canUsePush: canUsePush(),
+      pushNote: pushRowNote(),
       // Accounts (migration 008). The mode drives whether Menu shows an
       // Account group at all; the email is what "Signed in as ..." prints.
       authMode: AUTH_MODE,
@@ -7939,6 +8193,94 @@
       </div>`;
     }
 
+    // Notifications — the treasurer's own device (migration 015).
+    // NO APPROVED MOCKUP: the design has no notifications and no auth. It
+    // borrows the established .modal treatment, the way Edit member names and
+    // Payment schedule do.
+    if (notifyModalOpen && canUsePush()) {
+      const perm = pushPermission();
+      const supported = pushSupported();
+      const configured = !!PUSH_KEY;
+      const senderLive = !pushStatus || pushStatus.dispatchConfigured;
+      html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeNotifyModal()">
+        <div class="modal notify-modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <h3 id="dlg-title">Payment notifications</h3>
+          <p class="modal-sub">Get an alert on this device when a member sends a
+            payment for you to review. The fund's attention queue is still the
+            record — this only saves you opening the app to find out.</p>
+          ${
+            // PER DEVICE, and said before the switch rather than after. A push
+            // subscription belongs to one browser profile, the same shape as
+            // pf_onboarded — turning it on here tells your phone nothing.
+            `<p class="notify-scope">${icon("bell", 13)}<span>This switch is for
+              <b>this device only</b>. Turn it on again on your phone, or on
+              any other browser you use.</span></p>`
+          }
+          ${
+            !supported
+              ? `<p class="notify-blocked">${icon("alert", 14)}<span>This browser
+                   can't show notifications. On Android, use Chrome; on iPhone,
+                   the app has to be added to the Home Screen first.</span></p>`
+              : !configured
+              ? `<p class="notify-blocked">${icon("alert", 14)}<span>This fund
+                   hasn't been set up for notifications yet —
+                   <code>PUSH_PUBLIC_KEY</code> is empty in
+                   <code>js/config.js</code>.</span></p>`
+              : perm === "denied"
+              ? `<p class="notify-blocked">${icon("alert", 14)}<span>Notifications
+                   are blocked for this site. The app can't ask again — turn
+                   them back on in your browser's site settings for this page,
+                   then reopen this screen.</span></p>`
+              : pushSubscribed
+              ? `<div class="notify-state on">
+                   <span class="notify-state-dot"></span>
+                   <span>On for this device${
+                     pushStatus && pushStatus.myDevices > 1
+                       ? ` · ${pushStatus.myDevices} devices registered`
+                       : ""
+                   }</span>
+                 </div>`
+              : `<div class="notify-state off">
+                   <span class="notify-state-dot"></span>
+                   <span>Off for this device</span>
+                 </div>`
+          }
+          ${
+            // THE HONEST PART. The table can be written and the phone still
+            // stay silent, because the sending half is an Edge Function that
+            // may not be deployed. Saying "on" over that would be a UI that
+            // merely looks functional.
+            supported && configured && !senderLive
+              ? `<p class="notify-pending">${icon("clock", 14)}<span>Nothing is
+                   being sent yet. This fund's notification sender hasn't been
+                   deployed, so registering a device records it and no more.</span></p>`
+              : ""
+          }
+          ${
+            supported && configured && perm !== "denied"
+              ? `<p class="notify-what">You'll get one alert per transfer, not
+                   one per cycle — a member paying six cycles at once is a
+                   single notification. Your own payments don't notify you.</p>`
+              : ""
+          }
+          <div class="modal-actions">
+            ${
+              supported && configured && perm !== "denied"
+                ? pushSubscribed
+                  ? `<button class="modal-btn-secondary" onclick="PowerFund.disableNotifications()" ${
+                      pushBusy || busy ? "disabled" : ""
+                    }>Turn off on this device</button>`
+                  : `<button class="modal-btn-primary" onclick="PowerFund.enableNotifications()" ${
+                      pushBusy || busy ? "disabled" : ""
+                    }>${pushBusy ? "Working…" : "Turn on for this device"}</button>`
+                : ""
+            }
+            <button class="modal-btn-secondary" onclick="PowerFund.closeNotifyModal()">Close</button>
+          </div>
+        </div>
+      </div>`;
+    }
+
     // Treasurer: payment QR code panel
     if (qrModalOpen && unlocked) {
       const current = qrImageUrl();
@@ -8461,6 +8803,28 @@
       }
     }
 
+    // Push notifications (015). AFTER the first load, because canUsePush()
+    // needs the roster to know whether this login is the flagged treasurer.
+    // Deliberately not awaited — a slow or unavailable PushManager must not
+    // hold up the app, and this only reads the browser's own state.
+    if (!gated) {
+      refreshPushState().then(() => {
+        if (state) render();
+      });
+    }
+    // The worker tells us when a subscription was rotated underneath us. It
+    // cannot re-record one itself — that is an authenticated write and a
+    // worker has no Supabase session — so this is where the repair happens.
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.addEventListener("message", (e) => {
+        if (e && e.data === "PUSH_RESUBSCRIBE") {
+          refreshPushState().then(() => {
+            if (state) render();
+          });
+        }
+      });
+    }
+
     // Realtime: refresh when another device changes something.
     try {
       window.DB.subscribeToChanges(() => {
@@ -8574,6 +8938,10 @@
     removeAvatar,
     openContributePicker,
     closeContributePicker,
+    openNotifyModal,
+    closeNotifyModal,
+    enableNotifications,
+    disableNotifications,
     openWhoAmIPicker,
     closeWhoAmIPicker,
     setMyMember,

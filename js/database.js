@@ -300,6 +300,106 @@ window.DB = (function () {
   }
 
   // ===================================================================
+  // Push notifications (migration 015)
+  //
+  // Supabase has NO push product. These two RPCs only record WHERE a
+  // notification should be sent; the sending is an Edge Function, and the
+  // trigger that wakes it lives in Postgres.
+  //
+  // There is deliberately no load-time probe the way getSwapRequests() gives
+  // swapsAvailable() one. Reading the subscription table on every poll would
+  // buy nothing: what the UI actually needs — "is THIS device registered" —
+  // comes from the browser's own PushManager, which is authoritative and
+  // free. So a database without 015 is discovered on the first tap, and the
+  // error names the migration rather than showing a raw PostgREST message.
+  // ===================================================================
+  let pushPath = null; // null (unknown) | "on" | "absent"
+
+  /** False only once an RPC has proved 015 is missing. Never a promise that a
+   *  given registration will succeed. */
+  function pushAvailable() {
+    return pushPath !== "absent";
+  }
+
+  async function pushRpc(fn, args, whatFailed) {
+    const res = await client.rpc(fn, args);
+    if (res.error) {
+      if (missingFunction(res.error, fn)) {
+        pushPath = "absent";
+        throw new Error(
+          "Notifications need a database update. Run " +
+            "supabase/migrations/015_push_notifications.sql in the Supabase SQL " +
+            "editor, then reload."
+        );
+      }
+      // pf_register_push raises for an unlinked account and for an incomplete
+      // subscription, and both messages are written to be read by a member.
+      throw new Error(res.error.message || whatFailed);
+    }
+    pushPath = "on";
+    return res.data;
+  }
+
+  /**
+   * Record this device. `sub` is a live PushSubscription.
+   *
+   * The keys come out of toJSON() rather than being read off the object:
+   * `sub.getKey()` hands back raw ArrayBuffers that would each need
+   * base64url-encoding by hand, and toJSON() has already done exactly that.
+   */
+  function registerPush(sub, userAgent) {
+    const json = sub && typeof sub.toJSON === "function" ? sub.toJSON() : sub || {};
+    const keys = json.keys || {};
+    return pushRpc(
+      "pf_register_push",
+      {
+        p_endpoint: json.endpoint,
+        p_p256dh: keys.p256dh,
+        p_auth: keys.auth,
+        p_user_agent: userAgent || null,
+      },
+      "Couldn't turn notifications on"
+    );
+  }
+
+  /**
+   * Is the SENDING half deployed, and how many devices has this member
+   * registered? Booleans and a count — never the endpoint URL, never the
+   * shared secret; pf_push_status() is written not to hand those out.
+   *
+   * The app needs it to stay honest: registering a device while no Edge
+   * Function exists is a real write with no effect anybody can see, and
+   * calling that "notifications are on" is the simulated notification rule 4
+   * forbids. Returns null when it cannot tell, which the UI treats as "cannot
+   * promise", never as "configured".
+   */
+  async function pushStatus() {
+    const res = await client.rpc("pf_push_status");
+    if (res.error) {
+      if (missingFunction(res.error, "pf_push_status")) pushPath = "absent";
+      console.warn("Couldn't read push status:", res.error);
+      return null;
+    }
+    const row = Array.isArray(res.data) ? res.data[0] : res.data;
+    if (!row) return null;
+    pushPath = "on";
+    return {
+      dispatchConfigured: !!row.dispatch_configured,
+      myDevices: Number(row.my_devices) || 0,
+    };
+  }
+
+  /** Forget this device. Keyed on the endpoint, not the member: whoever is
+   *  holding the phone should never be refused the off switch. */
+  function unregisterPush(endpoint) {
+    return pushRpc(
+      "pf_unregister_push",
+      { p_endpoint: endpoint },
+      "Couldn't turn notifications off"
+    );
+  }
+
+  // ===================================================================
   // Cycles
   // ===================================================================
   async function getCycles() {
@@ -1640,6 +1740,10 @@ window.DB = (function () {
     acceptSwap,
     declineSwap,
     cancelSwap,
+    pushAvailable,
+    pushStatus,
+    registerPush,
+    unregisterPush,
     getCycles,
     updateCycleDueDates,
     getContributions,

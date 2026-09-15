@@ -25,6 +25,7 @@ begin;
 drop trigger if exists contributions_push on contributions;
 drop function if exists pf_queue_payment_push();
 
+drop function if exists pf_push_status();
 drop function if exists pf_unregister_push(text);
 drop function if exists pf_register_push(text, text, text, text);
 

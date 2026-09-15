@@ -6303,6 +6303,333 @@ async function desktopHeaderActions(browser, errors) {
 /** The boot failure screen: no shell, no data, so it must stand on its own
  *  and offer a way back. Console errors are expected here — the app really is
  *  failing to load — so this page's errors are not collected. */
+/* ---------------------------------------------------------------------------
+ * Push notifications (migration 015)
+ *
+ * NOTHING REAL CAN BE DELIVERED HERE and that is by design: this harness runs
+ * with serviceWorkers: "block" and mocks every network call, so an actual Web
+ * Push round trip is a manual check on a real phone. What IS testable — and
+ * what these cover — is the gate, the permission states, and the promise the
+ * screen makes about whether anything will arrive at all.
+ *
+ * Notification and PushManager are stubbed on the page, which is the only way
+ * to reach the granted / denied / unsupported branches deterministically.
+ * ------------------------------------------------------------------------- */
+
+/** A 65-byte VAPID public key's worth of base64url. Not a real key — nothing
+ *  verifies it here — but the right SHAPE, so vapidKeyBytes()'s atob() decode
+ *  is exercised rather than skipped. */
+const FAKE_VAPID =
+  "BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U";
+
+/** Stub the browser halves of Web Push. `permission` is what the page starts
+ *  with; `grant` is what requestPermission() answers when it is called. */
+async function stubPush(page, opts) {
+  await page.addInitScript((o) => {
+    const mkSub = (endpoint) => ({
+      endpoint,
+      toJSON: () => ({ endpoint, keys: { p256dh: "p256dh-key", auth: "auth-key" } }),
+      unsubscribe: async () => {
+        window.__pfUnsubscribedAt = Date.now();
+        window.__pfSub = null;
+        return true;
+      },
+    });
+    window.__pfSub = o.subscribed ? mkSub("https://fcm.example/existing") : null;
+    window.__pfSubscribeCalls = 0;
+    window.__pfAskedPermission = 0;
+
+    const reg = {
+      addEventListener() {},
+      pushManager: {
+        getSubscription: async () => window.__pfSub,
+        subscribe: async (options) => {
+          window.__pfSubscribeCalls++;
+          window.__pfSubscribeOpts = {
+            userVisibleOnly: options.userVisibleOnly,
+            keyBytes: options.applicationServerKey
+              ? options.applicationServerKey.length
+              : 0,
+          };
+          window.__pfSub = mkSub("https://fcm.example/fresh");
+          return window.__pfSub;
+        },
+      },
+    };
+    Object.defineProperty(navigator, "serviceWorker", {
+      configurable: true,
+      value: {
+        controller: null,
+        ready: Promise.resolve(reg),
+        getRegistration: async () => reg,
+        register: async () => reg,
+        addEventListener() {},
+      },
+    });
+    window.PushManager = window.PushManager || function () {};
+    if (o.unsupported) {
+      delete window.PushManager;
+      delete window.Notification;
+      return;
+    }
+    function N() {}
+    N.permission = o.permission;
+    N.requestPermission = async () => {
+      window.__pfAskedPermission++;
+      N.permission = o.grant || o.permission;
+      return N.permission;
+    };
+    window.Notification = N;
+  }, opts || {});
+}
+
+/** Answer 015's three RPCs, recording what was sent. */
+async function routePushRpcs(page, opts) {
+  const calls = [];
+  await page.route("**/rest/v1/rpc/pf_push_status", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([
+        {
+          dispatch_configured: opts.dispatchConfigured !== false,
+          my_devices: opts.myDevices == null ? 1 : opts.myDevices,
+        },
+      ]),
+    })
+  );
+  for (const fn of ["pf_register_push", "pf_unregister_push"]) {
+    await page.route(`**/rest/v1/rpc/${fn}`, (route) => {
+      let body = {};
+      try {
+        body = JSON.parse(route.request().postData() || "{}");
+      } catch (e) {}
+      calls.push({ fn, body, at: Date.now() });
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(fn === "pf_register_push" ? uuid(9) : 1),
+      });
+    });
+  }
+  return calls;
+}
+
+/** Sign in as `email` against a roster where member 0 is the flagged
+ *  treasurer, with the push key present in config. */
+async function pushPage(browser, errors, opts) {
+  const o = opts || {};
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`push: ${e}`));
+  const members = rosterWithEmails();
+  members[0].auth_user_id = FAKE_USER_ID; // Regine, the flagged treasurer
+  members[1].auth_user_id = "22222222-2222-2222-2222-222222222222"; // Sarah
+  const data = { ...M.TABLE_DATA, members };
+  await serve(page, data);
+  await stubPush(page, o.push || {});
+  const calls = await routePushRpcs(page, o);
+  await withAuthMode(page, "optional", {
+    signedIn: true,
+    email: o.asMember ? "sarah@example.com" : "regine@example.com",
+  });
+  // withAuthMode rewrites config.js for AUTH_MODE; the push key has to ride
+  // the same route or it is still the shipped empty string.
+  await page.route("**/js/config.js", async (route) => {
+    const res = await route.fetch();
+    let body = (await res.text())
+      .replace(/AUTH_MODE:\s*"[a-z]*"/, 'AUTH_MODE: "optional"')
+      .replace(
+        /PUSH_PUBLIC_KEY:\s*"[^"]*"/,
+        `PUSH_PUBLIC_KEY: "${o.noKey ? "" : FAKE_VAPID}"`
+      );
+    return route.fulfill({ status: 200, contentType: "application/javascript", body });
+  });
+  // Sign in as the treasurer's Google account: the app matches the session's
+  // user id to a member row, and member 1 carries a different one.
+  if (o.asMember) {
+    members[1].auth_user_id = FAKE_USER_ID;
+    members[0].auth_user_id = "22222222-2222-2222-2222-222222222222";
+  }
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
+  return { page, calls, data };
+}
+
+async function openNotifyMenu(page) {
+  await page.locator(".tab-item", { hasText: "Menu" }).click();
+  await page.waitForTimeout(400);
+}
+
+async function pushNotifications(browser, errors) {
+  // ---- 1. The gate ------------------------------------------------------
+  // An ordinary member is not offered it. The sender picks who to notify from
+  // members.is_treasurer, so a row here would register a device that nothing
+  // will ever send to — and say it worked.
+  {
+    const { page, calls } = await pushPage(browser, errors, { asMember: true });
+    await openNotifyMenu(page);
+    check(
+      "push/an ordinary member is not offered notifications",
+      (await page.locator(".menu-row", { hasText: "Payment notifications" }).count()) === 0
+    );
+    // Exported on PowerFund, so the absent row is not the gate.
+    await page.evaluate(() => window.PowerFund.enableNotifications());
+    await page.waitForTimeout(600);
+    check(
+      "push/...and calling the handler directly registers nothing",
+      calls.length === 0 && (await page.locator(".notify-modal").count()) === 0,
+      JSON.stringify(calls)
+    );
+    await page.close();
+  }
+
+  // ---- 2. Turning it on -------------------------------------------------
+  {
+    const { page, calls } = await pushPage(browser, errors, {
+      push: { permission: "default", grant: "granted" },
+    });
+    await openNotifyMenu(page);
+    const row = page.locator(".menu-row", { hasText: "Payment notifications" });
+    check("push/the treasurer gets the row", (await row.count()) === 1);
+    check(
+      "push/and it says this device is off",
+      /Off on this device/i.test(await row.first().innerText())
+    );
+    await row.first().click();
+    await page.waitForTimeout(400);
+    // PER DEVICE, said before the switch. A push subscription belongs to one
+    // browser profile, which is the thing people assume works the other way.
+    check(
+      "push/the sheet says the switch is per device",
+      /this device only/i.test(await page.locator(".notify-scope").innerText())
+    );
+    await page.locator(".modal-btn-primary", { hasText: "Turn on" }).click();
+    await page.waitForTimeout(1200);
+    check(
+      "push/it asks the browser for permission",
+      (await page.evaluate(() => window.__pfAskedPermission)) === 1
+    );
+    const subOpts = await page.evaluate(() => window.__pfSubscribeOpts);
+    check(
+      "push/subscribes with userVisibleOnly and a decoded key",
+      !!subOpts && subOpts.userVisibleOnly === true && subOpts.keyBytes === 65,
+      JSON.stringify(subOpts)
+    );
+    const reg = calls.filter((c) => c.fn === "pf_register_push");
+    check(
+      "push/records the endpoint and BOTH keys",
+      reg.length === 1 &&
+        reg[0].body.p_endpoint === "https://fcm.example/fresh" &&
+        reg[0].body.p_p256dh === "p256dh-key" &&
+        reg[0].body.p_auth === "auth-key",
+      JSON.stringify(reg)
+    );
+    check(
+      "push/the row then reads as on",
+      /On for this device/i.test(
+        await page.locator(".menu-row", { hasText: "Payment notifications" }).first().innerText()
+      )
+    );
+    await page.close();
+  }
+
+  // ---- 3. Turning it off ------------------------------------------------
+  {
+    const { page, calls } = await pushPage(browser, errors, {
+      push: { permission: "granted", subscribed: true },
+    });
+    await openNotifyMenu(page);
+    await page.locator(".menu-row", { hasText: "Payment notifications" }).first().click();
+    await page.waitForTimeout(500);
+    check(
+      "push/an already-registered device reads as on",
+      (await page.locator(".notify-state.on").count()) === 1
+    );
+    await page.locator(".modal-btn-secondary", { hasText: "Turn off" }).click();
+    await page.waitForTimeout(1200);
+    const un = calls.filter((c) => c.fn === "pf_unregister_push");
+    check(
+      "push/unregisters the endpoint it holds",
+      un.length === 1 && un[0].body.p_endpoint === "https://fcm.example/existing",
+      JSON.stringify(un)
+    );
+    // THE DATABASE FIRST. It is the record of where to send, so clearing it is
+    // what stops the notifications; unsubscribing locally first and failing
+    // the write would leave a device that looks off and a row still sent to.
+    const unsubAt = await page.evaluate(() => window.__pfUnsubscribedAt || 0);
+    check(
+      "push/...and does that BEFORE unsubscribing locally",
+      unsubAt > 0 && un.length === 1 && un[0].at <= unsubAt,
+      `rpc=${un.length ? un[0].at : "none"} local=${unsubAt}`
+    );
+    await page.close();
+  }
+
+  // ---- 4. The honesty check ---------------------------------------------
+  // The write can succeed and the phone still stay silent, because the sending
+  // half is an Edge Function that may not be deployed. Saying "on" over that
+  // is the simulated notification rule 4 forbids.
+  {
+    const { page } = await pushPage(browser, errors, {
+      push: { permission: "granted", subscribed: true },
+      dispatchConfigured: false,
+    });
+    await openNotifyMenu(page);
+    check(
+      "push/the row admits nothing is sending yet",
+      /nothing is sending yet/i.test(
+        await page.locator(".menu-row", { hasText: "Payment notifications" }).first().innerText()
+      )
+    );
+    await page.locator(".menu-row", { hasText: "Payment notifications" }).first().click();
+    await page.waitForTimeout(500);
+    check(
+      "push/and the sheet says so in full",
+      (await page.locator(".notify-pending").count()) === 1 &&
+        /hasn't been deployed/i.test(await page.locator(".notify-pending").innerText())
+    );
+    await page.close();
+  }
+
+  // ---- 5. The dead ends -------------------------------------------------
+  {
+    const { page } = await pushPage(browser, errors, {
+      push: { permission: "denied" },
+    });
+    await openNotifyMenu(page);
+    check(
+      "push/a blocked browser says so on the row",
+      /Blocked in your browser/i.test(
+        await page.locator(".menu-row", { hasText: "Payment notifications" }).first().innerText()
+      )
+    );
+    await page.locator(".menu-row", { hasText: "Payment notifications" }).first().click();
+    await page.waitForTimeout(400);
+    // The app CANNOT re-ask once permission is denied, so offering the button
+    // would be a control that silently does nothing.
+    check(
+      "push/and offers no button it cannot honour",
+      (await page.locator(".notify-blocked").count()) === 1 &&
+        (await page.locator(".modal-btn-primary", { hasText: "Turn on" }).count()) === 0
+    );
+    await page.close();
+  }
+  {
+    const { page } = await pushPage(browser, errors, {
+      push: { permission: "default" },
+      noKey: true,
+    });
+    await openNotifyMenu(page);
+    await page.locator(".menu-row", { hasText: "Payment notifications" }).first().click();
+    await page.waitForTimeout(400);
+    check(
+      "push/an unconfigured fund names what is missing",
+      /PUSH_PUBLIC_KEY/.test(await page.locator(".notify-blocked").innerText())
+    );
+    await page.close();
+  }
+}
+
 async function bootFailure(browser) {
   const page = await browser.newPage({ viewport: { width: 430, height: 900 } });
   // Routes by hand, so serve()'s AUTH_MODE pin never ran. Without this the
@@ -6423,6 +6750,8 @@ async function bootFailure(browser) {
   await contributePickerFromHome(browser, errors);
   console.log("\nDesktop header actions");
   await desktopHeaderActions(browser, errors);
+  console.log("\nPush notifications");
+  await pushNotifications(browser, errors);
   console.log("\nBoot failure");
   await bootFailure(browser);
 

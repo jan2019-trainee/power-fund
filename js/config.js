@@ -78,5 +78,5 @@ window.APP_CONFIG = {
   // Leave this "" until the Edge Function is deployed. Empty means the app
   // says notifications are not set up yet rather than offering a switch that
   // registers a device nothing will ever send to.
-  PUSH_PUBLIC_KEY: "08thIEBJfxMO7QjUl6rdi4W08jo1XLggKRLdlsBP6iAXJtfr",
+  PUSH_PUBLIC_KEY: "BONYMNptDbobkZyOEEPuBu39DhKRDBs0iNLxf3EgEaEfRcdXMmiMVRx7XGJ62QZo839n64tiKscoOiOdBcEiwMY",
 };

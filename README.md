@@ -107,6 +107,15 @@ power fund/
    [`supabase/migrations/`](supabase/migrations/) in order. A brand-new database
    created from the current `schema.sql` already includes them and can skip this.
 
+> **Migrations here are applied BY HAND, in the SQL editor — never with
+> `supabase db push`.**
+>
+> The files are named `001_…`, `002_…`, not the CLI's timestamp format, and the
+> CLI has no record of which have been applied. `db push` would try to replay
+> all of them against a live fund. `supabase/config.toml` exists so the CLI can
+> deploy the notifications Edge Function; that is the only thing it is for
+> here. `supabase functions …` is safe, `supabase db …` is not.
+
 ### 3. Seed members and cycles
 
 1. **SQL Editor → New query** again.
@@ -375,7 +384,10 @@ depends on a notification having arrived.
 2. **Generate a VAPID key pair** — `npx web-push generate-vapid-keys`. Put the
    **public** half in `PUSH_PUBLIC_KEY` in [`js/config.js`](js/config.js) and
    redeploy. It belongs in the page; that is what it is for.
-3. **Deploy the Edge Function** that does the signing and sending:
+3. **Deploy the Edge Function** that does the signing and sending. This needs
+   the Supabase CLI and `supabase/config.toml` (created by `supabase init`,
+   committed). Use only `supabase functions …` — see the warning in step 2 of
+   Setup about `supabase db push`:
 
    ```bash
    supabase functions deploy notify-payment --no-verify-jwt

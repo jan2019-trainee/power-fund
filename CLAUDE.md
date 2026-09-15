@@ -2259,6 +2259,7 @@ confirmation names everything it replaces.
 ```bash
 node tests/views.test.js      # static: view scope. no browser
 node tests/calc.test.js       # money rules. no browser
+node tests/config.test.mjs    # the shipped VAPID key. NO npm install needed
 node tests/message.test.mjs   # what the lock screen says. no browser
 node tests/webpush.test.mjs   # Web Push crypto vs http_ece. no browser
 node tests/notify-payment.test.mjs   # the Edge Function handler. no browser
@@ -2267,7 +2268,9 @@ python3 -m http.server 8791 & # then:
 PF_CHROMIUM=/opt/pw-browsers/chromium-1194/chrome-linux/chrome node tests/smoke.js
 ```
 
-The three `.mjs` suites need `npm install` (they use `http_ece` as a test
+`config.test.mjs` is deliberately dependency-free — it is the check somebody
+runs right before pasting a key and deploying, which is exactly when
+`node_modules` may not exist. The other three `.mjs` suites need `npm install` (they use `http_ece` as a test
 oracle) and Node 22+, which strips the `.ts` types natively — which is why the
 Edge Function's modules can be imported straight out of
 `supabase/functions/` rather than copied or built.

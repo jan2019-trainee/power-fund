@@ -375,8 +375,27 @@ depends on a notification having arrived.
 2. **Generate a VAPID key pair** — `npx web-push generate-vapid-keys`. Put the
    **public** half in `PUSH_PUBLIC_KEY` in [`js/config.js`](js/config.js) and
    redeploy. It belongs in the page; that is what it is for.
-3. **Deploy the Edge Function** that does the signing and sending, with the
-   **private** key and the Supabase service-role key as function secrets.
+3. **Deploy the Edge Function** that does the signing and sending:
+
+   ```bash
+   supabase functions deploy notify-payment --no-verify-jwt
+   supabase secrets set \
+     PF_PUSH_SECRET='<the same long random string as step 4>' \
+     VAPID_PUBLIC_KEY='<public half>' \
+     VAPID_PRIVATE_KEY='<private half>' \
+     VAPID_SUBJECT='mailto:you@example.com'
+   ```
+
+   `--no-verify-jwt` is required and is **not** a hole: the caller is Postgres
+   via `pg_net`, which has no Supabase session to present, so JWT verification
+   would simply stop the trigger reaching the function at all. The gate is the
+   `x-pf-push-secret` header, compared in constant time — and an **unset**
+   secret refuses every request rather than allowing them, so a half-finished
+   deploy cannot become an open relay onto the treasurer's phone.
+
+   `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are injected by Supabase; you
+   do not set those yourself.
+
 4. **Point the trigger at it**, in the Supabase SQL editor:
 
    ```sql
@@ -394,6 +413,23 @@ depends on a notification having arrived.
 Until step 3 is done the app says so rather than claiming notifications are
 on — `pf_push_status()` reports whether the sending half exists, and the
 screen repeats it.
+
+### What the function is, and what it deliberately isn't
+
+[`supabase/functions/notify-payment/`](supabase/functions/notify-payment/) has
+**no dependencies at all** — not `npm:web-push`, not a third-party Deno module.
+PostgREST is plain `fetch` and the crypto is WebCrypto (`webpush.ts` implements
+RFC 8291 message encryption and RFC 8292 VAPID). Two reasons, in this order:
+`web-push` is built on Node's `crypto` and would run through Deno's Node
+compatibility layer, which nothing in this repo can verify; and this is the one
+place in the project running with the **service-role key in scope**, so zero
+imports is zero supply chain.
+
+It is not hand-rolled crypto — every primitive is WebCrypto's. What the file
+owns is the assembly, and [`tests/webpush.test.mjs`](tests/webpush.test.mjs)
+checks that assembly against the `http_ece` library byte for byte, including
+**decrypting its output with an independent implementation**, which is exactly
+what a browser does.
 
 ### Where the secrets live
 

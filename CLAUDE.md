@@ -1631,6 +1631,100 @@ things:
   value instead. (013's own flag-does-not-survive check was already written the
   right way, with `state`.)
 
+### The sender — `supabase/functions/notify-payment/` (phase 2)
+
+**Zero dependencies, deliberately.** Not `npm:web-push`, not a third-party
+Deno module: PostgREST is plain `fetch` and the crypto is WebCrypto.
+`webpush.ts` implements RFC 8291 (aes128gcm) and RFC 8292 (VAPID) itself.
+
+Two reasons, in this order:
+
+1. **`web-push` is built on Node's `crypto`** (`createECDH`, `createHmac`), so
+   on Supabase Edge Functions it runs through Deno's Node-compatibility layer —
+   and **nothing in this repo's toolchain can verify that**, because there is
+   no Deno here. WebCrypto is native to Deno *and* to Node, so what the tests
+   run is the same code that deploys.
+2. This is the one place in the project executing with the **service-role key
+   in scope**. Zero imports is zero supply chain.
+
+It is **not hand-rolled crypto** — every primitive is WebCrypto's (ECDH, HKDF,
+AES-GCM, ECDSA). What the file owns is the *assembly*, and that is what is
+tested.
+
+#### How it is actually verified
+
+`tests/webpush.test.mjs` checks the assembly against `http_ece` — the library
+`web-push` itself encrypts with — in three ways, because one would not do:
+
+- **Byte-identical output.** Given the same salt and the same ephemeral key
+  pair, our body must equal theirs exactly. That pins every step of the
+  derivation, not just the result.
+- **An independent implementation DECRYPTING our output** with the
+  subscriber's private key, which is precisely what the browser does. A round
+  trip against our own code could not catch a shared misreading of the spec;
+  this can, and it is the check that matters.
+- The VAPID JWT **verified with WebCrypto's own `verify`** against the public
+  key — the thing the push service does before accepting the request.
+
+Run against mutated code first. Swapping the receiver/sender order in the
+`WebPush: info` construction, or using `0x01` instead of `0x02` as the last
+record's padding delimiter, both produce a body of **exactly the same length**
+— so a size check would have passed both. Only the decrypt catches them, and
+in production both would have looked like success: a 201 from the push service
+and a phone that never buzzed.
+
+#### Node 22 strips TypeScript natively
+
+Which is why the function's modules are imported straight out of
+`supabase/functions/` by the tests rather than copied or built. There is no
+build step, consistent with the rest of the project. The one thing this cost:
+`index.ts` reads its env **at call time, not at module load**, and guards
+`Deno.serve` behind a `globalThis.Deno` check — so the handler can be imported
+and exercised under Node without starting a server. That is a real
+testability seam, not a workaround; it also means a rotated secret is picked
+up without waiting for a cold isolate.
+
+#### Things in the handler worth not undoing
+
+- **`--no-verify-jwt` is required and is not a hole.** The caller is Postgres
+  via `pg_net`, which has no Supabase session to present, so JWT verification
+  would stop the trigger reaching the function at all. The gate is the
+  `x-pf-push-secret` header, compared in constant time.
+- **An UNSET secret fails CLOSED.** A half-finished deploy must not become an
+  open relay onto the treasurer's phone.
+- **The claim is `?txid=eq.N&sent_at=is.null` in one PATCH.** That single
+  statement is what makes a duplicate delivery — pg_net retrying, or a
+  replayed call — claim nothing and send nothing.
+- **The request body only ever carries a txid.** Everything else is read from
+  the database, so there is nothing a caller could forge even holding the
+  secret; the worst they can do is ask for a transaction that already went.
+- **404/410 prunes the subscription.** The push service is saying that browser
+  is never coming back; left in place it would be pushed to forever, and the
+  member would see "on" for a device that no longer exists. This is also how a
+  row from an unsubscribe that failed halfway cleans itself up.
+- **One JWT per push SERVICE, not per device** — the audience is the origin,
+  so two devices on the same service share a token.
+- **A run that delivered nothing writes `last_error`.** The outbox row is the
+  only trail for "the treasurer's phone stayed quiet", so "no treasurer is
+  flagged" and "the treasurer has no device registered" are recorded rather
+  than returned and forgotten.
+- **The notification names the member and the total, never an account number**
+  — same rule as the activity log, and this one renders on a lock screen.
+
+#### The limit of the handler test, stated
+
+`tests/notify-payment.test.mjs` runs the real handler against an in-memory
+fake of PostgREST. It proves the handler's logic — the gate, the claim, the
+pruning, and a full decrypt of what was POSTed — but **the fake answers
+PostgREST's URL syntax rather than being PostgREST**. A malformed filter that
+the fake happens to understand and the real service rejects would pass here.
+The query strings are asserted explicitly so they are at least visible, but
+the first deploy is still the first real test of them.
+
+`http_ece` is a **devDependency and a test oracle only**. `web-push` was
+installed, found to be imported by nothing, and removed — `npx web-push
+generate-vapid-keys` needs no dependency.
+
 ## Migrations
 
 Run in the Supabase SQL editor, in order. `006` also needs a one-off
@@ -2165,10 +2259,18 @@ confirmation names everything it replaces.
 ```bash
 node tests/views.test.js      # static: view scope. no browser
 node tests/calc.test.js       # money rules. no browser
+node tests/message.test.mjs   # what the lock screen says. no browser
+node tests/webpush.test.mjs   # Web Push crypto vs http_ece. no browser
+node tests/notify-payment.test.mjs   # the Edge Function handler. no browser
 bash tests/sql/run.sh         # RLS on a real Postgres 16. no browser
 python3 -m http.server 8791 & # then:
 PF_CHROMIUM=/opt/pw-browsers/chromium-1194/chrome-linux/chrome node tests/smoke.js
 ```
+
+The three `.mjs` suites need `npm install` (they use `http_ece` as a test
+oracle) and Node 22+, which strips the `.ts` types natively — which is why the
+Edge Function's modules can be imported straight out of
+`supabase/functions/` rather than copied or built.
 
 A fifth lesson, from 013: **the harness's own stub had drifted from
 `schema.sql`.** `members.member_order` is declared `unique` there and was not

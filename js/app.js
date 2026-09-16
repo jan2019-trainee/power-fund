@@ -8913,22 +8913,27 @@
     // Deliberately not awaited — a slow or unavailable PushManager must not
     // hold up the app, and this only reads the browser's own state.
     if (!gated) {
+      // The nudge on Home depends on this, so the repaint rule cannot simply
+      // be "only Menu" — but it must not be unconditional either.
+      const nudgeBefore = showPushNudge();
       refreshPushState().then(() => {
         // NO UNCONDITIONAL RENDER HERE. This resolves a tick or two after the
         // first paint, and render() clears body.pf-anim before reassigning
         // innerHTML — so an extra render lands mid-flight and KILLS the entry
         // transition it was in the middle of. Caught by tests/smoke.js's
-        // `anim/the first paint animates`, which is the check that exists
-        // because a background refresh replaying the transition was reported
-        // from use; this is the same hazard from the other direction.
+        // `anim/the first paint animates`.
         //
-        // Nothing push-related is on screen at boot: the row and the sheet
-        // both live in Menu, and setView() renders on its way there. The one
-        // case that needs a repaint is somebody already sitting on Menu when
-        // this resolves.
-        if (state && currentView === "menu") render();
+        // So repaint only when something ON SCREEN actually changed: the Menu
+        // surfaces, or the Home nudge appearing or disappearing. In the
+        // ordinary case — a configured fund — showPushNudge() answers the same
+        // before and after and nothing repaints, so the animation survives.
+        // The one case that does repaint is a fund whose sender is not
+        // deployed, where withdrawing the offer is worth a frame.
+        if (!state) return;
+        if (currentView === "menu" || showPushNudge() !== nudgeBefore) render();
       });
     }
+
     // The worker tells us when a subscription was rotated underneath us. It
     // cannot re-record one itself — that is an authenticated write and a
     // worker has no Supabase session — so this is where the repair happens.

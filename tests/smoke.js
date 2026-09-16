@@ -6509,7 +6509,10 @@ async function pushNotifications(browser, errors) {
   // is a fact about THIS DEVICE ("notifications are not on here"), which is
   // self-clearing and stays correct for a future member or a second phone.
   {
+    // asMember, because the copy under test is the MEMBER's. Without it this
+    // signs in as the treasurer and asserts the wrong half of the branch.
     const { page } = await pushPage(browser, errors, {
+      asMember: true,
       push: { permission: "default" },
     });
     const nudge = page.locator(".push-nudge");

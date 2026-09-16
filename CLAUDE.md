@@ -1863,6 +1863,58 @@ Worth knowing because it reads exactly like a broken trigger.
   the surface for it.
 - **The `confirmCycles` fix ships in this batch** rather than separately.
 
+### The Home nudge, and a collision between two earlier fixes
+
+How anybody finds out notifications exist. Asked for as a red dot on the Menu
+tab; built as a Home card instead.
+
+- **NOT a "what's new" badge.** That is right once, then goes stale, needs a
+  seen-flag per person, and does nothing for the next member or somebody's
+  second phone. The condition is a FACT ABOUT THIS DEVICE — notifications are
+  not on here — which self-clears the moment they are and needs no
+  announcement bookkeeping. It is also the right scope: a push subscription
+  belongs to one browser profile, so "already dealt with this" cannot be an
+  account-level fact.
+- **NOT red.** This app reserves the danger family for money, and the only red
+  thing on Home is *"₱30,000 never arrived"*. Borrowing that weight for a
+  setting spends it, and the next genuinely red thing reads as less. A test
+  asserts the border, background and glyph all avoid `#E15353`.
+- **Placed LAST among the notice cards**, below everything about money: it is
+  an offer rather than something to do. It carries a dismiss, which
+  `.payout-nudge` deliberately does not — that one names a real gap in the
+  fund's data and should keep asking.
+- Six conditions suppress it, each a reason not to ask: not linked; a browser
+  that cannot do push (an iOS Safari tab — nudging toward the impossible is
+  worse than silence); no VAPID key; already on here; permission already
+  **denied**, since the browser will not let the app ask again; and dispatch
+  known to be off, which would be rule 4 one step earlier.
+
+**THE COLLISION, and why the repaint rule reads the way it does.** The entry-
+animation fix made the boot push-refresh repaint **only on Menu**, because an
+unconditional render one tick after first paint clears `body.pf-anim` and kills
+the transition mid-flight. Correct then — and it silently broke this card,
+which lives on HOME and depends on `pushStatus` arriving from that same async
+refresh. On a fund whose sender is not deployed the nudge appeared and had no
+way to withdraw itself: the guard protecting the animation was also blocking
+the correction.
+
+The rule is now "repaint when something ON SCREEN changed":
+
+```js
+if (currentView === "menu" || showPushNudge() !== nudgeBefore) render();
+```
+
+On a configured fund the answer is the same before and after, nothing
+repaints, and the animation survives. The one case that costs a frame is the
+misconfigured fund, where withdrawing an offer that cannot work is worth it.
+**Do not narrow this back to "only Menu"** without deciding what happens to the
+nudge, and do not widen it to unconditional without re-reading the animation
+note above — the two constraints are real and they pull opposite ways.
+
+Found by `push/no nudge when nothing is sending yet`, which is the check that
+exists precisely because the nudge must not invite somebody into a dead
+feature.
+
 ### Still out of scope
 
 Turn-swap requests, dispute alerts, and due-date reminders. The reminders are

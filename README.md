@@ -468,10 +468,30 @@ the phone nothing, and the screen says so before the switch rather than after.
 
 ### What gets sent
 
-One alert per **transfer**, not per cycle: a member paying six cycles in one
-batch is a single notification, coalesced in the database. The treasurer's own
-payments do not notify them, and a re-upload on a claim already waiting is not
-a new claim. Cash payments the treasurer records themselves send nothing.
+| when | who hears about it |
+| --- | --- |
+| a member sends a payment | the treasurer |
+| the treasurer confirms it | that member |
+| the treasurer records a cash payment | that member |
+| the treasurer rejects it, with the reason | that member |
+| a payout is released | the recipient |
+
+One alert per **transfer or decision**, not per cycle: six cycles paid,
+confirmed or rejected together is a single notification, coalesced in the
+database.
+
+**Nobody is ever notified about something they did themselves** — the
+treasurer's own payment, a payout they released to themselves, a cash payment
+they recorded for themselves. And nothing about one member's money is sent to
+the group: every member notification goes to that member alone.
+
+Turn-swap requests, dispute alerts and due-date reminders are **not** built.
+The reminders would need `pg_cron` rather than a trigger, since nothing writes
+a row when a date passes.
+
+**Member events need migration 016**, and it has an order: deploy the Edge
+Function **before** applying it. The older function ignores the recipient
+column and sends everything to the treasurer.
 
 ## Security limitations — read this
 

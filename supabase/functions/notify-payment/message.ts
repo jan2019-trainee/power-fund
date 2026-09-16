@@ -14,9 +14,14 @@ export interface OutboxRow {
   id: string;
   txid: number | string;
   event_type: string;
+  /** Who to TELL. Null means the trigger could not resolve one — see index.ts. */
+  recipient_member_id?: string | null;
+  /** Who the event is ABOUT. For a member's own event these are the same. */
   member_id: string | null;
   cycle_number: number | null;
+  round_number?: number | null;
   amount: number | string | null;
+  note?: string | null;
 }
 
 export interface Notification {
@@ -45,11 +50,16 @@ export function cycleLabel(cycles: number[]): string {
 }
 
 /**
- * Turn one transaction's worth of outbox rows into one notification.
+ * Turn ONE recipient's rows from one transaction into one notification.
+ *
+ * index.ts groups the claimed rows by (recipient, event_type) before calling
+ * this, so every row here shares an event. That grouping is what lets a single
+ * transaction — a treasurer confirming one member and rejecting another —
+ * produce the right sentence for each person instead of one muddled one.
  *
  * `names` maps member id to display name. An unknown id reads "A member"
- * rather than an id: the id is meaningless on a lock screen, and this
- * notification is read by somebody holding a phone, not debugging.
+ * rather than an id: the id is meaningless on a lock screen, and this is read
+ * by somebody holding a phone, not debugging.
  *
  * Returns null when there is nothing worth showing — the caller must not
  * invent a notification to satisfy userVisibleOnly.
@@ -58,47 +68,97 @@ export function composeNotification(
   rows: OutboxRow[],
   names: Record<string, string>
 ): Notification | null {
-  const payments = rows.filter((r) => r.event_type === "payment_pending");
-  if (payments.length === 0) return null;
+  if (!rows.length) return null;
+  const event = rows[0].event_type;
+  const mine = rows.filter((r) => r.event_type === event);
+  if (!mine.length) return null;
 
-  // Normally one member per transaction — a member submits their own batch.
-  // More than one can only happen if some future writer batches across
-  // members, and a wrong-but-confident sentence is worse than a general one.
-  const memberIds = [...new Set(payments.map((r) => String(r.member_id)))];
-  const total = payments.reduce((n, r) => n + (Number(r.amount) || 0), 0);
-  const cycles = payments
+  const total = mine.reduce((n, r) => n + (Number(r.amount) || 0), 0);
+  const cycles = mine
     .map((r) => Number(r.cycle_number))
     .filter((c) => Number.isFinite(c));
-
-  if (memberIds.length > 1) {
-    return {
-      title: "Payments to review",
-      body: `${memberIds.length} members sent ${peso(total)} in total`,
-      tag: "pf-payment",
-      url: "/",
-    };
-  }
-
-  const id = memberIds[0];
-  const who = names[id] || "A member";
   const where = cycleLabel(cycles);
-  return {
-    // THE TITLE CARRIES THE EVENT, never the app's name. Reported from a real
-    // iPhone: the lock screen read "Power Fund / from Power Fund / Jan sent
-    // ₱2,000". iOS adds its own "from <app name>" attribution line beneath the
-    // title, so a title of "Power Fund" says the same thing twice and spends
-    // the boldest line on the one fact the reader already has. Android shows
-    // the app name in its own header for the same reason.
-    //
-    // So the title is what the treasurer must DO, and the body is the detail.
-    title: "Payment to review",
-    body: `${who} sent ${peso(total)}${where ? " — " + where : ""}`,
-    // PER MEMBER. A repeat from the same person replaces their earlier notice
-    // (sw.js sets renotify, so it still buzzes); two different people stack,
-    // because collapsing them would hide one of the two payments.
-    tag: `pf-payment-${id}`,
-    // "/" and not a deep link: the app has NO routing — one currentView, no
-    // hash, no history — so anything else reloads at Home and looks broken.
-    url: "/",
-  };
+  const subjects = [...new Set(mine.map((r) => String(r.member_id)))];
+  const id = subjects[0];
+  const who = names[id] || "A member";
+  const round = mine[0].round_number;
+  const note = (mine[0].note || "").trim();
+
+  // EVERY TITLE NAMES THE EVENT, never the app. iOS prints its own
+  // "from <app name>" line beneath the title and Android shows the app in its
+  // own header, so "Power Fund" there says the same thing twice and spends the
+  // boldest line on a fact the reader already has. Reported from a phone.
+  switch (event) {
+    case "payment_pending": {
+      // To the TREASURER, about somebody else.
+      if (subjects.length > 1) {
+        return {
+          title: "Payments to review",
+          body: `${subjects.length} members sent ${peso(total)} in total`,
+          tag: "pf-payment",
+          url: "/",
+        };
+      }
+      return {
+        title: "Payment to review",
+        body: `${who} sent ${peso(total)}${where ? " \u2014 " + where : ""}`,
+        // PER MEMBER. A repeat from the same person replaces their earlier
+        // notice (sw.js sets renotify, so it still buzzes); two different
+        // people stack, because collapsing them would hide one of the two.
+        tag: `pf-payment-${id}`,
+        url: "/",
+      };
+    }
+
+    // The member sent proof and has been waiting. This is the loop closing.
+    case "payment_confirmed":
+      return {
+        title: "Payment confirmed",
+        body: `Your ${peso(total)}${where ? " for " + where : ""} is confirmed`,
+        tag: `pf-confirmed-${id}`,
+        url: "/",
+      };
+
+    // A DIFFERENT FACT from the above: cash that changed hands in person, now
+    // on the record. Calling it "confirmed" would imply they had sent proof.
+    case "payment_recorded":
+      return {
+        title: "Payment recorded",
+        body: `The treasurer recorded ${peso(total)}${where ? " for " + where : ""}`,
+        tag: `pf-recorded-${id}`,
+        url: "/",
+      };
+
+    // The one that matters most: a rejection is invisible in the app until
+    // opened, and unlike a confirmation it NEEDS ACTION. The reason travels
+    // with it, because "send it again" with nothing to act on is worse than
+    // useless.
+    case "payment_rejected":
+      return {
+        title: "Payment needs resending",
+        body:
+          `Your payment${where ? " for " + where : ""} was rejected \u2014 ` +
+          (note || "send it again"),
+        tag: `pf-rejected-${id}`,
+        url: "/",
+      };
+
+    // The largest single transfer in the fund. The nudge is deliberate: the
+    // record that it arrived is the one thing only the recipient can give.
+    case "payout_released":
+      return {
+        title: "Your payout has been sent",
+        body:
+          `${peso(total)}${round ? " for Round " + round : ""} \u2014 ` +
+          "tap to confirm it arrived",
+        tag: `pf-payout-${id}`,
+        url: "/",
+      };
+
+    default:
+      // An event type this build does not know about. Saying nothing is right:
+      // userVisibleOnly means a push MUST show something, so the caller needs
+      // to know there is nothing to say rather than be handed a guess.
+      return null;
+  }
 }

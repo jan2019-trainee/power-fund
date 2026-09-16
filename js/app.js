@@ -1461,18 +1461,22 @@
   /**
    * Who may turn this on.
    *
-   * verifiedTreasurer() — a LINKED account carrying `is_treasurer` — and NOT
-   * isTreasurerAccount(), which falls back to the PIN when nobody is flagged.
-   * The Edge Function decides who to notify from `members.is_treasurer`, so a
-   * PIN-unlocked member offered this switch would register a device that
-   * nothing will ever send to, and be told it worked.
+   * ANY LINKED MEMBER since migration 016 — `editableMember()`, the same gate
+   * as the payout QR and the receipt acknowledgement, and never
+   * `localStorage.pf_my_member_id`: a push subscription decides whose phone
+   * hears about whose money, so an unverified per-device preference is not
+   * enough to key it on.
    *
-   * Today the only event is a member's payment, which is the treasurer's to
-   * act on, so this is treasurer-only by scope rather than by permission.
-   * When member-facing events land, the gate becomes editableMember().
+   * It was verifiedTreasurer() while the only event was an incoming payment —
+   * treasurer-only BY SCOPE rather than by permission. 016 gives every member
+   * events of their own (confirmed, recorded, rejected, payout released), so
+   * the scope reason is gone and the gate widens to match.
+   *
+   * Still NOT isTreasurerAccount() anywhere near this: that falls back to the
+   * PIN when nobody is flagged, and the sender routes on real member ids.
    */
   function canUsePush() {
-    return !!(verifiedTreasurer() && window.DB.pushAvailable());
+    return !!(editableMember() && window.DB.pushAvailable());
   }
 
   /** The VAPID key travels as base64url; subscribe() wants raw bytes. */
@@ -1553,6 +1557,82 @@
     if (pushStatus && !pushStatus.dispatchConfigured)
       return "On here, but nothing is sending yet";
     return "On for this device";
+  }
+
+  /** Dismissed on THIS DEVICE. Per-device is the right scope and not a
+   *  shortcut: a push subscription belongs to one browser profile, so
+   *  "already dealt with this" cannot be an account-level fact. It also means
+   *  a member's second phone gets asked, which is correct. */
+  const PUSH_NUDGE_KEY = "pf_push_nudge_dismissed";
+
+  function pushNudgeDismissed() {
+    try {
+      return localStorage.getItem(PUSH_NUDGE_KEY) === "1";
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function dismissPushNudge() {
+    try {
+      localStorage.setItem(PUSH_NUDGE_KEY, "1");
+    } catch (e) {
+      /* private window, or site data blocked — it reappears next load, which
+         is better than throwing on a dismissal. */
+    }
+    render();
+  }
+
+  /**
+   * Should Home offer to turn notifications on?
+   *
+   * DELIBERATELY NOT A "what's new" BADGE. That kind of marker is right once,
+   * then goes stale, needs a seen-flag per person, and does nothing for the
+   * next member or for somebody's second phone. The condition here is a
+   * FACT ABOUT THIS DEVICE — "notifications are not on here" — which is
+   * self-clearing the moment they are, and correct forever after without any
+   * announcement bookkeeping.
+   *
+   * Every clause is a reason NOT to ask:
+   */
+  function showPushNudge() {
+    // Not a linked member, or the database has no 015/016: the switch itself
+    // is not offered, so neither is the nudge.
+    if (!canUsePush()) return false;
+    // iOS in an ordinary Safari tab. Push cannot work until the app is on the
+    // Home Screen, and nudging somebody toward something impossible is worse
+    // than silence.
+    if (!pushSupported()) return false;
+    // This fund never had its VAPID key set.
+    if (!PUSH_KEY) return false;
+    // Already on here.
+    if (pushSubscribed) return false;
+    // DENIED IS FOREVER, as far as the app is concerned — the browser will
+    // not let us ask again, so a nudge would lead to a sheet that can only
+    // explain itself. "default" is the one state where asking can work.
+    if (pushPermission() !== "default") return false;
+    // Known not to be sending. Null means we have not been told yet, and that
+    // is not the same as "no" — the sheet is honest about it either way.
+    if (pushStatus && !pushStatus.dispatchConfigured) return false;
+    return !pushNudgeDismissed();
+  }
+
+  /** The nudge says what THIS viewer would be told. Same reason the sheet's
+   *  copy branches: the treasurer's version is false for the other four. */
+  function pushNudgeCopy() {
+    return verifiedTreasurer()
+      ? {
+          title: "Get a heads-up when a payment arrives",
+          note:
+            "Right now you only find out by opening the app. One tap, " +
+            "on this device.",
+        }
+      : {
+          title: "Know when your payment is confirmed",
+          note:
+            "And when it is rejected, or your own payout is sent. One tap, " +
+            "on this device.",
+        };
   }
 
   function openNotifyModal() {
@@ -2081,17 +2161,22 @@
     render();
     try {
       const now = new Date().toISOString();
+      // ONE STATEMENT, not a loop of single-row updates. Each await is its own
+      // request and therefore its own transaction, so the old form could leave
+      // half a batch confirmed with no activity-log entry (that comes after),
+      // and would send the member one notification PER CYCLE once 015's
+      // per-transaction coalescing had something to coalesce. Reject has
+      // always done it this way.
       let total = 0;
+      const ids = [];
       for (const c of cycles) {
         const row = C.contributionFor(state.contributions, memberId, c);
         if (row && row.status === C.STATUS_PENDING) {
           total += Number(row.amount) || 0;
-          await window.DB.updateContribution(row.id, {
-            status: C.STATUS_PAID,
-            paid_at: now,
-          });
+          ids.push(row.id);
         }
       }
+      if (ids.length) await window.DB.confirmContributions(ids, now);
       await logActivity(
         `Treasurer confirmed ${memberName(memberId)}'s ${cycleRangeLabel(
           cycles
@@ -6797,6 +6882,8 @@
       // true of THIS DEVICE, which is what a push subscription is scoped to.
       canUsePush: canUsePush(),
       pushNote: pushRowNote(),
+      showPushNudge: showPushNudge(),
+      pushNudgeCopy: pushNudgeCopy(),
       // Accounts (migration 008). The mode drives whether Menu shows an
       // Account group at all; the email is what "Signed in as ..." prints.
       authMode: AUTH_MODE,
@@ -8205,9 +8292,21 @@
       html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeNotifyModal()">
         <div class="modal notify-modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
           <h3 id="dlg-title">Payment notifications</h3>
-          <p class="modal-sub">Get an alert on this device when a member sends a
-            payment for you to review. The fund's attention queue is still the
-            record — this only saves you opening the app to find out.</p>
+          <p class="modal-sub">${
+            // The copy has to say what THIS viewer will be told. It used to
+            // promise "when a member sends a payment for you to review" to
+            // everybody, which is false for four of the five people who can
+            // now see this screen.
+            verifiedTreasurer()
+              ? `Get an alert on this device when a member sends a payment for
+                 you to review, and when a payout you released is reported as
+                 not arrived. The fund's attention queue is still the record —
+                 this only saves you opening the app to find out.`
+              : `Get an alert on this device when the treasurer confirms or
+                 rejects one of your payments, and when your own payout is
+                 sent. The app is still the record — this only saves you
+                 opening it to find out.`
+          }</p>
           ${
             // PER DEVICE, and said before the switch rather than after. A push
             // subscription belongs to one browser profile, the same shape as
@@ -8258,9 +8357,15 @@
           }
           ${
             supported && configured && perm !== "denied"
-              ? `<p class="notify-what">You'll get one alert per transfer, not
-                   one per cycle — a member paying six cycles at once is a
-                   single notification. Your own payments don't notify you.</p>`
+              ? `<p class="notify-what">${
+                  verifiedTreasurer()
+                    ? `You'll get one alert per transfer, not one per cycle — a
+                       member paying six cycles at once is a single
+                       notification.`
+                    : `You'll get one alert per decision, not one per cycle — a
+                       batch of six confirmed together is a single
+                       notification.`
+                } You are never notified about something you did yourself.</p>`
               : ""
           }
           <div class="modal-actions">
@@ -8808,22 +8913,27 @@
     // Deliberately not awaited — a slow or unavailable PushManager must not
     // hold up the app, and this only reads the browser's own state.
     if (!gated) {
+      // The nudge on Home depends on this, so the repaint rule cannot simply
+      // be "only Menu" — but it must not be unconditional either.
+      const nudgeBefore = showPushNudge();
       refreshPushState().then(() => {
         // NO UNCONDITIONAL RENDER HERE. This resolves a tick or two after the
         // first paint, and render() clears body.pf-anim before reassigning
         // innerHTML — so an extra render lands mid-flight and KILLS the entry
         // transition it was in the middle of. Caught by tests/smoke.js's
-        // `anim/the first paint animates`, which is the check that exists
-        // because a background refresh replaying the transition was reported
-        // from use; this is the same hazard from the other direction.
+        // `anim/the first paint animates`.
         //
-        // Nothing push-related is on screen at boot: the row and the sheet
-        // both live in Menu, and setView() renders on its way there. The one
-        // case that needs a repaint is somebody already sitting on Menu when
-        // this resolves.
-        if (state && currentView === "menu") render();
+        // So repaint only when something ON SCREEN actually changed: the Menu
+        // surfaces, or the Home nudge appearing or disappearing. In the
+        // ordinary case — a configured fund — showPushNudge() answers the same
+        // before and after and nothing repaints, so the animation survives.
+        // The one case that does repaint is a fund whose sender is not
+        // deployed, where withdrawing the offer is worth a frame.
+        if (!state) return;
+        if (currentView === "menu" || showPushNudge() !== nudgeBefore) render();
       });
     }
+
     // The worker tells us when a subscription was rotated underneath us. It
     // cannot re-record one itself — that is an authenticated write and a
     // worker has no Supabase session — so this is where the repair happens.
@@ -8953,6 +9063,7 @@
     closeContributePicker,
     openNotifyModal,
     closeNotifyModal,
+    dismissPushNudge,
     enableNotifications,
     disableNotifications,
     openWhoAmIPicker,

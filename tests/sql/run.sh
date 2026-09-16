@@ -745,6 +745,12 @@ push() {
   out=$(q -tAc "begin;
       ${setup:+$setup;}
       delete from push_outbox; delete from net.calls;
+      -- Release the once-per-transaction dispatch claim. [setup] runs in the
+      -- SAME transaction as the action, and if it enqueued anything it has
+      -- already taken the flag — so without this the action could never
+      -- dispatch and every count read x/0. In real use the setup happened in
+      -- an earlier transaction entirely.
+      select set_config('pf.push_scheduled', '', true);
       set local role authenticated;
       select set_config('request.jwt.claim.sub','$sub',true);
       $sql;
@@ -766,9 +772,16 @@ push() {
 # Runs <sql> as <sub>, then reads <expression> as the superuser — for asking
 # what the dispatch actually carried, which no PostgREST role may see.
 pushval() {
-  local label="$1" expect="$2" sub="$3" sql="$4" expr="$5" out got
+  local label="$1" expect="$2" sub="$3" sql="$4" expr="$5" setup="${6:-}" out got
   out=$(q -tAc "begin;
+      ${setup:+$setup;}
       delete from push_outbox; delete from net.calls;
+      -- Release the once-per-transaction dispatch claim. [setup] runs in the
+      -- SAME transaction as the action, and if it enqueued anything it has
+      -- already taken the flag — so without this the action could never
+      -- dispatch and every count read x/0. In real use the setup happened in
+      -- an earlier transaction entirely.
+      select set_config('pf.push_scheduled', '', true);
       set local role authenticated;
       select set_config('request.jwt.claim.sub','$sub',true);
       $sql;
@@ -987,6 +1000,171 @@ if [ -z "$(printf '%s' "$reapply015" | grep -i ERROR)" ]; then
 else
   printf '  FAIL 015 does not re-apply after rollback — %s\n' \
     "$(printf '%s' "$reapply015" | grep -i ERROR | head -1 | cut -c1-110)"; FAILED=1
+fi
+
+# ===========================================================================
+# Migration 016 — member notifications
+#
+# Applied HERE rather than in policy.sql, so the 015 assertions above run in
+# the world they were written for and this section starts from 015 applied.
+# ===========================================================================
+echo
+echo "016 — member notifications"
+apply016=$(q -q -v ON_ERROR_STOP=1 -f "$MIG/016_member_notifications.sql" 2>&1)
+if [ -z "$(printf '%s' "$apply016" | grep -i ERROR)" ]; then
+  printf '  ok   016 applies on top of 015\n'
+else
+  printf '  FAIL 016 does not apply — %s\n' \
+    "$(printf '%s' "$apply016" | grep -i ERROR | head -1 | cut -c1-110)"; FAILED=1
+fi
+q -tAc "update app_secrets set push_endpoint_url='https://fn/notify-payment',
+                               push_secret='shhh' where id=1" >/dev/null 2>&1
+
+PEND="insert into contributions (cycle_id,member_id,status,proof_url)
+        values ('$C1','$SID',1,$PROOF)"
+
+echo "016 — the outbox says who a notification is FOR"
+# 015 had no recipient at all: the function hardcoded "whoever is flagged
+# treasurer". Every row now names its own reader.
+pushval "a claim still goes to the treasurer, but now says so" "$RID/payment_pending" $MEM \
+  "insert into contributions (cycle_id,member_id,status,proof_url)
+     values ('$C1','$SID',1,$PROOF)" \
+  "select recipient_member_id || '/' || event_type from push_outbox limit 1"
+pushval "...and still names the payer as the subject" "$SID" $MEM \
+  "insert into contributions (cycle_id,member_id,status,proof_url)
+     values ('$C1','$SID',1,$PROOF)" \
+  "select member_id from push_outbox limit 1"
+
+echo "016 — what the member is told"
+# The member sent proof and has been waiting. This is the loop closing.
+pushval "a confirmed payment tells the PAYER, not the treasurer" "$SID/payment_confirmed" $TRE \
+  "update contributions set status=2 where cycle_id='$C1' and member_id='$SID'" \
+  "select recipient_member_id || '/' || event_type from push_outbox limit 1" \
+  "$PEND"
+# TWO DIFFERENT FACTS. From status 1 the member sent proof and it was approved;
+# from 0 the treasurer logged cash that changed hands in person.
+pushval "cash the treasurer logged reads as RECORDED, not confirmed" "payment_recorded" $TRE \
+  "update contributions set status=2 where cycle_id='$C1' and member_id='$SID'" \
+  "select event_type from push_outbox limit 1" \
+  "insert into contributions (cycle_id,member_id,status) values ('$C1','$SID',0)"
+# The one that matters most: today a rejection is invisible until the member
+# opens the app, and unlike a confirmation it needs action.
+pushval "a rejection carries the treasurer's reason" "payment_rejected/wrong reference" $TRE \
+  "update contributions set status=3, rejection_note='wrong reference'
+     where cycle_id='$C1' and member_id='$SID'" \
+  "select event_type || '/' || note from push_outbox limit 1" \
+  "$PEND"
+pushval "...and a rejection with no reason still sends" "payment_rejected/<null>" $TRE \
+  "update contributions set status=3 where cycle_id='$C1' and member_id='$SID'" \
+  "select event_type || '/' || coalesce(note,'<null>') from push_outbox limit 1" \
+  "$PEND"
+
+echo "016 — the payout's own event"
+# Keyed on recipient_member_id, the RECORD — never the payout position. The
+# roster can be reordered or swapped after a release, which is exactly when the
+# two disagree, and telling the wrong person their ₱30,000 arrived is the worst
+# outcome available here.
+pushval "a released payout tells its recorded recipient" "$SID/payout_released/3" $TRE \
+  "update payouts set released=true, released_on='2027-01-05', amount=30000
+     where round_number=3" \
+  "select recipient_member_id || '/' || event_type || '/' || round_number
+     from push_outbox limit 1" \
+  "update payouts set recipient_member_id='$SID', recipient_name='Sarah' where round_number=3"
+push "a payout that was ALREADY released says nothing again" "0/0" $TRE \
+  "update payouts set note='tidying' where round_number=1"
+
+echo "016 — never tell somebody what they just did themselves"
+# 015 spelled this as "is the payer the treasurer". recipient = pf_member_id()
+# says the same thing and extends to every new event.
+push "the treasurer confirming their OWN payment tells nobody" "0/0" $TRE \
+  "update contributions set status=2 where cycle_id='$C1' and member_id='$RID'" \
+  "insert into contributions (cycle_id,member_id,status,proof_url)
+     values ('$C1','$RID',1,$PROOF)"
+push "...nor releasing a payout to themselves" "0/0" $TRE \
+  "update payouts set released=true, released_on='2027-02-05', amount=30000
+     where round_number=4" \
+  "update payouts set recipient_member_id='$RID', recipient_name='Regine' where round_number=4"
+push "...but a payment they confirm for SOMEBODY ELSE does" "1/1" $TRE \
+  "update contributions set status=2 where cycle_id='$C1' and member_id='$SID'" \
+  "$PEND"
+
+echo "016 — one transfer is still one notification"
+SIXPEND="insert into contributions (cycle_id, member_id, status, proof_url) values
+  ('$C1','$SID',1,$PROOF),('$C2','$SID',1,$PROOF),('$C3','$SID',1,$PROOF),
+  ('$C4','$SID',1,$PROOF),('$C5','$SID',1,$PROOF),('$C6','$SID',1,$PROOF)"
+push "rejecting six cycles dispatches once" "6/1" $TRE \
+  "update contributions set status=3, rejection_note='resend please'
+     where member_id='$SID'" "$SIXPEND"
+# THE REASON confirmCycles() had to stop looping. Each await was its own
+# request and therefore its own TRANSACTION, so the member would have got six
+# notifications — and a failure part-way left half a batch confirmed with no
+# activity-log entry at all.
+push "confirming six cycles in ONE statement dispatches once" "6/1" $TRE \
+  "update contributions set status=2, paid_at=now() where member_id='$SID'" "$SIXPEND"
+pushval "...and all six name the same single member" "6/1" $TRE \
+  "update contributions set status=2, paid_at=now() where member_id='$SID'" \
+  "select count(*) || '/' || count(distinct recipient_member_id) from push_outbox" \
+  "$SIXPEND"
+
+echo "016 — A NOTIFICATION STILL NEVER COSTS A PAYMENT"
+q -tAc "alter table net.calls add constraint boom
+          check (req_url <> 'https://fn/notify-payment')" >/dev/null 2>&1
+pushval "pg_net throwing: the confirm still lands, and is recorded" "2/1" $TRE \
+  "update contributions set status=2 where cycle_id='$C1' and member_id='$SID'" \
+  "select (select status from contributions where cycle_id='$C1' and member_id='$SID')
+          || '/' || (select count(*) from push_outbox)" \
+  "$PEND"
+q -tAc "alter table net.calls drop constraint boom" >/dev/null 2>&1
+q -tAc "alter function net.http_post(text,jsonb,jsonb,jsonb,integer)
+          rename to http_post_x" >/dev/null 2>&1
+pushval "pg_net absent: the rejection still lands" "3/1" $TRE \
+  "update contributions set status=3 where cycle_id='$C1' and member_id='$SID'" \
+  "select (select status from contributions where cycle_id='$C1' and member_id='$SID')
+          || '/' || (select count(*) from push_outbox)" \
+  "$PEND"
+q -tAc "alter function net.http_post_x(text,jsonb,jsonb,jsonb,integer)
+          rename to http_post" >/dev/null 2>&1
+
+echo "016 — nothing loosened"
+run "a member still may NOT confirm their own payment" $MEM DENY \
+  "insert into contributions (cycle_id,member_id,status,proof_url)
+     values ('$C1','$SID',1,$PROOF);
+   update contributions set status=2 where cycle_id='$C1' and member_id='$SID'"
+run "a member still may NOT reject anything" $MEM DENY \
+  "insert into contributions (cycle_id,member_id,status,proof_url)
+     values ('$C1','$SID',1,$PROOF);
+   update contributions set status=3 where cycle_id='$C1' and member_id='$SID'"
+run "a member still may NOT release a payout" $MEM DENY \
+  "update payouts set released=true where round_number=3"
+run "a member still may not read the outbox" $MEM DENY "select 1 from push_outbox"
+state "the dispatch flag still does not survive the transaction" "" \
+  "select current_setting('pf.push_scheduled', true)"
+pfval "015's old function is gone, not left to be re-pointed at" "0" '!' \
+  "select count(*) from pg_proc where proname = 'pf_queue_payment_push'"
+
+echo "016 — the rollback"
+if q -q -v ON_ERROR_STOP=1 -f "$MIG/016_rollback.sql" >/dev/null 2>&1; then
+  printf '  ok   016_rollback.sql applies cleanly\n'
+else printf '  FAIL 016_rollback.sql does not apply\n'; FAILED=1; fi
+pfval "the recipient column is gone" "0" '!' \
+  "select count(*) from information_schema.columns
+    where table_name='push_outbox' and column_name='recipient_member_id'"
+# Back to 015's world: the treasurer is told, the member is not.
+push "a claim still notifies the treasurer after rollback" "1/1" $MEM \
+  "insert into contributions (cycle_id,member_id,status,proof_url)
+     values ('$C1','$SID',1,$PROOF)"
+push "...and a confirmation notifies nobody again" "0/0" $TRE \
+  "update contributions set status=2 where cycle_id='$C1' and member_id='$SID'" \
+  "$PEND"
+if q -q -v ON_ERROR_STOP=1 -f "$MIG/016_rollback.sql" >/dev/null 2>&1; then
+  printf '  ok   016_rollback.sql is idempotent\n'
+else printf '  FAIL 016_rollback.sql is not re-runnable\n'; FAILED=1; fi
+re016=$(q -q -v ON_ERROR_STOP=1 -f "$MIG/016_member_notifications.sql" 2>&1)
+if [ -z "$(printf '%s' "$re016" | grep -i ERROR)" ]; then
+  printf '  ok   016 re-applies on top of its own rollback\n'
+else
+  printf '  FAIL 016 does not re-apply — %s\n' \
+    "$(printf '%s' "$re016" | grep -i ERROR | head -1 | cut -c1-110)"; FAILED=1
 fi
 
 echo

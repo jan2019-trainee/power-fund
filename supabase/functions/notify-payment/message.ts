@@ -72,8 +72,8 @@ export function composeNotification(
 
   if (memberIds.length > 1) {
     return {
-      title: "Power Fund",
-      body: `${memberIds.length} payments sent — ${peso(total)} waiting for review`,
+      title: "Payments to review",
+      body: `${memberIds.length} members sent ${peso(total)} in total`,
       tag: "pf-payment",
       url: "/",
     };
@@ -83,7 +83,15 @@ export function composeNotification(
   const who = names[id] || "A member";
   const where = cycleLabel(cycles);
   return {
-    title: "Power Fund",
+    // THE TITLE CARRIES THE EVENT, never the app's name. Reported from a real
+    // iPhone: the lock screen read "Power Fund / from Power Fund / Jan sent
+    // ₱2,000". iOS adds its own "from <app name>" attribution line beneath the
+    // title, so a title of "Power Fund" says the same thing twice and spends
+    // the boldest line on the one fact the reader already has. Android shows
+    // the app name in its own header for the same reason.
+    //
+    // So the title is what the treasurer must DO, and the body is the detail.
+    title: "Payment to review",
     body: `${who} sent ${peso(total)}${where ? " — " + where : ""}`,
     // PER MEMBER. A repeat from the same person replaces their earlier notice
     // (sw.js sets renotify, so it still buzzes); two different people stack,

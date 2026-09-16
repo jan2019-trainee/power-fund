@@ -56,6 +56,18 @@ check("the tag is per member, so two people do not collapse into one notice",
 check("the url stays '/' because the app has no routing",
   composeNotification(six, NAMES).url === "/");
 
+// THE TITLE IS THE EVENT, NOT THE APP. iOS prints its own "from <app name>"
+// line under the title, so a title of "Power Fund" read as "Power Fund / from
+// Power Fund" on a real lock screen — the boldest line spent on a fact the
+// reader already had. Reported from a phone, not caught by any check.
+check("the title says what to DO, and never repeats the app name",
+  composeNotification(six, NAMES).title === "Payment to review" &&
+    !/Power Fund/i.test(composeNotification(six, NAMES).title),
+  composeNotification(six, NAMES).title);
+check("...and the multi-member title too",
+  !/Power Fund/i.test(composeNotification([row(7), row(7, REGINE)], NAMES).title),
+  composeNotification([row(7), row(7, REGINE)], NAMES).title);
+
 check("an unknown member reads as 'A member', never as an id",
   composeNotification([row(7, "unknown-id")], NAMES).body.startsWith("A member sent"),
   composeNotification([row(7, "unknown-id")], NAMES).body);
@@ -67,7 +79,7 @@ check("nothing to say returns null rather than inventing a notice",
     composeNotification([{ ...row(7), event_type: "something_else" }], NAMES) === null);
 
 check("several members in one transaction do not claim to be one person",
-  /2 payments sent/.test(composeNotification([row(7), row(7, REGINE)], NAMES).body),
+  /2 members sent/.test(composeNotification([row(7), row(7, REGINE)], NAMES).body),
   composeNotification([row(7), row(7, REGINE)], NAMES).body);
 
 console.log("\nFormatting");

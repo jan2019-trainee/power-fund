@@ -212,8 +212,12 @@ console.log("\nnotify-payment — the happy path");
   const note = JSON.parse(plain.toString("utf8"));
   check("the treasurer's lock screen reads the whole transfer, once",
     note.body === "Sarah sent ₱6,000 — cycles 7–12", note.body);
-  check("...titled Power Fund, opening the app",
-    note.title === "Power Fund" && note.url === "/");
+  // The title is the EVENT. iOS prints its own "from <app name>" line beneath
+  // it, so "Power Fund" there read as "Power Fund / from Power Fund" on a real
+  // lock screen — reported from a phone, invisible to every check here.
+  check("...titled with what to do, not with the app's own name",
+    note.title === "Payment to review" && !/Power Fund/i.test(note.title) &&
+      note.url === "/", note.title);
 
   // Visible for review even though this fake is not PostgREST.
   check("it claims with sent_at is null, which is what makes it atomic",

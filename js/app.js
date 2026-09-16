@@ -1559,6 +1559,82 @@
     return "On for this device";
   }
 
+  /** Dismissed on THIS DEVICE. Per-device is the right scope and not a
+   *  shortcut: a push subscription belongs to one browser profile, so
+   *  "already dealt with this" cannot be an account-level fact. It also means
+   *  a member's second phone gets asked, which is correct. */
+  const PUSH_NUDGE_KEY = "pf_push_nudge_dismissed";
+
+  function pushNudgeDismissed() {
+    try {
+      return localStorage.getItem(PUSH_NUDGE_KEY) === "1";
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function dismissPushNudge() {
+    try {
+      localStorage.setItem(PUSH_NUDGE_KEY, "1");
+    } catch (e) {
+      /* private window, or site data blocked — it reappears next load, which
+         is better than throwing on a dismissal. */
+    }
+    render();
+  }
+
+  /**
+   * Should Home offer to turn notifications on?
+   *
+   * DELIBERATELY NOT A "what's new" BADGE. That kind of marker is right once,
+   * then goes stale, needs a seen-flag per person, and does nothing for the
+   * next member or for somebody's second phone. The condition here is a
+   * FACT ABOUT THIS DEVICE — "notifications are not on here" — which is
+   * self-clearing the moment they are, and correct forever after without any
+   * announcement bookkeeping.
+   *
+   * Every clause is a reason NOT to ask:
+   */
+  function showPushNudge() {
+    // Not a linked member, or the database has no 015/016: the switch itself
+    // is not offered, so neither is the nudge.
+    if (!canUsePush()) return false;
+    // iOS in an ordinary Safari tab. Push cannot work until the app is on the
+    // Home Screen, and nudging somebody toward something impossible is worse
+    // than silence.
+    if (!pushSupported()) return false;
+    // This fund never had its VAPID key set.
+    if (!PUSH_KEY) return false;
+    // Already on here.
+    if (pushSubscribed) return false;
+    // DENIED IS FOREVER, as far as the app is concerned — the browser will
+    // not let us ask again, so a nudge would lead to a sheet that can only
+    // explain itself. "default" is the one state where asking can work.
+    if (pushPermission() !== "default") return false;
+    // Known not to be sending. Null means we have not been told yet, and that
+    // is not the same as "no" — the sheet is honest about it either way.
+    if (pushStatus && !pushStatus.dispatchConfigured) return false;
+    return !pushNudgeDismissed();
+  }
+
+  /** The nudge says what THIS viewer would be told. Same reason the sheet's
+   *  copy branches: the treasurer's version is false for the other four. */
+  function pushNudgeCopy() {
+    return verifiedTreasurer()
+      ? {
+          title: "Get a heads-up when a payment arrives",
+          note:
+            "Right now you only find out by opening the app. One tap, " +
+            "on this device.",
+        }
+      : {
+          title: "Know when your payment is confirmed",
+          note:
+            "And when it is rejected, or your own payout is sent. One tap, " +
+            "on this device.",
+        };
+  }
+
   function openNotifyModal() {
     // Exported on PowerFund, so an absent menu row is not the gate.
     if (!canUsePush()) return;
@@ -6806,6 +6882,8 @@
       // true of THIS DEVICE, which is what a push subscription is scoped to.
       canUsePush: canUsePush(),
       pushNote: pushRowNote(),
+      showPushNudge: showPushNudge(),
+      pushNudgeCopy: pushNudgeCopy(),
       // Accounts (migration 008). The mode drives whether Menu shows an
       // Account group at all; the email is what "Signed in as ..." prints.
       authMode: AUTH_MODE,
@@ -8980,6 +9058,7 @@
     closeContributePicker,
     openNotifyModal,
     closeNotifyModal,
+    dismissPushNudge,
     enableNotifications,
     disableNotifications,
     openWhoAmIPicker,

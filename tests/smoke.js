@@ -6504,6 +6504,95 @@ async function pushNotifications(browser, errors) {
     await page.close();
   }
 
+  // ---- 1b. The Home nudge -----------------------------------------------
+  // How anybody finds out this exists. NOT a "what's new" badge: the condition
+  // is a fact about THIS DEVICE ("notifications are not on here"), which is
+  // self-clearing and stays correct for a future member or a second phone.
+  {
+    const { page } = await pushPage(browser, errors, {
+      push: { permission: "default" },
+    });
+    const nudge = page.locator(".push-nudge");
+    check("push/Home offers it to a member who has not turned it on", (await nudge.count()) === 1);
+    check(
+      "push/...saying what THEY would be told",
+      /your payment is confirmed/i.test(await nudge.innerText()),
+      (await nudge.innerText()).replace(/\n/g, " ").slice(0, 70)
+    );
+    // Red on Home means "₱30,000 never arrived". Spending that weight on a
+    // setting would make the next real red thing read as less.
+    const danger = await page.evaluate(() => {
+      const el = document.querySelector(".push-nudge");
+      const cs = getComputedStyle(el);
+      const mark = getComputedStyle(el.querySelector(".push-nudge-mark")).color;
+      return { border: cs.borderColor, bg: cs.backgroundColor, mark };
+    });
+    check(
+      "push/...and does not borrow the danger family",
+      !/225,\s*83,\s*83/.test(danger.border) && !/225,\s*83,\s*83/.test(danger.bg) &&
+        !/225,\s*83,\s*83/.test(danger.mark),
+      JSON.stringify(danger)
+    );
+    await page.locator(".push-nudge-main").click();
+    await page.waitForTimeout(400);
+    check("push/tapping it opens the switch directly", (await page.locator(".notify-modal").count()) === 1);
+    await page.close();
+  }
+  {
+    const { page } = await pushPage(browser, errors, {
+      push: { permission: "default" },
+    });
+    check("push/the dismiss is a real 44px target, not a decorative x",
+      (await page.locator(".push-nudge-x").boundingBox()).width >= 44);
+    await page.locator(".push-nudge-x").click();
+    await page.waitForTimeout(400);
+    check("push/dismissing hides it", (await page.locator(".push-nudge").count()) === 0);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(2200);
+    check("push/...and it stays hidden on this device",
+      (await page.locator(".push-nudge").count()) === 0);
+    await page.close();
+  }
+  {
+    // DENIED IS FOREVER as far as the app is concerned — the browser will not
+    // let it ask again, so a nudge could only lead to a sheet explaining that.
+    const { page } = await pushPage(browser, errors, { push: { permission: "denied" } });
+    check("push/no nudge once the browser has been told no",
+      (await page.locator(".push-nudge").count()) === 0);
+    await page.close();
+  }
+  {
+    const { page } = await pushPage(browser, errors, {
+      push: { permission: "granted", subscribed: true },
+    });
+    check("push/no nudge when it is already on here",
+      (await page.locator(".push-nudge").count()) === 0);
+    await page.close();
+  }
+  {
+    // Inviting somebody to switch on something that cannot send is the
+    // simulated notification rule 4 forbids, one step earlier.
+    const { page } = await pushPage(browser, errors, {
+      push: { permission: "default" },
+      dispatchConfigured: false,
+    });
+    check("push/no nudge when nothing is sending yet",
+      (await page.locator(".push-nudge").count()) === 0);
+    await page.close();
+  }
+  {
+    const { page } = await pushPage(browser, errors, { push: { permission: "default" }, noKey: true });
+    check("push/no nudge when the fund has no VAPID key",
+      (await page.locator(".push-nudge").count()) === 0);
+    await page.close();
+  }
+  {
+    const { page } = await pushPage(browser, errors, { signedOut: true, push: { permission: "default" } });
+    check("push/no nudge for a viewer with no linked account",
+      (await page.locator(".push-nudge").count()) === 0);
+    await page.close();
+  }
+
   // ---- 2. Turning it on -------------------------------------------------
   {
     const { page, calls } = await pushPage(browser, errors, {

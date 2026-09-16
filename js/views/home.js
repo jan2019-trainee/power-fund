@@ -21,7 +21,8 @@ window.PFViews.home = function (ctx) {
     formatDateTime, overdueRows, activityTimeLabel, isWide, identityLocked,
     payoutOwner, pesoWhole, myUnconfirmedPayout, receiptAckRound, receiptAckNote,
     payoutDateText, canSwapTurns, myIncomingSwaps, myOutgoingSwap, memberName,
-    roundRecipient, disputedPayouts, myDisputedPayout, disputeRound, disputeNote
+    roundRecipient, disputedPayouts, myDisputedPayout, disputeRound, disputeNote,
+    showPushNudge, pushNudgeCopy
   } = ctx;
   // Cycles due so far — the denominator behind each member's standing ring.
   // Set when the pinned action renders, so the view can reserve room for it.
@@ -439,6 +440,35 @@ window.PFViews.home = function (ctx) {
   S.swaps = section();
 
   S.payoutNudge = section();
+
+  /* ---- "Turn notifications on" --------------------------------------------
+   *
+   * The LOWEST-urgency thing on Home, and placed to say so: below every card
+   * about money, because this is an offer rather than a task. Nothing is
+   * wrong if it is ignored.
+   *
+   * NOT the danger family and not a red dot. Red on Home means "₱30,000 never
+   * arrived"; borrowing that weight for a setting would spend it, and the
+   * next real red thing would be discounted. This is the neutral card
+   * treatment with an accent glyph.
+   *
+   * NO approved mockup — new design, flagged as such for UI/UX QA.
+   */
+  if (showPushNudge) {
+    html += `<div class="push-nudge">
+      <button type="button" class="push-nudge-main" onclick="PowerFund.openNotifyModal()">
+        <span class="push-nudge-mark">${icon("bell", 17)}</span>
+        <span class="push-nudge-lines">
+          <span class="push-nudge-title">${escapeHtml(pushNudgeCopy.title)}</span>
+          <span class="push-nudge-note">${escapeHtml(pushNudgeCopy.note)}</span>
+        </span>
+        <span class="push-nudge-go">›</span>
+      </button>
+      <button type="button" class="push-nudge-x" onclick="PowerFund.dismissPushNudge()"
+        aria-label="Not now — hide this">✕</button>
+    </div>`;
+  }
+  S.pushNudge = section();
 
   // The old standalone due-countdown banner was removed — the same date is
   // always visible a little further down, either on the My-status card
@@ -1154,6 +1184,9 @@ window.PFViews.home = function (ctx) {
       // in a different order for the treasurer than for everyone else.
       S.complete +
       S.payoutNudge +
+      // Last of the notice cards, because it is the only one that is an offer
+      // rather than something to do.
+      S.pushNudge +
       S.fundTotal + S.hero + S.cta + S.roster + S.roundsLink + S.prevRounds +
       S.spacer
     );
@@ -1306,7 +1339,7 @@ window.PFViews.home = function (ctx) {
       <aside class="home-rail">
         ${S.disputes}${S.rejected}${unlocked ? `${S.release}${S.attention}` : ""}${
           S.receiptAck
-        }${S.swaps}${S.myStatus}${S.complete}${S.payoutNudge}${overview}${quick}
+        }${S.swaps}${S.myStatus}${S.complete}${S.payoutNudge}${S.pushNudge}${overview}${quick}
       </aside>
     </div>` +
     S.cta +

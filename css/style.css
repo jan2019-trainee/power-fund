@@ -6719,3 +6719,61 @@ body.auth-gate {
   color: var(--text-muted);
   margin: 0 0 4px;
 }
+
+/* --- "Turn notifications on" (migration 016) ------------------------------
+   The LOWEST-urgency card on Home, and it looks it. Deliberately NOT the
+   danger family and deliberately not a red dot: red here means "₱30,000 never
+   arrived", and spending that weight on a setting would make the next real
+   red thing read as less. Neutral surface, accent glyph — the same shape as
+   .payout-nudge without its dashed "you have not done this yet" urgency,
+   because nothing is wrong if this one is ignored.
+
+   It carries a dismiss, which .payout-nudge does not: that one names a real
+   gap in the fund's data and should keep asking, this one is an offer. */
+.push-nudge {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+.push-nudge-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: 12px 4px 12px 13px;
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  cursor: pointer;
+}
+.push-nudge-mark { flex: none; color: var(--accent); margin-top: 1px; }
+.push-nudge-lines { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.push-nudge-title {
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.push-nudge-note { font-size: 12.5px; line-height: 1.45; color: var(--text-muted); }
+.push-nudge-go { flex: none; color: var(--text-muted); font-size: 18px; align-self: center; }
+/* A real 44px target rather than a decorative ✕ — this is the control most
+   people will actually reach for, and it must not be the fiddly one. */
+.push-nudge-x {
+  flex: none;
+  width: 44px;
+  background: none;
+  border: 0;
+  border-left: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+.push-nudge-x:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.04); }

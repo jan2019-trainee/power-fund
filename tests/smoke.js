@@ -6429,7 +6429,7 @@ async function pushPage(browser, errors, opts) {
   await stubPush(page, o.push || {});
   const calls = await routePushRpcs(page, o);
   await withAuthMode(page, "optional", {
-    signedIn: true,
+    signedIn: !o.signedOut,
     email: o.asMember ? "sarah@example.com" : "regine@example.com",
   });
   // withAuthMode rewrites config.js for AUTH_MODE; the push key has to ride
@@ -6462,14 +6462,35 @@ async function openNotifyMenu(page) {
 
 async function pushNotifications(browser, errors) {
   // ---- 1. The gate ------------------------------------------------------
-  // An ordinary member is not offered it. The sender picks who to notify from
-  // members.is_treasurer, so a row here would register a device that nothing
-  // will ever send to — and say it worked.
+  // SINCE 016 any LINKED member may turn this on — they have events of their
+  // own now (confirmed, recorded, rejected, payout released). It was
+  // treasurer-only while the only event was an incoming payment, which was a
+  // scope limit rather than a permission one.
   {
-    const { page, calls } = await pushPage(browser, errors, { asMember: true });
+    const { page } = await pushPage(browser, errors, { asMember: true });
+    await openNotifyMenu(page);
+    const row = page.locator(".menu-row", { hasText: "Payment notifications" });
+    check("push/an ordinary member is offered notifications too", (await row.count()) === 1);
+    await row.first().click();
+    await page.waitForTimeout(400);
+    // The copy used to promise "when a member sends a payment for you to
+    // review" to everybody — false for four of the five people who can now
+    // reach this screen.
+    const sub = await page.locator(".notify-modal .modal-sub").innerText();
+    check(
+      "push/...and is told what THEY will be told, not the treasurer's version",
+      /confirms or rejects one of your payments/i.test(sub) && !/for you to review/i.test(sub),
+      sub.slice(0, 90)
+    );
+    await page.close();
+  }
+  {
+    // The gate is a LINKED ACCOUNT, never localStorage.pf_my_member_id: a push
+    // subscription decides whose phone hears about whose money.
+    const { page, calls } = await pushPage(browser, errors, { signedOut: true });
     await openNotifyMenu(page);
     check(
-      "push/an ordinary member is not offered notifications",
+      "push/a viewer with no linked account is not offered it",
       (await page.locator(".menu-row", { hasText: "Payment notifications" }).count()) === 0
     );
     // Exported on PowerFund, so the absent row is not the gate.

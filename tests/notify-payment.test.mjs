@@ -116,7 +116,12 @@ function scenario({ outbox, members, subs, pushStatus = 201 }) {
       );
     }
     if (table === "push_subscriptions" && method === "GET") {
-      const ids = (/member_id=in\.\(([^)]*)\)/.exec(query) || [, ""])[1].split(",").filter(Boolean);
+      // The handler looks up ONE recipient per group now (member_id=eq.X); the
+      // in.(...) form is kept so this fake still answers an older shape.
+      const one = /member_id=eq\.([^&]+)/.exec(query);
+      const ids = one
+        ? [one[1]]
+        : (/member_id=in\.\(([^)]*)\)/.exec(query) || [, ""])[1].split(",").filter(Boolean);
       return Response.json(
         state.subs.filter((s) => ids.includes(s.member_id))
           .map(({ id, member_id, endpoint, p256dh, auth }) => ({ id, member_id, endpoint, p256dh, auth }))
@@ -143,13 +148,26 @@ const post = (txid, secret = SECRET) =>
     body: JSON.stringify({ txid: String(txid) }),
   });
 
+/** 015-shaped rows: recipient_member_id null, meaning "the flagged treasurer".
+ *  Kept null deliberately — that fallback is still live for payment_pending
+ *  and is the path a pre-016 row would take. */
 const outboxRows = (cycles, member = MEM, txid = 42) =>
   cycles.map((c, i) => ({
     id: `out-${i}`, txid, event_type: "payment_pending",
-    member_id: member, cycle_number: c,
+    recipient_member_id: null, member_id: member, cycle_number: c,
+    round_number: null, note: null,
     // PostgREST hands numeric back as a STRING; the real thing does too.
     amount: "1000.00", sent_at: null, last_error: null,
   }));
+
+/** 016-shaped rows: the recipient is named, and is usually the subject. */
+const memberRows = (event, opts = {}) => [{
+  id: opts.id || "out-m", txid: opts.txid || 42, event_type: event,
+  recipient_member_id: opts.to || MEM, member_id: opts.about || MEM,
+  cycle_number: opts.cycle === undefined ? 7 : opts.cycle,
+  round_number: opts.round || null, note: opts.note || null,
+  amount: opts.amount || "1000.00", sent_at: null, last_error: null,
+}];
 
 const ROSTER = [
   { id: TRE, name: "Regine", is_treasurer: true },
@@ -233,6 +251,122 @@ console.log("\nnotify-payment — the happy path");
   const out = await (await handle(post(42))).json();
   check("a second delivery of the same txid sends nothing",
     out.claimed === 0 && st.pushes.length === 0, JSON.stringify(out));
+}
+
+console.log("\nnotify-payment — member events (016)");
+{
+  // The loop closing: the member sent proof and has been waiting.
+  const device = makeDevice("https://push.example/sarah");
+  const st = scenario({
+    outbox: memberRows("payment_confirmed", { amount: "2000.00" }),
+    members: ROSTER,
+    subs: [
+      { id: "sub-t", member_id: TRE, ...makeDevice("https://push.example/treasurer") },
+      { id: "sub-m", member_id: MEM, ...device },
+    ],
+  });
+  const out = await (await handle(post(42))).json();
+  check("a confirmation goes to the MEMBER, not the treasurer",
+    st.pushes.length === 1 && st.pushes[0].url === "https://push.example/sarah",
+    JSON.stringify({ out, urls: st.pushes.map((p) => p.url) }));
+
+  const ua = crypto.createECDH("prime256v1");
+  ua.setPrivateKey(device.privateKey);
+  const note = JSON.parse(ece.decrypt(Buffer.from(st.pushes[0].body), {
+    version: "aes128gcm", privateKey: ua,
+    authSecret: Buffer.from(device.auth, "base64url"),
+  }).toString("utf8"));
+  check("...and reads as their own money, in the second person",
+    note.title === "Payment confirmed" &&
+      note.body === "Your \u20b12,000 for cycle 7 is confirmed",
+    `${note.title} / ${note.body}`);
+}
+{
+  // A rejection is invisible in the app until opened, and unlike a
+  // confirmation it NEEDS ACTION — so the reason travels with it.
+  const device = makeDevice("https://push.example/sarah");
+  const st = scenario({
+    outbox: memberRows("payment_rejected", { note: "wrong reference number" }),
+    members: ROSTER, subs: [{ id: "sub-m", member_id: MEM, ...device }],
+  });
+  await handle(post(42));
+  const ua = crypto.createECDH("prime256v1");
+  ua.setPrivateKey(device.privateKey);
+  const note = JSON.parse(ece.decrypt(Buffer.from(st.pushes[0].body), {
+    version: "aes128gcm", privateKey: ua,
+    authSecret: Buffer.from(device.auth, "base64url"),
+  }).toString("utf8"));
+  check("a rejection carries the treasurer's reason onto the lock screen",
+    note.title === "Payment needs resending" && /wrong reference number/.test(note.body),
+    `${note.title} / ${note.body}`);
+}
+{
+  const device = makeDevice("https://push.example/sarah");
+  const st = scenario({
+    outbox: memberRows("payout_released", { amount: "30000.00", cycle: null, round: 3 }),
+    members: ROSTER, subs: [{ id: "sub-m", member_id: MEM, ...device }],
+  });
+  await handle(post(42));
+  const ua = crypto.createECDH("prime256v1");
+  ua.setPrivateKey(device.privateKey);
+  const note = JSON.parse(ece.decrypt(Buffer.from(st.pushes[0].body), {
+    version: "aes128gcm", privateKey: ua,
+    authSecret: Buffer.from(device.auth, "base64url"),
+  }).toString("utf8"));
+  // The nudge is deliberate: the record that it arrived is the one thing only
+  // the recipient can give.
+  check("a released payout names the round and asks for the receipt",
+    note.body === "\u20b130,000 for Round 3 \u2014 tap to confirm it arrived", note.body);
+}
+{
+  // THE CASE THE GROUPING EXISTS FOR: one transaction, two people, two
+  // different sentences. Ungrouped this was one muddled notification.
+  const sarah = makeDevice("https://push.example/sarah");
+  const clara = "11111111-0000-0000-0000-000000000004";
+  const clr = makeDevice("https://push.example/clara");
+  const st = scenario({
+    outbox: [
+      ...memberRows("payment_confirmed", { id: "a", to: MEM, about: MEM }),
+      ...memberRows("payment_rejected", { id: "b", to: clara, about: clara, note: "blurry" }),
+    ],
+    members: [...ROSTER, { id: clara, name: "Clara", is_treasurer: false }],
+    subs: [
+      { id: "s1", member_id: MEM, ...sarah },
+      { id: "s2", member_id: clara, ...clr },
+    ],
+  });
+  const out = await (await handle(post(42))).json();
+  check("one transaction touching two members sends two notifications",
+    out.recipients === 2 && out.sent === 2 && st.pushes.length === 2,
+    JSON.stringify(out));
+  const decode = (push, dev) => {
+    const u = crypto.createECDH("prime256v1");
+    u.setPrivateKey(dev.privateKey);
+    return JSON.parse(ece.decrypt(Buffer.from(push.body), {
+      version: "aes128gcm", privateKey: u,
+      authSecret: Buffer.from(dev.auth, "base64url"),
+    }).toString("utf8"));
+  };
+  const toSarah = decode(st.pushes.find((p) => p.url.endsWith("sarah")), sarah);
+  const toClara = decode(st.pushes.find((p) => p.url.endsWith("clara")), clr);
+  check("...and each person is told their own thing",
+    toSarah.title === "Payment confirmed" &&
+      toClara.title === "Payment needs resending" && /blurry/.test(toClara.body),
+    `${toSarah.title} | ${toClara.title}`);
+}
+{
+  // An event type this build does not know about. userVisibleOnly means a push
+  // MUST show something, so inventing a sentence is the one thing not to do.
+  const st = scenario({
+    outbox: memberRows("something_new_in_017"),
+    members: ROSTER,
+    subs: [{ id: "sub-m", member_id: MEM, ...makeDevice("https://push.example/sarah") }],
+  });
+  const out = await (await handle(post(42))).json();
+  check("an unknown event sends nothing rather than guessing",
+    out.sent === 0 && st.pushes.length === 0 &&
+      /nobody to notify|no device/i.test(st.patched[0]?.last_error || ""),
+    JSON.stringify({ out, patched: st.patched }));
 }
 
 console.log("\nnotify-payment — when there is nobody to tell");

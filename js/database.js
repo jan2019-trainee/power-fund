@@ -535,6 +535,37 @@ window.DB = (function () {
    * back to the old destructive path rather than failing the treasurer's
    * action outright.
    */
+  /**
+   * Confirm several pending claims in ONE statement.
+   *
+   * It used to be a loop of single-row updates in app.js, and that was two
+   * bugs wearing one shape. Each `await` is its own HTTP request and therefore
+   * its own TRANSACTION, so:
+   *
+   *   * A failure part-way left the member with some cycles confirmed and the
+   *     rest still pending, and the activity-log entry — written after the
+   *     loop — never happened at all. The ledger moved and the record of why
+   *     did not.
+   *   * Migration 015 coalesces notifications per transaction, so confirming a
+   *     six-cycle batch would have sent the member SIX notifications.
+   *
+   * One statement fixes both, and matches what rejectContributions() has
+   * always done.
+   */
+  async function confirmContributions(ids, paidAt) {
+    if (!ids || !ids.length) return true;
+    const res = await client
+      .from("contributions")
+      .update({ status: 2, paid_at: paidAt || new Date().toISOString() })
+      .in("id", ids)
+      .select();
+    unwrap(res, "Couldn't confirm the payment");
+    // .select() is what makes a silent RLS refusal detectable: without it
+    // res.data is null and there is nothing to count.
+    requireRows(res, "Couldn't confirm the payment");
+    return true;
+  }
+
   async function rejectContributions(ids, note) {
     if (!ids || !ids.length) return true;
     const res = await client
@@ -1751,6 +1782,7 @@ window.DB = (function () {
     upsertContribution,
     upsertContributions,
     updateContribution,
+    confirmContributions,
     deleteContribution,
     rejectContributions,
     uploadProof,

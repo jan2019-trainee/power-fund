@@ -1733,6 +1733,144 @@ the first deploy is still the first real test of them.
 installed, found to be imported by nothing, and removed — `npx web-push
 generate-vapid-keys` needs no dependency.
 
+## Member notifications (migration 016)
+
+015 told the treasurer a payment had arrived. This tells the MEMBER what
+happened to it, and tells a recipient their payout went out. Four events, all
+chosen on one principle: **the member has already acted and is waiting for an
+answer.** A notification is at its best when it closes a loop somebody is
+already holding open, and at its worst when it opens one.
+
+| transition | told | lock screen |
+| --- | --- | --- |
+| `contributions` 1→2 | the payer | **Payment confirmed** · "Your ₱2,000 for cycles 1–2 is confirmed" |
+| `contributions` 0→2 | the payer | **Payment recorded** · "The treasurer recorded ₱1,000 for cycle 7" |
+| `contributions` 1→3 | the payer | **Payment needs resending** · "Your payment for cycle 7 was rejected — wrong reference" |
+| `payouts` released | the recipient | **Your payout has been sent** · "₱30,000 for Round 3 — tap to confirm it arrived" |
+
+**The rejection is the one that mattered most.** Today a refusal is invisible
+until the member happens to open the app, and unlike a confirmation it NEEDS
+ACTION. The reason travels with it: "send it again" with nothing to act on is
+worse than useless.
+
+### The bug this started as, again
+
+**`confirmCycles()` wrote row by row** — `for (const c of cycles) { await
+updateContribution(...) }`. Each `await` is its own HTTP request and therefore
+its own TRANSACTION. That was two bugs wearing one shape:
+
+- **Money.** A failure part-way left the member with some cycles confirmed and
+  the rest still pending, and the `activity_log` entry — written *after* the
+  loop — never happened at all. The ledger moved and the record of why did not.
+- **Notifications.** 015 coalesces per transaction, so confirming a six-cycle
+  batch would have sent the member SIX notifications.
+
+`rejectContributions()` had always done it correctly with one `.in("id", ids)`
+statement. `confirmContributions()` now matches it. The money half stands on
+its own merit and would have been worth fixing with no notification in sight —
+the same shape as 013, where "reorder payout order has never worked" turned
+out to be the first half of the feature rather than a detour.
+
+### One suppression rule, replacing 015's special case
+
+015 asked "is the payer the treasurer". The general form is
+**`recipient = pf_member_id()` — never tell somebody about something they just
+did themselves** — and it extends to every new event: a treasurer confirming
+their own cash payment, or releasing a payout to themselves, gets nothing.
+
+`pf_member_id()` is null for a service-role caller, so a script acting on the
+fund suppresses nothing. That is correct: a script is not the member.
+
+### Three columns, and one of them is a reversal
+
+- **`recipient_member_id`** is the enabler. 015 had no recipient at all — the
+  function hardcoded "whoever is flagged treasurer". **NULL keeps its 015
+  meaning** as a diagnostic: the trigger could not resolve a treasurer, and the
+  function records that rather than guessing.
+- **`round_number` comes BACK**, and 015's note removing it was right at the
+  time: `ceil(cycle/CYCLES_PER_ROUND)` lives in `js/calculations.js`, and
+  copying that constant into SQL is how the two drift. A payout event carries a
+  real round and no cycle, so there is now something honest to put in it.
+- **`note`** carries the rejection reason, capped at 200 characters.
+
+### `OLD` is read once, through `tg_op`
+
+`if tg_op = 'INSERT' then _was := -1; else _was := old.status; end if;` rather
+than `tg_op = 'INSERT' or old.status is distinct from 1`. **SQL does not
+promise to evaluate a boolean left to right**, and touching `OLD` in an INSERT
+trigger raises. 015 got away with the inline form; the explicit variable is
+what makes it safe rather than lucky.
+
+### The payout event keys on the RECORD, not the position
+
+`recipient_member_id`, never `member_order` — the same rule the Rounds
+accordion had to learn. The roster can be reordered or swapped after a
+release, which is exactly when the two disagree, and telling the wrong person
+their ₱30,000 arrived is the worst outcome available here.
+
+### The Edge Function fans out
+
+One txid used to mean one notification. It now groups the claimed rows by
+**(recipient, event_type)** and sends one per group. The case that grouping
+exists for: a treasurer confirming one member's batch while rejecting
+another's is one transaction and two people, and each needs their own
+sentence. Ungrouped, it was one muddled notification to whoever came first.
+
+An **unknown event type sends nothing** rather than guessing. `userVisibleOnly`
+means a push MUST show something, so the caller has to be told there is nothing
+to say rather than handed an invented sentence.
+
+### The gate widens to `editableMember()`
+
+It was `verifiedTreasurer()` while the only event was an incoming payment —
+**treasurer-only by SCOPE, not by permission**, which is exactly what the 015
+note said. 016 gives every member events of their own, so the scope reason is
+gone. Still a LINKED ACCOUNT and never `localStorage.pf_my_member_id`: a push
+subscription decides whose phone hears about whose money.
+
+**The copy had to branch with it.** The sheet promised "an alert when a member
+sends a payment for you to review" to everybody, which is false for four of the
+five people who can now reach that screen.
+
+### DEPLOY ORDER MATTERS, unlike 015
+
+015 was safe to apply in any order. This is not:
+
+1. **The Edge Function first.** It handles both shapes — null recipient → the
+   treasurer, set recipient → that member. The 015 function ignores the column
+   entirely, so applying 016 first would put every member's confirmation on the
+   treasurer's phone.
+2. Then migration 016.
+3. Then the frontend, for the gate and the copy.
+
+### The harness leaked a transaction-local flag between setup and action
+
+`push()` / `pushval()` run their `[setup]` in the SAME transaction as the
+action. When the setup enqueued anything it took `pf.push_scheduled` — the
+once-per-transaction dispatch claim — so the action could never dispatch and
+every count read `x/0`. Real use has the setup in an earlier transaction
+entirely. The helpers now release the flag after clearing the counters.
+Worth knowing because it reads exactly like a broken trigger.
+
+### The product decisions, taken by the owner
+
+- **Cash payments (0→2) notify the payer**, and only the payer — nothing about
+  a member's money is broadcast to the group.
+- **The rejection reason goes on the lock screen.** It is the treasurer's free
+  text, read by the member it is about.
+- **The payout notification asks for the receipt** ("tap to confirm it
+  arrived"). It is the one record only the recipient can give, and 012 built
+  the surface for it.
+- **The `confirmCycles` fix ships in this batch** rather than separately.
+
+### Still out of scope
+
+Turn-swap requests, dispute alerts, and due-date reminders. The reminders are
+the different one: they are time-based, so they need `pg_cron` rather than a
+trigger — nothing writes a row when a date passes — and they are the category
+most likely to get notifications switched off for everyone, treasurer included.
+Per-event preferences are also out: one switch, five people, four events.
+
 ## Migrations
 
 Run in the Supabase SQL editor, in order. `006` also needs a one-off
@@ -1825,8 +1963,21 @@ Edge Function exists. `pg_net` is installed if available and simply skipped if
 not — the trigger resolves `net.http_post` at run time inside an exception
 block.
 
-**So every migration through 014 is live, and 015 is written and tested but
-not yet run.** A recipient can view the treasurer's receipt, confirm it
+**`016` IS NOT APPLIED YET** — `016_member_notifications.sql`:
+`push_outbox.recipient_member_id` / `.round_number` / `.note`,
+`pf_push_enqueue()`, `pf_queue_contribution_push()` (replacing 015's
+`pf_queue_payment_push`, which it drops) and `pf_queue_payout_push()`.
+Validated on a real Postgres 16 by `tests/sql/run.sh` (31 assertions including
+the rollback). Ships with `016_rollback.sql`, which restores 015's trigger
+verbatim and loses nothing anybody can see.
+
+**ORDER MATTERS HERE, unlike 015: deploy the Edge Function BEFORE applying
+016.** The 015 function ignores `recipient_member_id` and sends everything to
+the treasurer, so the other order puts every member's confirmation on the
+treasurer's phone.
+
+**So every migration through 014 is live, 015 is applied and sending, and 016
+is written and tested but not yet run.** A recipient can view the treasurer's receipt, confirm it
 arrived, or report that it did not.
 
 Every migration from 010 on is wrapped in `begin; … commit;`. Not decoration:

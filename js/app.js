@@ -1461,18 +1461,22 @@
   /**
    * Who may turn this on.
    *
-   * verifiedTreasurer() — a LINKED account carrying `is_treasurer` — and NOT
-   * isTreasurerAccount(), which falls back to the PIN when nobody is flagged.
-   * The Edge Function decides who to notify from `members.is_treasurer`, so a
-   * PIN-unlocked member offered this switch would register a device that
-   * nothing will ever send to, and be told it worked.
+   * ANY LINKED MEMBER since migration 016 — `editableMember()`, the same gate
+   * as the payout QR and the receipt acknowledgement, and never
+   * `localStorage.pf_my_member_id`: a push subscription decides whose phone
+   * hears about whose money, so an unverified per-device preference is not
+   * enough to key it on.
    *
-   * Today the only event is a member's payment, which is the treasurer's to
-   * act on, so this is treasurer-only by scope rather than by permission.
-   * When member-facing events land, the gate becomes editableMember().
+   * It was verifiedTreasurer() while the only event was an incoming payment —
+   * treasurer-only BY SCOPE rather than by permission. 016 gives every member
+   * events of their own (confirmed, recorded, rejected, payout released), so
+   * the scope reason is gone and the gate widens to match.
+   *
+   * Still NOT isTreasurerAccount() anywhere near this: that falls back to the
+   * PIN when nobody is flagged, and the sender routes on real member ids.
    */
   function canUsePush() {
-    return !!(verifiedTreasurer() && window.DB.pushAvailable());
+    return !!(editableMember() && window.DB.pushAvailable());
   }
 
   /** The VAPID key travels as base64url; subscribe() wants raw bytes. */
@@ -2081,17 +2085,22 @@
     render();
     try {
       const now = new Date().toISOString();
+      // ONE STATEMENT, not a loop of single-row updates. Each await is its own
+      // request and therefore its own transaction, so the old form could leave
+      // half a batch confirmed with no activity-log entry (that comes after),
+      // and would send the member one notification PER CYCLE once 015's
+      // per-transaction coalescing had something to coalesce. Reject has
+      // always done it this way.
       let total = 0;
+      const ids = [];
       for (const c of cycles) {
         const row = C.contributionFor(state.contributions, memberId, c);
         if (row && row.status === C.STATUS_PENDING) {
           total += Number(row.amount) || 0;
-          await window.DB.updateContribution(row.id, {
-            status: C.STATUS_PAID,
-            paid_at: now,
-          });
+          ids.push(row.id);
         }
       }
+      if (ids.length) await window.DB.confirmContributions(ids, now);
       await logActivity(
         `Treasurer confirmed ${memberName(memberId)}'s ${cycleRangeLabel(
           cycles
@@ -8205,9 +8214,21 @@
       html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeNotifyModal()">
         <div class="modal notify-modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
           <h3 id="dlg-title">Payment notifications</h3>
-          <p class="modal-sub">Get an alert on this device when a member sends a
-            payment for you to review. The fund's attention queue is still the
-            record — this only saves you opening the app to find out.</p>
+          <p class="modal-sub">${
+            // The copy has to say what THIS viewer will be told. It used to
+            // promise "when a member sends a payment for you to review" to
+            // everybody, which is false for four of the five people who can
+            // now see this screen.
+            verifiedTreasurer()
+              ? `Get an alert on this device when a member sends a payment for
+                 you to review, and when a payout you released is reported as
+                 not arrived. The fund's attention queue is still the record —
+                 this only saves you opening the app to find out.`
+              : `Get an alert on this device when the treasurer confirms or
+                 rejects one of your payments, and when your own payout is
+                 sent. The app is still the record — this only saves you
+                 opening it to find out.`
+          }</p>
           ${
             // PER DEVICE, and said before the switch rather than after. A push
             // subscription belongs to one browser profile, the same shape as
@@ -8258,9 +8279,15 @@
           }
           ${
             supported && configured && perm !== "denied"
-              ? `<p class="notify-what">You'll get one alert per transfer, not
-                   one per cycle — a member paying six cycles at once is a
-                   single notification. Your own payments don't notify you.</p>`
+              ? `<p class="notify-what">${
+                  verifiedTreasurer()
+                    ? `You'll get one alert per transfer, not one per cycle — a
+                       member paying six cycles at once is a single
+                       notification.`
+                    : `You'll get one alert per decision, not one per cycle — a
+                       batch of six confirmed together is a single
+                       notification.`
+                } You are never notified about something you did yourself.</p>`
               : ""
           }
           <div class="modal-actions">

@@ -3996,7 +3996,7 @@
    *  so the line would otherwise restate the field directly above it. */
   function fundNameCurrentShown() {
     const current = (state.settings && state.settings.fund_name) || "";
-    return !!current;
+    return !!current && String(fundNameValue || "").trim() !== current;
   }
 
   function openFundNameModal() {
@@ -8092,11 +8092,11 @@
             problem || fundNameError ? "" : " hidden"
           }>${escapeHtml(problem || fundNameError || "")}</p>
           <div class="modal-actions">
-            <button class="modal-btn-secondary" onclick="PowerFund.closeFundNameModal()">Cancel</button>
             <button class="modal-btn-primary" id="fund-name-save"
                     onclick="PowerFund.saveFundName()" ${
                       problem || busy ? "disabled" : ""
                     }>${busy ? "Saving…" : "Save"}</button>
+            <button class="modal-btn-secondary" onclick="PowerFund.closeFundNameModal()">Cancel</button>
           </div>
           <!-- Only once the draft DIFFERS from what is on file, because the
                input OPENS pre-filled with the current name — so at open time

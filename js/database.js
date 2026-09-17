@@ -1106,6 +1106,43 @@ window.DB = (function () {
   // ===================================================================
   // Settings (treasurer PIN)
   // ===================================================================
+  /**
+   * The fund's display name (migration 006's `app_settings.fund_name`).
+   *
+   * THIS COLUMN HAD NO WRITER until now. 006 added it and documented a one-off
+   * `update app_settings set fund_name = '...'` to be pasted by hand, which on
+   * this fund was never run — so the header fell back to "Power Fund" and the
+   * group's name was only ever visible as the desktop subtitle from
+   * APP_CONFIG.SUBTITLE, which is hidden below 480px. Reported from a phone.
+   * Same shape as `cycles.due_date` and `qr_bank` before they got writers.
+   *
+   * `null` is a MEANINGFUL value, not a failure: it restores the "Power Fund"
+   * fallback, which is the only way to undo a name. So an empty string is
+   * normalised to null rather than refused.
+   *
+   * `requireRows()`, not `.single()`: 011 makes app_settings treasurer-only,
+   * and RLS refuses by making the row invisible rather than raising — the
+   * reply is `[]` with no error. The treasurer PIN is shared with the whole
+   * group, so without this a member who unlocked treasurer mode would be told
+   * the rename worked.
+   */
+  async function saveFundName(name) {
+    const trimmed = String(name == null ? "" : name).trim();
+    const res = await client
+      .from("app_settings")
+      .update({ fund_name: trimmed || null })
+      .eq("id", 1)
+      .select();
+    if (res.error && /fund_name/i.test(res.error.message || "")) {
+      throw new Error(
+        "This database doesn't have the fund name column yet — run " +
+          "supabase/migrations/006_redesign_foundation.sql first."
+      );
+    }
+    unwrap(res, "Couldn't save the fund name");
+    return requireRows(res, "Couldn't save the fund name");
+  }
+
   /** The bank / account-name / account-number trio shown beside the payment
    *  QR, so a member can check they are paying the right account before they
    *  send (migration 006's qr_bank / qr_account_* columns). */
@@ -1806,6 +1843,7 @@ window.DB = (function () {
     verifyPin,
     setPin,
     saveQrAccount,
+    saveFundName,
     loadEverything,
     resetAll,
     restoreFromBackup,

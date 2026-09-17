@@ -170,7 +170,16 @@ for (const f of files) {
       !own.has(fn) &&
       // A bare call to it: `fn(` not preceded by a dot (PowerFund.fn( is fine,
       // that goes through the global and is resolved at click time).
-      new RegExp("(?<![.\\w$])" + fn + "\\s*\\(").test(src)
+      (new RegExp("(?<![.\\w$])" + fn + "\\s*\\(").test(src) ||
+        // ...or a bare REFERENCE to it, which is the same bug without the
+        // parentheses and used to slip through: the Fund name row tested
+        // `fundName ? … : …` where ctx carries `fundNameRaw`, so the whole
+        // Menu render threw for a treasurer and took the tab bar with it.
+        // Same shape as the undeclared-ctx-name regex below — used as code,
+        // not as prose.
+        new RegExp(
+          "(?<![.\\w$\"'-])" + fn + "(?![\\w$-])\\s*(?=[.,;:?)\\]}=<>+\\-*/&|!]|$)"
+        ).test(src))
   );
   check(
     `${f}: no app.js-only helpers`,

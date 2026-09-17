@@ -950,6 +950,95 @@ permission — `pf_set_pin` already allows it, and the app already promised it.
 A test asserts the control case: an ordinary PIN unlock still proves the
 current PIN, or anyone holding an unlocked phone could lock the group out.
 
+## The fund name had no writer at all (Menu → Group → Fund name)
+
+Reported from a phone: *"why is 'ViTAMiN Fund 2027' not displayed?"* Two
+separate things, and only one of them was a bug.
+
+- **The header's second line is not the fund name.** `.subtitle-long` carries
+  `APP_CONFIG.SUBTITLE` — a deploy-time constant — and is `display: none`
+  below 480px by design, replaced by `.subtitle-short`. Working as intended.
+- **The header TITLE is the fund name, and it was null**, because
+  `app_settings.fund_name` has existed since migration 006 and **nothing in
+  `js/` ever wrote it**. 006 documents a one-off
+  `update app_settings set fund_name = '…' where id = 1;` (line 177) that this
+  fund never ran. Every reference in the app was a read. Same shape of gap as
+  the payment schedule: a column the app depends on, writable only in the
+  Supabase SQL editor.
+
+Category: **UI Only**. **No migration** — 011's `settings_treasurer` already
+permits the write.
+
+- **Gated on `isTreasurerAccount()`, not on `unlocked`**, for the same reason
+  the schedule is: 011 keys the policy off `members.is_treasurer`, which the
+  shared PIN cannot express, so a PIN-gated row would offer the other four a
+  button Postgres refuses. Checked in the menu row, the render branch and both
+  handlers — `openFundNameModal` and `saveFundName` are exported on
+  `PowerFund`, so the absent row is not the gate.
+- **Empty is a VALID value and is the undo.** It writes SQL `null`, never
+  `""`, and the header falls back to "Power Fund". An empty string would read
+  as a name that is one space wide everywhere the title renders.
+- **`FUND_NAME_MAX = 40`, enforced in the validator AND as `maxlength`** —
+  same division as `NAME_MAX`: the attribute is the courtesy that stops the
+  keystroke, the validator is the rule, because `maxlength` does not survive a
+  paste into a modified field or a direct call to the exported setter. **This
+  is what the first version of the smoke check got wrong**: Playwright's
+  `fill()` honours `maxlength`, so filling 41 characters landed 40 and never
+  reached the validator — the check was asserting a refusal that could not
+  happen. It goes through `setFundNameValue()` now, and the attribute is
+  asserted separately. **The QA CAPTURE had the identical flaw and was
+  mislabelled** — "Save disabled, the length named" over a shot showing a
+  valid 40-character name and an enabled button. It sets the field and the
+  draft directly now, which is the state a paste into a modified field
+  produces, and THROWS if Save is still enabled rather than saving a
+  screenshot that says the opposite of its own caption.
+- **`setFundNameValue()` patches by hand and does not render** — a render would
+  eat the caret. It patches the problem line and the Save button's `disabled`,
+  and clears a stale `fundNameError`, because that message described the
+  previous attempt and the two share one node.
+- **The row's subtitle names the CURRENT value** (or says the header is showing
+  a default). Nothing else in the app would ever have mentioned the absence —
+  which is the whole reason this was reported as a bug rather than noticed.
+- `saveFundName()` sends **only `fund_name`**, scoped to `id=eq.1`, through
+  `requireRows()` — the eleventh place `.single()` could have hidden a refusal.
+- **The menu row gets a NEW `tag` glyph**, not `sheet`. Export CSV summary
+  already carries `sheet` two groups above it on the same screen, and two
+  unrelated rows sharing an icon is the P3-6 defect.
+- **The sheet says "Power Fund" ONCE**, and **"Currently X" only once the
+  draft DIFFERS from what is on file.** The first version printed the fallback
+  in the hint under the input AND again under the buttons (caught by reading
+  the diff — the third time that shape of duplication has had to be removed);
+  the second still restated the current name under the buttons while the input
+  sat pre-filled with exactly it, which the CAPTURE caught. It says what you
+  are changing FROM now, which is the one thing the screen cannot otherwise
+  tell you once you start typing. **It is patched by hand** in
+  `setFundNameValue()` like the problem line, and rendered hidden rather than
+  omitted — its condition depends on the draft, and the draft changes on every
+  keystroke without a render, so a conditionally-rendered line would have
+  nothing to patch and would appear only on the next unrelated render.
+- **Save comes BEFORE Cancel**, which is the app's own order — 12 modals to 3,
+  and Payment schedule, whose treatment this screen borrows, is one of the 12.
+  The first version had them the other way round. Also caught in the capture.
+- **No approved mockup.** It borrows the `.modal` treatment Payment schedule
+  and Edit member names use. Flagged for UI/UX QA as new design.
+
+### Two holes in the test suites this exposed
+
+- **`tests/views.test.js`'s leak check only saw CALLS.** The Fund name row
+  referenced `fundName` — an `app.js` closure function — as a bare value where
+  ctx carries `fundNameRaw`, so the whole Menu render threw for a treasurer
+  and took the tab bar with it. The regex required `fn(`, so a reference
+  without parentheses was invisible; it now also matches the bare-identifier
+  form the undeclared-ctx-name check below it already used. Run against the
+  broken line it reports `needs adding to ctx: fundName`.
+- **`tests/sql/run.sh` had never stubbed `app_settings` at all**, so 011's
+  `settings_treasurer` — the only enforcement behind this feature's UI gate —
+  had no test. Six assertions now cover it: the treasurer may set and clear
+  the name, a member may not, a login on no member row may not, `anon` may
+  not, and every signed-in member may still READ it (a members-can't-read rule
+  would blank the title for four of the five). Run against a
+  `using (true)` policy, two of them fail.
+
 ## The payment schedule is editable now (Menu → Group → Payment schedule)
 
 Found while auditing what "complete" was hiding. `cycles.due_date` has existed
@@ -2000,7 +2089,7 @@ real Postgres 16 by `tests/sql/run.sh` (20 assertions). Ships with
 `014_rollback.sql`, which names the query to run first — an open report that
 ₱30,000 never arrived is not something to drop silently.
 
-**`015` IS NOT APPLIED YET** — `015_push_notifications.sql`:
+**`015` IS APPLIED** — `015_push_notifications.sql`:
 `push_subscriptions` + its two register functions, `pf_push_status()`,
 `push_outbox`, `app_secrets.push_endpoint_url` / `.push_secret`, and
 `pf_queue_payment_push()` on `contributions`. Validated on a real Postgres 16
@@ -2015,7 +2104,8 @@ Edge Function exists. `pg_net` is installed if available and simply skipped if
 not — the trigger resolves `net.http_post` at run time inside an exception
 block.
 
-**`016` IS NOT APPLIED YET** — `016_member_notifications.sql`:
+**`016` IS APPLIED**, and the Edge Function is deployed —
+`016_member_notifications.sql`:
 `push_outbox.recipient_member_id` / `.round_number` / `.note`,
 `pf_push_enqueue()`, `pf_queue_contribution_push()` (replacing 015's
 `pf_queue_payment_push`, which it drops) and `pf_queue_payout_push()`.
@@ -2023,14 +2113,25 @@ Validated on a real Postgres 16 by `tests/sql/run.sh` (31 assertions including
 the rollback). Ships with `016_rollback.sql`, which restores 015's trigger
 verbatim and loses nothing anybody can see.
 
-**ORDER MATTERS HERE, unlike 015: deploy the Edge Function BEFORE applying
-016.** The 015 function ignores `recipient_member_id` and sends everything to
-the treasurer, so the other order puts every member's confirmation on the
-treasurer's phone.
+**ORDER MATTERED HERE, unlike 015: the Edge Function had to be deployed
+BEFORE applying 016**, and was. The 015 function ignores
+`recipient_member_id` and sends everything to the treasurer, so the other
+order would have put every member's confirmation on the treasurer's phone.
+Kept as a record rather than an instruction — it is done — because it is the
+shape of dependency to check for on the next one.
 
-**So every migration through 014 is live, 015 is applied and sending, and 016
-is written and tested but not yet run.** A recipient can view the treasurer's receipt, confirm it
-arrived, or report that it did not.
+**So every migration through 016 is live.** A recipient can view the
+treasurer's receipt, confirm it arrived, or report that it did not; the
+treasurer's phone hears about an incoming payment; and every member hears
+what happened to theirs — confirmed, recorded, rejected with the reason, or
+their payout sent.
+
+**Two earlier notes in this file said 015 was not applied while the summary
+below them said it was sending.** Both are corrected above. Worth knowing the
+failure mode: this appendix is the only record of what is live, and a
+contradiction in it is worse than a stale line, because it gives the next
+reader two answers and no way to tell which is current. Update the section
+header and the summary in the same edit.
 
 Every migration from 010 on is wrapped in `begin; … commit;`. Not decoration:
 without it a `raise` in 011's preflight aborted one statement and psql

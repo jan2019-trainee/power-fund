@@ -4953,6 +4953,251 @@ async function pinDeadEnds(browser, errors) {
   await norm.close();
 }
 
+/** Fund name (Menu -> Group -> Fund name).
+ *
+ *  `app_settings.fund_name` arrived with migration 006 and NEVER GOT A WRITER
+ *  — 006 documented a one-off `update` to paste by hand, which on this fund
+ *  was never run. So the header fell back to "Power Fund" and the group's
+ *  name only ever appeared as the desktop subtitle from APP_CONFIG.SUBTITLE,
+ *  which `css/style.css` hides below 480px. Reported from a phone: "why is
+ *  ViTAMiN Fund 2027 not displayed?"
+ *
+ *  The two properties worth asserting are the GATE (app_settings is
+ *  treasurer-only under 011, so this cannot be the shared PIN) and that an
+ *  EMPTY name is a real value — clearing it is the only way to undo a rename.
+ */
+async function fundNameWriter(browser, errors) {
+  const linked = (i, flagged) => {
+    const m = rosterWithEmails();
+    m.forEach((x, j) => {
+      x.is_treasurer = j === (flagged == null ? 0 : flagged);
+      x.auth_user_id =
+        j === i ? FAKE_USER_ID : `7777777${j}-0000-0000-0000-00000000000${j}`;
+    });
+    return m;
+  };
+
+  async function withSettings(page, settings) {
+    const writes = [];
+    await page.route("**/rest/v1/app_settings**", (r) => {
+      const req = r.request();
+      if (req.method() === "GET") {
+        return r.fulfill({
+          status: 200, contentType: "application/json",
+          body: JSON.stringify([settings]),
+        });
+      }
+      let body = {};
+      try { body = JSON.parse(req.postData() || "{}"); } catch (e) {}
+      writes.push({ url: req.url(), body });
+      Object.assign(settings, body);
+      return r.fulfill({
+        status: 200, contentType: "application/json",
+        body: JSON.stringify([settings]),
+      });
+    });
+    return writes;
+  }
+
+  // ---- THE REPORTED SYMPTOM, on a phone -------------------------------
+  const phone = await browser.newPage({ viewport: { width: 393, height: 852 } });
+  phone.on("pageerror", (e) => errors.push(`fund-name: ${e}`));
+  const unnamed = { ...M.SETTINGS, fund_name: null };
+  await serve(phone, { ...M.TABLE_DATA, app_settings: unnamed });
+  await withSettings(phone, unnamed);
+  await phone.goto(BASE, { waitUntil: "domcontentloaded" });
+  await phone.waitForTimeout(1800);
+  const head = await phone.locator(".header-titles").innerText();
+  check(
+    "fund-name/with no name set the header falls back to Power Fund",
+    /Power Fund/.test(head),
+    head.replace(/\n+/g, " | ")
+  );
+  // The long subtitle is what carries APP_CONFIG.SUBTITLE, and it is hidden
+  // here BY DESIGN — which is the other half of why the name was invisible.
+  const longShown = await phone.evaluate(() => {
+    const el = document.querySelector(".subtitle-long");
+    return el ? getComputedStyle(el).display : "(absent)";
+  });
+  check(
+    "fund-name/...and the config subtitle is hidden on a phone, by design",
+    longShown === "none",
+    longShown
+  );
+  await phone.close();
+
+  // ---- the treasurer sets it -----------------------------------------
+  const page = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  page.on("pageerror", (e) => errors.push(`fund-name: ${e}`));
+  const members = linked(0, 0); // Regine: flagged AND signed in
+  const settings = { ...M.SETTINGS, fund_name: null };
+  await serve(page, { ...M.TABLE_DATA, members, app_settings: settings });
+  const writes = await withSettings(page, settings);
+  await withAuthMode(page, "optional", { signedIn: true, email: "regine@example.com" });
+  await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForTimeout(2500);
+  await page.locator(".unlock-btn").click();
+  await page.waitForTimeout(700);
+  await page.locator(".tab-item", { hasText: "Menu" }).click();
+  await page.waitForTimeout(500);
+
+  const rowLoc = page.locator(".menu-row", { hasText: "Fund name" });
+  check("fund-name/the treasurer gets the row", (await rowLoc.count()) === 1);
+  check(
+    "fund-name/...and it says the name is not set yet",
+    /Power Fund/.test(await rowLoc.innerText()),
+    (await rowLoc.innerText()).replace(/\n+/g, " | ")
+  );
+
+  await rowLoc.click();
+  await page.waitForTimeout(500);
+  check(
+    "fund-name/the sheet opens empty and offers the default as the way back",
+    (await page.locator("#fund-name-input").inputValue()) === "" &&
+      /Power Fund/.test(await page.locator(".fund-name-hint").innerText())
+  );
+
+  // maxlength is the COURTESY that stops the keystroke. Asserted as an
+  // attribute, because Playwright's fill() honours it — so filling 41
+  // characters lands 40 and never reaches the validator at all, which is
+  // exactly why the next check goes through the setter instead.
+  check(
+    "fund-name/the input carries the cap as maxlength",
+    (await page.locator("#fund-name-input").getAttribute("maxlength")) ===
+      String(40),
+    await page.locator("#fund-name-input").getAttribute("maxlength")
+  );
+  // The VALIDATOR is the rule, and this is the path that can still exceed the
+  // cap: a paste into a modified field, or a direct call to the exported
+  // setter. Save must be genuinely disabled, not merely validated on submit.
+  await page.evaluate(() => window.PowerFund.setFundNameValue("x".repeat(41)));
+  await page.waitForTimeout(300);
+  check(
+    "fund-name/an over-long name disables Save and says why",
+    (await page.locator("#fund-name-save").isDisabled()) === true &&
+      /41 characters/.test(await page.locator("#fund-name-problem").innerText()),
+    await page.locator("#fund-name-problem").innerText().catch(() => "(no problem shown)")
+  );
+
+  await page.locator("#fund-name-input").fill("ViTAMiN Fund 2027");
+  await page.waitForTimeout(300);
+  check(
+    "fund-name/a valid name re-enables Save",
+    (await page.locator("#fund-name-save").isDisabled()) === false
+  );
+  await page.locator("#fund-name-save").click();
+  await page.waitForTimeout(1600);
+
+  const wrote = writes.find((w) => w.body && "fund_name" in w.body);
+  check(
+    "fund-name/saving writes fund_name and NOTHING else",
+    !!wrote &&
+      wrote.body.fund_name === "ViTAMiN Fund 2027" &&
+      Object.keys(wrote.body).join(",") === "fund_name",
+    wrote ? JSON.stringify(wrote.body) : `(no write; ${writes.length})`
+  );
+  check(
+    "fund-name/...scoped to the settings row",
+    !!wrote && /id=eq\.1/.test(wrote.url),
+    wrote ? wrote.url : "(none)"
+  );
+  // THE POINT OF THE WHOLE CHANGE: it shows in the header, on a phone.
+  const after = await page.locator(".header-titles").innerText();
+  check(
+    "fund-name/the header now carries the name",
+    /ViTAMiN Fund 2027/.test(after) && !/Power Fund/.test(after),
+    after.replace(/\n+/g, " | ")
+  );
+
+  // ---- clearing it is the only way to undo a rename ------------------
+  await page.locator(".tab-item", { hasText: "Menu" }).click();
+  await page.waitForTimeout(500);
+  await page.locator(".menu-row", { hasText: "Fund name" }).click();
+  await page.waitForTimeout(500);
+  check(
+    "fund-name/reopening shows the current name",
+    (await page.locator("#fund-name-input").inputValue()) === "ViTAMiN Fund 2027"
+  );
+  // The input opens pre-filled with the name on file, so "Currently X" would
+  // be restating the field right above it. It appears only once the draft
+  // moves off it — and is patched by hand, since typing does not render.
+  check(
+    "fund-name/...and does NOT restate it under the buttons",
+    (await page.locator("#fund-name-current").isHidden()) === true
+  );
+  await page.locator("#fund-name-input").fill("Barkada Fund");
+  await page.waitForTimeout(300);
+  check(
+    "fund-name/...which appears once the draft differs, naming what it was",
+    (await page.locator("#fund-name-current").isVisible()) === true &&
+      /ViTAMiN Fund 2027/.test(await page.locator("#fund-name-current").innerText()),
+    await page.locator("#fund-name-current").innerText().catch(() => "(hidden)")
+  );
+  // The app's own order: primary first, Cancel second — 12 modals to 3, and
+  // Payment schedule, which this screen borrows its treatment from, is one.
+  const btnOrder = await page.evaluate(() => {
+    const box = document.querySelector("#fund-name-save").parentElement;
+    return [...box.children].map((b) => b.className.replace(/\s+/g, " ").trim());
+  });
+  check(
+    "fund-name/Save comes before Cancel",
+    /primary/.test(btnOrder[0] || "") && /secondary/.test(btnOrder[1] || ""),
+    JSON.stringify(btnOrder)
+  );
+  await page.locator("#fund-name-input").fill("");
+  await page.waitForTimeout(300);
+  check(
+    "fund-name/an EMPTY name is allowed — it is the undo",
+    (await page.locator("#fund-name-save").isDisabled()) === false
+  );
+  await page.locator("#fund-name-save").click();
+  await page.waitForTimeout(1600);
+  const cleared = writes.filter((w) => w.body && "fund_name" in w.body).pop();
+  check(
+    "fund-name/clearing writes NULL, not an empty string",
+    !!cleared && cleared.body.fund_name === null,
+    cleared ? JSON.stringify(cleared.body) : "(none)"
+  );
+  check(
+    "fund-name/...and the header goes back to the default",
+    /Power Fund/.test(await page.locator(".header-titles").innerText())
+  );
+  await page.close();
+
+  // ---- a PIN-unlocked member is NOT the treasurer --------------------
+  // 011 makes app_settings treasurer-only, so gating this on `unlocked` would
+  // offer four of five members a write Postgres refuses.
+  const mem = await browser.newPage({ viewport: { width: 430, height: 950 } });
+  mem.on("pageerror", (e) => errors.push(`fund-name-member: ${e}`));
+  const m2 = linked(1, 0); // Sarah signed in; Regine is the flagged treasurer
+  const s2 = { ...M.SETTINGS, fund_name: null, treasurer_pin: "1234" };
+  await serve(mem, { ...M.TABLE_DATA, members: m2, app_settings: s2 });
+  const memWrites = await withSettings(mem, s2);
+  await withAuthMode(mem, "optional", { signedIn: true, email: "sarah@example.com" });
+  await mem.goto(BASE, { waitUntil: "domcontentloaded" });
+  await mem.waitForTimeout(2500);
+  await mem.locator(".tab-item", { hasText: "Menu" }).click();
+  await mem.waitForTimeout(500);
+  check(
+    "fund-name/a member who is not the treasurer is not offered the row",
+    (await mem.locator(".menu-row", { hasText: "Fund name" }).count()) === 0
+  );
+  // Exported on PowerFund, so the absent row is not the gate.
+  await mem.evaluate(() => {
+    window.PowerFund.openFundNameModal();
+    window.PowerFund.setFundNameValue("Sneaky Fund");
+    window.PowerFund.saveFundName();
+  });
+  await mem.waitForTimeout(1200);
+  check(
+    "fund-name/...and the exported handlers refuse them",
+    (await mem.locator("#fund-name-input").count()) === 0 &&
+      !memWrites.some((w) => w.body && "fund_name" in w.body),
+    JSON.stringify(memWrites.map((w) => w.body))
+  );
+  await mem.close();
+}
+
 /** Payment schedule — the 30 due dates, which until now could only be changed
  *  in SQL. Gated on the ACCOUNT (011's cycles_treasurer keys off
  *  members.is_treasurer), not on the shared PIN. */
@@ -6836,6 +7081,7 @@ async function bootFailure(browser) {
   await unlockVisibility(browser, errors);
   await extraTreasurer(browser, errors);
   await transferRole(browser, errors);
+  await fundNameWriter(browser, errors);
   await paymentSchedule(browser, errors);
   await pinDeadEnds(browser, errors);
   await qaFindings(browser, errors);

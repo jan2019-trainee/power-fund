@@ -585,6 +585,7 @@ async function tabs(page, prefix, list) {
       await shot(p, `a-${label}-menu`, "Menu, signed-in treasurer (no PIN needed to unlock)");
 
       const overlays = [
+        ["fund-name", "Fund name — NEW DESIGN, no approved mockup. The writer for app_settings.fund_name", () => window.PowerFund.openFundNameModal()],
         ["schedule", "Payment schedule — the 30 due dates", () => window.PowerFund.openScheduleModal()],
         ["member-signin", "Member sign-in — the addresses a login is matched against", () => window.PowerFund.openMemberAccountsModal()],
         ["transfer-role", "Transfer treasurer role", () => window.PowerFund.openTransferRole()],
@@ -602,6 +603,38 @@ async function tabs(page, prefix, list) {
           await p.keyboard.press("Escape").catch(() => {});
           await p.waitForTimeout(220);
         }
+      }
+
+      // The fund name with the cap exceeded. The empty sheet above says
+      // nothing about the 40-character rule or what a refusal looks like,
+      // and the disabled Save IS the gate here.
+      await p.evaluate(() => window.PowerFund.openFundNameModal());
+      await p.waitForTimeout(500);
+      // Set the field AND the draft directly. fill() alone is honoured by
+      // maxlength, so 45 characters land as 40, the validator never fires and
+      // this shot showed a valid name under a label promising a refusal —
+      // the same artefact the smoke check had. This is the state a paste into
+      // a modified field produces: over-length text in the box, Save refused.
+      await p.evaluate(() => {
+        const v = "The ViTAMiN Paluwagan Fund of 2027 and Beyond";
+        const el = document.getElementById("fund-name-input");
+        if (el) el.value = v;
+        window.PowerFund.setFundNameValue(v);
+      });
+      await p.waitForTimeout(400);
+      if (!(await p.locator("#fund-name-save").isDisabled())) {
+        throw new Error(
+          "the fund-name over-cap capture did not reach the validator — " +
+            "Save is still enabled, so the shot would be mislabelled"
+        );
+      }
+      await shot(
+        p, `a-${label}-fund-name-too-long`,
+        "Fund name over the 40-character cap — Save disabled, the length named"
+      );
+      for (let i = 0; i < 3 && (await p.locator(".modal-overlay").count()); i++) {
+        await p.keyboard.press("Escape").catch(() => {});
+        await p.waitForTimeout(220);
       }
 
       // The schedule with a shift applied — the state a reviewer has to judge,
@@ -638,6 +671,35 @@ async function tabs(page, prefix, list) {
     await p.evaluate(() => window.PowerFund.resetData());
     await p.waitForTimeout(600);
     await shot(p, "a-mobile-no-pin-confirm", "A PIN-gated action with no PIN to type — offers to create one");
+    await p.close();
+
+    // A fund that never set a FUND NAME, which is the state this screen
+    // exists for: the header falls back to "Power Fund" and nothing else in
+    // the app says that is a default rather than the name. SETTINGS above
+    // carries a name, so without this the reviewer only ever sees the
+    // already-named case.
+    const noName = {
+      ...acct.data,
+      app_settings: { ...acct.data.app_settings, fund_name: null },
+    };
+    p = await open(browser, noName, MOBILE, null, {
+      authMode: "optional",
+      signedInAs: acct.me,
+    });
+    await p.locator(".unlock-btn").click();
+    await p.waitForTimeout(600);
+    await p.evaluate(() => window.PowerFund.setView("menu"));
+    await p.waitForTimeout(450);
+    await shot(
+      p, "a-mobile-menu-no-fund-name",
+      "Menu on a fund with no name set — the header reads \"Power Fund\" and the row says so"
+    );
+    await p.evaluate(() => window.PowerFund.openFundNameModal());
+    await p.waitForTimeout(500);
+    await shot(
+      p, "a-mobile-fund-name-unset",
+      "Fund name, never set — the sheet opens empty and offers the default as the way back"
+    );
     await p.close();
   }
 

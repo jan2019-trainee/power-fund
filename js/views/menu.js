@@ -21,7 +21,7 @@ window.PFViews.menu = function (ctx) {
     authMode, sessionEmail, identityLocked, signInStatus, isTreasurerAccount,
     hasTreasurerPin, isWide,
     payoutOwner, maskAccount, canSwapTurns, myOutgoingSwap, memberName,
-    canUsePush, pushNote
+    canUsePush, pushNote, fundNameRaw
   } = ctx;
 
   /** One tappable settings row. `note` is the quiet second line. */
@@ -83,6 +83,24 @@ window.PFViews.menu = function (ctx) {
     ]);
 
     html += group("Group", [
+      // FLAGGED TREASURER ONLY, for the same reason Payment schedule is: 011
+      // makes app_settings treasurer-only, and the PIN is shared with all
+      // five, so a PIN-gated row would offer the other four a write Postgres
+      // refuses. The subtitle names the CURRENT value, because a fund with no
+      // name set shows "Power Fund" in the header and nothing else in the app
+      // says that is a default rather than the name.
+      ...(isTreasurerAccount
+        ? [
+            row(
+              "tag",
+              "Fund name",
+              "PowerFund.openFundNameModal()",
+              fundNameRaw
+                ? `Currently “${escapeHtml(fundNameRaw)}”`
+                : "Not set — the header shows “Power Fund”"
+            ),
+          ]
+        : []),
       row("users", "Edit member names", "PowerFund.openEditNamesModal()"),
       row(
         "rounds",

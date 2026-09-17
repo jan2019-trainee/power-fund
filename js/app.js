@@ -256,6 +256,13 @@
   let swapTarget = "";
   let swapNote = "";
 
+  /* The fund's display name (Menu -> Group -> Fund name). Empty is a real
+   * value — it restores the "Power Fund" fallback, which is the only way to
+   * undo a name — so the draft is a string and never null. */
+  let fundNameModalOpen = false;
+  let fundNameValue = "";
+  let fundNameError = null;
+
   let scheduleModalOpen = false;
   let scheduleValues = {};
   /* The last VALID date seen for each cycle, which is what a shift measures
@@ -3964,6 +3971,108 @@
     );
   }
 
+  /** The fund name's own cap. NOT NAME_MAX (10) — that is for MEMBER names,
+   *  which sit in a 5-across roster and inside chips. This one shows in the
+   *  header, which ellipsises, and in the share text. 40 leaves room for
+   *  "ViTAMiN Fund 2027" and its like without letting somebody paste a
+   *  paragraph into the one string every screen prints.
+   *
+   *  Counted in UTF-16 units to match what `maxlength` itself counts, so the
+   *  attribute and the rule can never disagree about whether a name fits. */
+  const FUND_NAME_MAX = 40;
+
+  function fundNameProblem() {
+    const v = String(fundNameValue || "").trim();
+    // Empty is ALLOWED and means "go back to the default" — see the note on
+    // fundNameValue. So the only rule is the cap.
+    if (v.length > FUND_NAME_MAX) {
+      return `That name is ${v.length} characters — keep it to ${FUND_NAME_MAX} or fewer.`;
+    }
+    return null;
+  }
+
+  /** Whether the "Currently X" line applies: a name IS on file AND the draft
+   *  has moved off it. At open the input is pre-filled with that same name,
+   *  so the line would otherwise restate the field directly above it. */
+  function fundNameCurrentShown() {
+    const current = (state.settings && state.settings.fund_name) || "";
+    return !!current && String(fundNameValue || "").trim() !== current;
+  }
+
+  function openFundNameModal() {
+    // FLAGGED TREASURER ONLY, not `unlocked`. 011 makes app_settings
+    // treasurer-only, and the PIN is shared with all five by design — so a
+    // PIN-gated row would offer the other four a button Postgres refuses.
+    // Checked here as well as on the menu row and in the render branch,
+    // because this is exported on PowerFund.
+    if (!isTreasurerAccount()) return;
+    fundNameValue = (state.settings && state.settings.fund_name) || "";
+    fundNameError = null;
+    fundNameModalOpen = true;
+    render();
+  }
+  function closeFundNameModal() {
+    fundNameModalOpen = false;
+    fundNameValue = "";
+    fundNameError = null;
+    render();
+  }
+  function setFundNameValue(v) {
+    fundNameValue = v;
+    // No render: it would eat the caret. The live problem text is patched by
+    // hand instead, the same way the member-name validators do it.
+    const el = document.getElementById("fund-name-problem");
+    const btn = document.getElementById("fund-name-save");
+    const problem = fundNameProblem();
+    // The same node shows a refused WRITE (fundNameError). Typing clears that
+    // too, deliberately: the message described the previous attempt, and
+    // leaving a stale "the database refused it" under a name they have since
+    // changed would read as a refusal of the new one.
+    if (problem) fundNameError = null;
+    const shown = problem || fundNameError;
+    if (el) {
+      el.textContent = shown || "";
+      el.hidden = !shown;
+    }
+    if (btn) btn.disabled = !!problem || busy;
+    // Same reason as the problem line: no render, so this is patched too.
+    const cur = document.getElementById("fund-name-current");
+    if (cur) cur.hidden = !fundNameCurrentShown();
+  }
+
+  async function saveFundName() {
+    if (busy || !isTreasurerAccount()) return;
+    const problem = fundNameProblem();
+    if (problem) {
+      fundNameError = problem;
+      return render();
+    }
+    const next = String(fundNameValue || "").trim();
+    const prev = (state.settings && state.settings.fund_name) || "";
+    if (next === prev) return closeFundNameModal();
+
+    busy = true;
+    render();
+    try {
+      await window.DB.saveFundName(next);
+      await logActivity(
+        next
+          ? `Fund renamed to "${next}"`
+          : `Fund name cleared — the header shows "Power Fund" again`,
+        { type: "admin" }
+      );
+      closeFundNameModal();
+      await reload();
+      showSuccess(next ? `This fund is now "${next}".` : "Fund name cleared.");
+    } catch (e) {
+      fundNameError = e.message;
+      busy = false;
+      return render();
+    }
+    busy = false;
+    render();
+  }
+
   function openScheduleModal() {
     if (!isTreasurerAccount()) return;
     scheduleValues = {};
@@ -4635,6 +4744,13 @@
     download: '<path d="M12 3v13"/><polyline points="7 11 12 16 17 11"/><path d="M4 20h16"/>',
     upload: '<path d="M12 21V8"/><polyline points="7 13 12 8 17 13"/><path d="M4 4h16"/>',
     sheet: '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h3"/>',
+    // Fund name. A NEW glyph rather than reusing `sheet`, which Export CSV
+    // summary already carries two groups above it — two unrelated rows
+    // sharing an icon is the P3-6 defect, and this one would sit on the same
+    // screen as the row it copied. Two straight strokes and a dot: legible at
+    // the 18px a menu row renders it at, where a tag with a smaller hole is
+    // not.
+    tag: '<path d="M20.5 13.3 13.3 20.5a2 2 0 0 1-2.8 0L3.5 13.2V3.5h9.7l7.3 7.3a2 2 0 0 1 0 2.5Z"/><circle cx="7.8" cy="7.8" r="1.4"/>',
     alert:
       '<path d="M10.3 4.6 2.6 18a2 2 0 0 0 1.7 3h15.4a2 2 0 0 0 1.7-3L13.7 4.6a2 2 0 0 0-3.4 0Z"/><path d="M12 9.5v4"/><circle cx="12" cy="17" r=".9" fill="currentColor" stroke="none"/>',
     check: '<polyline points="4 12 10 18 20 6"/>',
@@ -6184,6 +6300,7 @@
       shareModalOpen ||
       editNamesModalOpen ||
       scheduleModalOpen ||
+      fundNameModalOpen ||
       swapModalOpen ||
       memberAccountsModalOpen ||
       transferRoleModalOpen ||
@@ -6219,6 +6336,7 @@
     if (reorderModalOpen) return closeReorderModal();
     if (editNamesModalOpen) return closeEditNamesModal();
     if (swapModalOpen) return closeSwapModal();
+    if (fundNameModalOpen) return closeFundNameModal();
     if (scheduleModalOpen) return closeScheduleModal();
     if (memberAccountsModalOpen) return closeMemberAccountsModal();
     if (transferRoleModalOpen) return closeTransferRole();
@@ -6858,6 +6976,10 @@
       undoPaidTarget, markPaidTarget,
       hasMasterPin: hasMasterPin(),
       hasTreasurerPin: hasTreasurerPin(),
+      // The RAW setting, not fundName() — the Menu row has to tell a fund
+      // that is NAMED "Power Fund" apart from one with no name set, and
+      // fundName() collapses both to the same string.
+      fundNameRaw: (state.settings && state.settings.fund_name) || "",
       moneyRefused: moneyWritesRefused(),
       MONEY_REFUSED_NOTE,
       myUnconfirmedPayout: myUnconfirmedPayout(),
@@ -7932,6 +8054,65 @@
             }>Save names</button>
             <button class="modal-btn-secondary" onclick="PowerFund.closeEditNamesModal()">Cancel</button>
           </div>
+        </div>
+      </div>`;
+    }
+
+    // ---- Fund name (Menu -> Group -> Fund name) ------------------------
+    // Checked against isTreasurerAccount() here as well as on the menu row,
+    // because openFundNameModal is exported on PowerFund and the render must
+    // never take the caller's word for it.
+    //
+    // NO APPROVED MOCKUP: `app_settings.fund_name` arrived with migration 006
+    // and never got a screen, so every artboard shows a named fund without
+    // showing where the name is set. It borrows the established `.modal`
+    // treatment the way Edit member names does. Flagged for UI/UX QA as new
+    // design, not as a port.
+    if (fundNameModalOpen && isTreasurerAccount()) {
+      const problem = fundNameProblem();
+      const current = (state.settings && state.settings.fund_name) || "";
+      html += `<div class="modal-overlay" onclick="if(event.target===this) PowerFund.closeFundNameModal()">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1">
+          <h3 id="dlg-title">Fund name</h3>
+          <p class="modal-sub">Shown in the header on every screen, in the
+            sidebar, and in the text you share to the group chat.</p>
+
+          <label class="field-label" for="fund-name-input">Name</label>
+          <input id="fund-name-input" class="text-input" type="text"
+                 maxlength="${FUND_NAME_MAX}" placeholder="e.g. ViTAMiN Fund 2027"
+                 value="${escapeHtml(fundNameValue)}"
+                 oninput="PowerFund.setFundNameValue(this.value)">
+          <p class="fund-name-hint">Leave it empty to go back to
+            <b>Power Fund</b>.</p>
+          <!-- .pin-error is what the schedule modal uses for exactly this —
+               a live validation line and a refused write in one place. Reused
+               rather than given its own class, which would be a fourth copy of
+               the same treatment. -->
+          <p class="pin-error" id="fund-name-problem" role="alert"${
+            problem || fundNameError ? "" : " hidden"
+          }>${escapeHtml(problem || fundNameError || "")}</p>
+          <div class="modal-actions">
+            <button class="modal-btn-primary" id="fund-name-save"
+                    onclick="PowerFund.saveFundName()" ${
+                      problem || busy ? "disabled" : ""
+                    }>${busy ? "Saving…" : "Save"}</button>
+            <button class="modal-btn-secondary" onclick="PowerFund.closeFundNameModal()">Cancel</button>
+          </div>
+          <!-- Only once the draft DIFFERS from what is on file, because the
+               input OPENS pre-filled with the current name — so at open time
+               this line restated the field directly above it, and the empty
+               case repeated the hint's "Power Fund". Caught in a capture.
+               It now says what you are changing FROM, which is the one thing
+               the screen cannot otherwise tell you once you start typing. -->
+          <!-- Always in the DOM, hidden until it applies, because
+               setFundNameValue() patches it by hand — its condition depends
+               on the DRAFT, and that changes on every keystroke without a
+               render. Rendering it conditionally would leave nothing to
+               patch and the line would only ever appear on the next
+               unrelated render. -->
+          <p class="fund-name-current" id="fund-name-current"${
+            fundNameCurrentShown() ? "" : " hidden"
+          }>Currently <b>${escapeHtml(current)}</b>.</p>
         </div>
       </div>`;
     }
@@ -9173,6 +9354,10 @@
     declineSwap,
     cancelSwap,
     setReceiptAckNote,
+    openFundNameModal,
+    closeFundNameModal,
+    setFundNameValue,
+    saveFundName,
     openScheduleModal,
     closeScheduleModal,
     setScheduleShift,

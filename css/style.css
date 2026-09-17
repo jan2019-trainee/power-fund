@@ -6777,3 +6777,30 @@ body.auth-gate {
   cursor: pointer;
 }
 .push-nudge-x:hover { color: var(--text-primary); background: rgba(255, 255, 255, 0.04); }
+
+/* -------------------------------------------------------------------------
+   Fund name (Menu -> Group -> Fund name).
+
+   `app_settings.fund_name` arrived with migration 006 and never got a screen
+   — 006 documented a one-off `update` to paste by hand instead. So there is
+   NO APPROVED MOCKUP for this; it borrows the `.modal` + `.text-input`
+   treatment Edit member names uses. Flagged for UI/UX QA as new design.
+   ------------------------------------------------------------------------- */
+.fund-name-hint,
+.fund-name-current {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  text-align: left;
+}
+.fund-name-hint { margin: 7px 0 0; }
+.fund-name-hint b,
+.fund-name-current b { color: var(--text-primary); }
+/* Below the actions, because it states what IS rather than what to do — the
+   same reason the reset dialog puts its consequences under the button. */
+.fund-name-current {
+  margin: 12px 0 0;
+  padding-top: 11px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+}

@@ -2089,7 +2089,7 @@ real Postgres 16 by `tests/sql/run.sh` (20 assertions). Ships with
 `014_rollback.sql`, which names the query to run first — an open report that
 ₱30,000 never arrived is not something to drop silently.
 
-**`015` IS NOT APPLIED YET** — `015_push_notifications.sql`:
+**`015` IS APPLIED** — `015_push_notifications.sql`:
 `push_subscriptions` + its two register functions, `pf_push_status()`,
 `push_outbox`, `app_secrets.push_endpoint_url` / `.push_secret`, and
 `pf_queue_payment_push()` on `contributions`. Validated on a real Postgres 16
@@ -2104,7 +2104,8 @@ Edge Function exists. `pg_net` is installed if available and simply skipped if
 not — the trigger resolves `net.http_post` at run time inside an exception
 block.
 
-**`016` IS NOT APPLIED YET** — `016_member_notifications.sql`:
+**`016` IS APPLIED**, and the Edge Function is deployed —
+`016_member_notifications.sql`:
 `push_outbox.recipient_member_id` / `.round_number` / `.note`,
 `pf_push_enqueue()`, `pf_queue_contribution_push()` (replacing 015's
 `pf_queue_payment_push`, which it drops) and `pf_queue_payout_push()`.
@@ -2112,14 +2113,25 @@ Validated on a real Postgres 16 by `tests/sql/run.sh` (31 assertions including
 the rollback). Ships with `016_rollback.sql`, which restores 015's trigger
 verbatim and loses nothing anybody can see.
 
-**ORDER MATTERS HERE, unlike 015: deploy the Edge Function BEFORE applying
-016.** The 015 function ignores `recipient_member_id` and sends everything to
-the treasurer, so the other order puts every member's confirmation on the
-treasurer's phone.
+**ORDER MATTERED HERE, unlike 015: the Edge Function had to be deployed
+BEFORE applying 016**, and was. The 015 function ignores
+`recipient_member_id` and sends everything to the treasurer, so the other
+order would have put every member's confirmation on the treasurer's phone.
+Kept as a record rather than an instruction — it is done — because it is the
+shape of dependency to check for on the next one.
 
-**So every migration through 014 is live, 015 is applied and sending, and 016
-is written and tested but not yet run.** A recipient can view the treasurer's receipt, confirm it
-arrived, or report that it did not.
+**So every migration through 016 is live.** A recipient can view the
+treasurer's receipt, confirm it arrived, or report that it did not; the
+treasurer's phone hears about an incoming payment; and every member hears
+what happened to theirs — confirmed, recorded, rejected with the reason, or
+their payout sent.
+
+**Two earlier notes in this file said 015 was not applied while the summary
+below them said it was sending.** Both are corrected above. Worth knowing the
+failure mode: this appendix is the only record of what is live, and a
+contradiction in it is worse than a stale line, because it gives the next
+reader two answers and no way to tell which is current. Update the section
+header and the summary in the same edit.
 
 Every migration from 010 on is wrapped in `begin; … commit;`. Not decoration:
 without it a `raise` in 011's preflight aborted one statement and psql

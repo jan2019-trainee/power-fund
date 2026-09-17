@@ -3996,7 +3996,7 @@
    *  so the line would otherwise restate the field directly above it. */
   function fundNameCurrentShown() {
     const current = (state.settings && state.settings.fund_name) || "";
-    return false;
+    return !!current;
   }
 
   function openFundNameModal() {

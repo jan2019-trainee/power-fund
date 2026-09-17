@@ -127,6 +127,18 @@ create table app_secrets (
 insert into app_secrets (id) values (1);
 alter table app_secrets enable row level security;
 revoke all on app_secrets from anon, authenticated;
+-- app_settings. The fund name's only enforcement is 011's settings_treasurer
+-- policy, and nothing here had ever extracted it — so the Fund name screen's
+-- treasurer gate mirrored a rule no test could see. Columns as schema.sql
+-- declares them plus 006's additions; the PINs are NOT here (010 moved them
+-- into app_secrets above).
+create table app_settings (
+  id int primary key default 1 check (id = 1),
+  qr_code_url text, qr_updated_at timestamptz, qr_updated_by text,
+  fund_name text, qr_bank text, qr_account_number text, qr_account_name text,
+  created_at timestamptz not null default now());
+insert into app_settings (id, fund_name) values (1, 'ViTAMiN Fund 2027');
+alter table app_settings enable row level security;
 -- pg_net, stubbed to RECORD rather than send. The signature is pg_net's real
 -- one — argument names, order and defaults — because 015 calls it with NAMED
 -- arguments, so a stub that merely accepted three columns would let a call
@@ -159,6 +171,7 @@ grant execute on function auth.uid(), storage.foldername(text) to anon, authenti
 grant execute on function pf_member_id(), pf_is_treasurer() to anon, authenticated;
 grant select, insert, update, delete on storage.objects, members, cycles, payouts, activity_log to anon, authenticated;
 grant select, insert, update, delete on contributions to anon, authenticated;
+grant select, insert, update, delete on app_settings to anon, authenticated;
 insert into members (id, name, member_order, email, auth_user_id, is_treasurer) values
  ('11111111-0000-0000-0000-000000000001','Regine',1,'r@x.com','aaaaaaaa-0000-0000-0000-00000000000a', true),
  ('11111111-0000-0000-0000-000000000002','Sarah', 2,'s@x.com','bbbbbbbb-0000-0000-0000-00000000000b', false),
@@ -244,6 +257,11 @@ def cut(s, start, end):
     # and must be here too — permissive policies are OR-ed, so testing the new
     # one alone would not show that the treasurer still has full access.
     + cut(lock, 'drop policy if exists payouts_read', '-- 6) activity_log')
+    # 011 section 7. The Fund name writer (Menu -> Group) is the app's first
+    # writer for this table, and its UI gate is isTreasurerAccount() only
+    # because this policy is treasurer-only — the gate is worth no more than
+    # what this section says.
+    + cut(lock, 'drop policy if exists settings_read', '-- 8) Storage')
     + cut(ack, 'drop policy if exists payouts_recipient_ack', 'commit;')
     # 013: turn swaps. Taken WHOLE (constraint rewrite, table, policies, the
     # four functions and the amended guard) because the pieces only work
@@ -313,8 +331,11 @@ swapq() {
 }
 
 # state <label> <expected> <sql>
+# -q so psql's command-status lines (BEGIN, SET, DO) stay out of the compared
+# value — a read that has to run AS a member needs those statements in front
+# of it, and without -q they were concatenated into the answer.
 state() {
-  local got; got=$(q -tAc "$3" 2>&1 | tr -d ' ' | tr '\n' ',' | sed 's/,$//')
+  local got; got=$(q -q -tAc "$3" 2>&1 | tr -d ' ' | tr '\n' ',' | sed 's/,$//')
   if [ "$got" = "$2" ]; then printf '  ok   %s\n' "$1"
   else printf '  FAIL %s — expected %s, got %s\n' "$1" "$2" "$got"; FAILED=1; fi
 }
@@ -388,6 +409,31 @@ run "member still may NOT change their own email" $MEM DENY \
   "update members set email='new@x.com' where id='$SID'"
 run "member may still rename themselves" $MEM OK \
   "update members set name='Sarah R' where id='$SID'"
+
+echo "app_settings — the fund name (Menu -> Group -> Fund name)"
+# The app's first writer for this table. The screen is gated on
+# isTreasurerAccount() and NOT on `unlocked`, because the PIN is shared with
+# all five and this policy keys off members.is_treasurer — a PIN-gated row
+# would offer the other four a write Postgres refuses. These four assertions
+# are what make that reasoning checkable.
+run "the treasurer may set the fund name" $TRE OK \
+  "update app_settings set fund_name = 'Barkada Fund' where id = 1"
+run "the treasurer may clear the fund name" $TRE OK \
+  "update app_settings set fund_name = null where id = 1"
+run "a member may NOT set the fund name" $MEM DENY \
+  "update app_settings set fund_name = 'Mine Now' where id = 1"
+run "a login on no member row may NOT set the fund name" $GHOST DENY \
+  "update app_settings set fund_name = 'Mine Now' where id = 1"
+run "anon may NOT set the fund name" - DENY \
+  "update app_settings set fund_name = 'Mine Now' where id = 1"
+# Reads stay open: every member's header shows the name, so a members-can't-read
+# rule would blank the title for four of the five.
+# set_config goes in a DO block so it returns no row of its own; the name is
+# compared with spaces stripped, the way every other state() check is.
+state "every signed-in member may READ the fund name" "ViTAMiNFund2027" \
+  "begin; set local role authenticated;
+   do \$\$ begin perform set_config('request.jwt.claim.sub','$MEM',true); end \$\$;
+   select fund_name from app_settings where id = 1"
 
 echo "members — treasurer and anon"
 run "treasurer may set any member's payout details" $TRE OK "update members set $P where id='$SID'"

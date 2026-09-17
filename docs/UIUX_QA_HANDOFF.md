@@ -47,6 +47,7 @@ them as new design.** Where they borrow, they borrow
 | **Member sign-in** panel | Menu → Account → Member sign-in (admin only) |
 | **Transfer treasurer role** | Menu → Security → Transfer treasurer role (admin only) |
 | **Payment schedule** | Menu → Group → Payment schedule (admin only) |
+| **Fund name** | Menu → Group → Fund name (admin only) |
 | **No-treasurer-PIN confirm** | A PIN-gated action on a fund with no treasurer PIN |
 | **Received ✓** (payout receipt confirmation) | Home, signed in as the member a released payout was sent to |
 | **Swap my turn** (*palit ng turno*) | Menu → General → Swap my turn, signed in as a member whose round is not paid out |
@@ -104,6 +105,35 @@ The 30 due dates, editable from the app for the first time. Borrows the
 - Reachable only by a Google-verified treasurer. A PIN-unlocked member must
   not see the row — and `PowerFund.openScheduleModal()` from the console must
   do nothing for them.
+
+### Fund name (new design — no mockup)
+`app_settings.fund_name` has existed since migration 006 and **nothing in the
+app ever wrote it** — the column was filled by a hand-run SQL update that this
+fund never ran, so the header said "Power Fund" and no screen said that was a
+default rather than the name. Category **UI Only**: the column and 011's
+`settings_treasurer` policy both already existed; only the screen was missing.
+Borrows the same `.modal` treatment as Payment schedule and Edit member names.
+
+- **Where the name actually shows:** the header title on every screen, the
+  desktop sidebar, and the share text. It is NOT the header's second line —
+  that is `APP_CONFIG.SUBTITLE`, a deploy-time constant, and on a phone the
+  long form is hidden below 480px by design.
+- **Empty is a valid value and is the undo.** Clearing the field writes SQL
+  NULL (not `""`) and the header goes back to **Power Fund**. The hint under
+  the input says so; check it reads as an offer rather than as a warning.
+- **Capped at 40 characters.** `maxlength` stops the keystroke; the validator
+  is the rule, because `maxlength` does not survive a paste into a modified
+  field. Over the cap, Save is genuinely `disabled` and the message names the
+  actual length. Judge the disabled treatment — the same property the reset
+  dialog was marked down for in the first pass.
+- **States:** not set yet (the row says so) · a current name echoed in the
+  row's subtitle · over the cap · the database refusing the write (the same
+  line the live validation uses, and typing clears it) · saving.
+- Reachable only by a Google-verified treasurer, for the same reason Payment
+  schedule is: 011 makes `app_settings` treasurer-only and the PIN is shared
+  with all five, so a PIN-gated row would offer the other four a write
+  Postgres refuses. A PIN-unlocked member must not see the row, and
+  `PowerFund.openFundNameModal()` from the console must do nothing for them.
 
 ### Received ✓ — the payout's second side (new design — no mockup)
 

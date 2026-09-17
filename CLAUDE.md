@@ -950,6 +950,80 @@ permission — `pf_set_pin` already allows it, and the app already promised it.
 A test asserts the control case: an ordinary PIN unlock still proves the
 current PIN, or anyone holding an unlocked phone could lock the group out.
 
+## The fund name had no writer at all (Menu → Group → Fund name)
+
+Reported from a phone: *"why is 'ViTAMiN Fund 2027' not displayed?"* Two
+separate things, and only one of them was a bug.
+
+- **The header's second line is not the fund name.** `.subtitle-long` carries
+  `APP_CONFIG.SUBTITLE` — a deploy-time constant — and is `display: none`
+  below 480px by design, replaced by `.subtitle-short`. Working as intended.
+- **The header TITLE is the fund name, and it was null**, because
+  `app_settings.fund_name` has existed since migration 006 and **nothing in
+  `js/` ever wrote it**. 006 documents a one-off
+  `update app_settings set fund_name = '…' where id = 1;` (line 177) that this
+  fund never ran. Every reference in the app was a read. Same shape of gap as
+  the payment schedule: a column the app depends on, writable only in the
+  Supabase SQL editor.
+
+Category: **UI Only**. **No migration** — 011's `settings_treasurer` already
+permits the write.
+
+- **Gated on `isTreasurerAccount()`, not on `unlocked`**, for the same reason
+  the schedule is: 011 keys the policy off `members.is_treasurer`, which the
+  shared PIN cannot express, so a PIN-gated row would offer the other four a
+  button Postgres refuses. Checked in the menu row, the render branch and both
+  handlers — `openFundNameModal` and `saveFundName` are exported on
+  `PowerFund`, so the absent row is not the gate.
+- **Empty is a VALID value and is the undo.** It writes SQL `null`, never
+  `""`, and the header falls back to "Power Fund". An empty string would read
+  as a name that is one space wide everywhere the title renders.
+- **`FUND_NAME_MAX = 40`, enforced in the validator AND as `maxlength`** —
+  same division as `NAME_MAX`: the attribute is the courtesy that stops the
+  keystroke, the validator is the rule, because `maxlength` does not survive a
+  paste into a modified field or a direct call to the exported setter. **This
+  is what the first version of the smoke check got wrong**: Playwright's
+  `fill()` honours `maxlength`, so filling 41 characters landed 40 and never
+  reached the validator — the check was asserting a refusal that could not
+  happen. It goes through `setFundNameValue()` now, and the attribute is
+  asserted separately.
+- **`setFundNameValue()` patches by hand and does not render** — a render would
+  eat the caret. It patches the problem line and the Save button's `disabled`,
+  and clears a stale `fundNameError`, because that message described the
+  previous attempt and the two share one node.
+- **The row's subtitle names the CURRENT value** (or says the header is showing
+  a default). Nothing else in the app would ever have mentioned the absence —
+  which is the whole reason this was reported as a bug rather than noticed.
+- `saveFundName()` sends **only `fund_name`**, scoped to `id=eq.1`, through
+  `requireRows()` — the eleventh place `.single()` could have hidden a refusal.
+- **The menu row gets a NEW `tag` glyph**, not `sheet`. Export CSV summary
+  already carries `sheet` two groups above it on the same screen, and two
+  unrelated rows sharing an icon is the P3-6 defect.
+- **The sheet says "Power Fund" ONCE.** The first version printed the fallback
+  in the hint under the input AND again under the buttons — the third time
+  that shape of duplication has had to be removed, and the first caught by
+  reading the diff rather than a capture. The line under the buttons now
+  appears only when a name IS set.
+- **No approved mockup.** It borrows the `.modal` treatment Payment schedule
+  and Edit member names use. Flagged for UI/UX QA as new design.
+
+### Two holes in the test suites this exposed
+
+- **`tests/views.test.js`'s leak check only saw CALLS.** The Fund name row
+  referenced `fundName` — an `app.js` closure function — as a bare value where
+  ctx carries `fundNameRaw`, so the whole Menu render threw for a treasurer
+  and took the tab bar with it. The regex required `fn(`, so a reference
+  without parentheses was invisible; it now also matches the bare-identifier
+  form the undeclared-ctx-name check below it already used. Run against the
+  broken line it reports `needs adding to ctx: fundName`.
+- **`tests/sql/run.sh` had never stubbed `app_settings` at all**, so 011's
+  `settings_treasurer` — the only enforcement behind this feature's UI gate —
+  had no test. Six assertions now cover it: the treasurer may set and clear
+  the name, a member may not, a login on no member row may not, `anon` may
+  not, and every signed-in member may still READ it (a members-can't-read rule
+  would blank the title for four of the five). Run against a
+  `using (true)` policy, two of them fail.
+
 ## The payment schedule is editable now (Menu → Group → Payment schedule)
 
 Found while auditing what "complete" was hiding. `cycles.due_date` has existed

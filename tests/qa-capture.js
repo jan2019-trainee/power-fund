@@ -585,6 +585,7 @@ async function tabs(page, prefix, list) {
       await shot(p, `a-${label}-menu`, "Menu, signed-in treasurer (no PIN needed to unlock)");
 
       const overlays = [
+        ["fund-name", "Fund name — NEW DESIGN, no approved mockup. The writer for app_settings.fund_name", () => window.PowerFund.openFundNameModal()],
         ["schedule", "Payment schedule — the 30 due dates", () => window.PowerFund.openScheduleModal()],
         ["member-signin", "Member sign-in — the addresses a login is matched against", () => window.PowerFund.openMemberAccountsModal()],
         ["transfer-role", "Transfer treasurer role", () => window.PowerFund.openTransferRole()],
@@ -602,6 +603,22 @@ async function tabs(page, prefix, list) {
           await p.keyboard.press("Escape").catch(() => {});
           await p.waitForTimeout(220);
         }
+      }
+
+      // The fund name with the cap exceeded. The empty sheet above says
+      // nothing about the 40-character rule or what a refusal looks like,
+      // and the disabled Save IS the gate here.
+      await p.evaluate(() => window.PowerFund.openFundNameModal());
+      await p.waitForTimeout(500);
+      await p.locator("#fund-name-input").fill("The ViTAMiN Paluwagan Fund of 2027 and Beyond");
+      await p.waitForTimeout(400);
+      await shot(
+        p, `a-${label}-fund-name-too-long`,
+        "Fund name over the 40-character cap — Save disabled, the length named"
+      );
+      for (let i = 0; i < 3 && (await p.locator(".modal-overlay").count()); i++) {
+        await p.keyboard.press("Escape").catch(() => {});
+        await p.waitForTimeout(220);
       }
 
       // The schedule with a shift applied — the state a reviewer has to judge,

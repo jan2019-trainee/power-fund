@@ -41,6 +41,12 @@ widened by accident:
   who loses their Google account would otherwise have no route to correct where
   their payout goes, and nor would anyone else;
 - `anon` and an unrecognised login are refused throughout.
+- **`app_settings` is treasurer-only, reads open** — 011's `settings_treasurer`
+  is the only enforcement behind Menu → Group → **Fund name**, and this table
+  was not stubbed here at all until that screen was built, so the UI's
+  treasurer gate mirrored a rule nothing could check. Every signed-in member
+  may still READ the name: the header prints it on every screen, so a
+  members-can't-read rule would blank the title for four of the five.
 
 ## The failure mode this documents
 

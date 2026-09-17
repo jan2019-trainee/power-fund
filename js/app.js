@@ -3991,6 +3991,14 @@
     return null;
   }
 
+  /** Whether the "Currently X" line applies: a name IS on file AND the draft
+   *  has moved off it. At open the input is pre-filled with that same name,
+   *  so the line would otherwise restate the field directly above it. */
+  function fundNameCurrentShown() {
+    const current = (state.settings && state.settings.fund_name) || "";
+    return false;
+  }
+
   function openFundNameModal() {
     // FLAGGED TREASURER ONLY, not `unlocked`. 011 makes app_settings
     // treasurer-only, and the PIN is shared with all five by design — so a
@@ -4027,6 +4035,9 @@
       el.hidden = !shown;
     }
     if (btn) btn.disabled = !!problem || busy;
+    // Same reason as the problem line: no render, so this is patched too.
+    const cur = document.getElementById("fund-name-current");
+    if (cur) cur.hidden = !fundNameCurrentShown();
   }
 
   async function saveFundName() {
@@ -8087,17 +8098,21 @@
                       problem || busy ? "disabled" : ""
                     }>${busy ? "Saving…" : "Save"}</button>
           </div>
-          <!-- Only when a name IS set. The hint above already offers
-               "Power Fund" as the way back, so printing it again here said
-               the same thing twice in one dialog — the shape of duplication
-               the fund-complete and dispute screens were both caught on. -->
-          ${
-            current
-              ? `<p class="fund-name-current">Currently <b>${escapeHtml(
-                  current
-                )}</b>.</p>`
-              : ""
-          }
+          <!-- Only once the draft DIFFERS from what is on file, because the
+               input OPENS pre-filled with the current name — so at open time
+               this line restated the field directly above it, and the empty
+               case repeated the hint's "Power Fund". Caught in a capture.
+               It now says what you are changing FROM, which is the one thing
+               the screen cannot otherwise tell you once you start typing. -->
+          <!-- Always in the DOM, hidden until it applies, because
+               setFundNameValue() patches it by hand — its condition depends
+               on the DRAFT, and that changes on every keystroke without a
+               render. Rendering it conditionally would leave nothing to
+               patch and the line would only ever appear on the next
+               unrelated render. -->
+          <p class="fund-name-current" id="fund-name-current"${
+            fundNameCurrentShown() ? "" : " hidden"
+          }>Currently <b>${escapeHtml(current)}</b>.</p>
         </div>
       </div>`;
     }

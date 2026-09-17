@@ -126,9 +126,15 @@ Borrows the same `.modal` treatment as Payment schedule and Edit member names.
   field. Over the cap, Save is genuinely `disabled` and the message names the
   actual length. Judge the disabled treatment — the same property the reset
   dialog was marked down for in the first pass.
-- **States:** not set yet (the row says so) · a current name echoed in the
-  row's subtitle · over the cap · the database refusing the write (the same
-  line the live validation uses, and typing clears it) · saving.
+- **States:** not set yet (the row says so, and
+  `a-mobile-menu-no-fund-name` / `a-mobile-fund-name-unset` capture it) · a
+  current name echoed in the row's subtitle · over the cap
+  (`a-*-fund-name-too-long`) · the database refusing the write (the same line
+  the live validation uses, and typing clears it) · saving.
+- **"Currently X" under the buttons appears only once the draft differs** from
+  what is on file. The input opens pre-filled, so at open time that line
+  restated the field directly above it — caught in a capture, not a test.
+  It now says what you are changing FROM.
 - Reachable only by a Google-verified treasurer, for the same reason Payment
   schedule is: 011 makes `app_settings` treasurer-only and the PIN is shared
   with all five, so a PIN-gated row would offer the other four a write

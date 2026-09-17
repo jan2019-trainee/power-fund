@@ -986,7 +986,12 @@ permits the write.
   `fill()` honours `maxlength`, so filling 41 characters landed 40 and never
   reached the validator — the check was asserting a refusal that could not
   happen. It goes through `setFundNameValue()` now, and the attribute is
-  asserted separately.
+  asserted separately. **The QA CAPTURE had the identical flaw and was
+  mislabelled** — "Save disabled, the length named" over a shot showing a
+  valid 40-character name and an enabled button. It sets the field and the
+  draft directly now, which is the state a paste into a modified field
+  produces, and THROWS if Save is still enabled rather than saving a
+  screenshot that says the opposite of its own caption.
 - **`setFundNameValue()` patches by hand and does not render** — a render would
   eat the caret. It patches the problem line and the Save button's `disabled`,
   and clears a stale `fundNameError`, because that message described the
@@ -999,11 +1004,21 @@ permits the write.
 - **The menu row gets a NEW `tag` glyph**, not `sheet`. Export CSV summary
   already carries `sheet` two groups above it on the same screen, and two
   unrelated rows sharing an icon is the P3-6 defect.
-- **The sheet says "Power Fund" ONCE.** The first version printed the fallback
-  in the hint under the input AND again under the buttons — the third time
-  that shape of duplication has had to be removed, and the first caught by
-  reading the diff rather than a capture. The line under the buttons now
-  appears only when a name IS set.
+- **The sheet says "Power Fund" ONCE**, and **"Currently X" only once the
+  draft DIFFERS from what is on file.** The first version printed the fallback
+  in the hint under the input AND again under the buttons (caught by reading
+  the diff — the third time that shape of duplication has had to be removed);
+  the second still restated the current name under the buttons while the input
+  sat pre-filled with exactly it, which the CAPTURE caught. It says what you
+  are changing FROM now, which is the one thing the screen cannot otherwise
+  tell you once you start typing. **It is patched by hand** in
+  `setFundNameValue()` like the problem line, and rendered hidden rather than
+  omitted — its condition depends on the draft, and the draft changes on every
+  keystroke without a render, so a conditionally-rendered line would have
+  nothing to patch and would appear only on the next unrelated render.
+- **Save comes BEFORE Cancel**, which is the app's own order — 12 modals to 3,
+  and Payment schedule, whose treatment this screen borrows, is one of the 12.
+  The first version had them the other way round. Also caught in the capture.
 - **No approved mockup.** It borrows the `.modal` treatment Payment schedule
   and Edit member names use. Flagged for UI/UX QA as new design.
 

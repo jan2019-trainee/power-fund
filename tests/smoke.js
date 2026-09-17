@@ -5118,6 +5118,32 @@ async function fundNameWriter(browser, errors) {
     "fund-name/reopening shows the current name",
     (await page.locator("#fund-name-input").inputValue()) === "ViTAMiN Fund 2027"
   );
+  // The input opens pre-filled with the name on file, so "Currently X" would
+  // be restating the field right above it. It appears only once the draft
+  // moves off it — and is patched by hand, since typing does not render.
+  check(
+    "fund-name/...and does NOT restate it under the buttons",
+    (await page.locator("#fund-name-current").isHidden()) === true
+  );
+  await page.locator("#fund-name-input").fill("Barkada Fund");
+  await page.waitForTimeout(300);
+  check(
+    "fund-name/...which appears once the draft differs, naming what it was",
+    (await page.locator("#fund-name-current").isVisible()) === true &&
+      /ViTAMiN Fund 2027/.test(await page.locator("#fund-name-current").innerText()),
+    await page.locator("#fund-name-current").innerText().catch(() => "(hidden)")
+  );
+  // The app's own order: primary first, Cancel second — 12 modals to 3, and
+  // Payment schedule, which this screen borrows its treatment from, is one.
+  const btnOrder = await page.evaluate(() => {
+    const box = document.querySelector("#fund-name-save").parentElement;
+    return [...box.children].map((b) => b.className.replace(/\s+/g, " ").trim());
+  });
+  check(
+    "fund-name/Save comes before Cancel",
+    /primary/.test(btnOrder[0] || "") && /secondary/.test(btnOrder[1] || ""),
+    JSON.stringify(btnOrder)
+  );
   await page.locator("#fund-name-input").fill("");
   await page.waitForTimeout(300);
   check(
